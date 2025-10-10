@@ -1,0 +1,30 @@
+# Rclone Configuration Template
+#
+# This is a template for rclone configuration. Replace the placeholders with your actual values.
+# You can generate this configuration using: rclone config
+#
+# For Backblaze B2:
+# [b2backup]
+# type = b2
+# account = <your_application_key_id>
+# key = <your_application_key>
+# hard_delete = false
+#
+# For Amazon S3:
+# [s3backup]
+# type = s3
+# provider = AWS
+# access_key_id = <your_access_key>
+# secret_access_key = <your_secret_key>
+# region = us-east-1
+#
+# For S3-compatible services (e.g., MinIO, Wasabi):
+# [s3compatible]
+# type = s3
+# provider = Other
+# access_key_id = <your_access_key>
+# secret_access_key = <your_secret_key>
+# endpoint = https://s3.example.com
+# region = auto
+#
+# After configuring, save this to: /perm/pictures-sync/rclone.conf
