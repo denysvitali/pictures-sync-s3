@@ -46,6 +46,8 @@ func main() {
 		appSettings.GetRemoteName(),
 		appSettings.GetRemotePath(),
 		stateMgr,
+		appSettings.GetTransfers(),
+		appSettings.GetCheckers(),
 	)
 
 	// Initialize LED controller
@@ -87,7 +89,7 @@ func main() {
 		case event := <-monitor.Events():
 			switch event.Type {
 			case sdmonitor.EventInserted:
-				handleCardInserted(event, stateMgr, syncMgr, appSettings)
+				handleCardInserted(event, monitor, stateMgr, syncMgr, appSettings)
 			case sdmonitor.EventRemoved:
 				handleCardRemoved(event, stateMgr)
 			}
@@ -95,7 +97,7 @@ func main() {
 	}
 }
 
-func handleCardInserted(event sdmonitor.Event, stateMgr *state.Manager, syncMgr *syncmanager.Manager, appSettings *settings.Settings) {
+func handleCardInserted(event sdmonitor.Event, monitor *sdmonitor.Monitor, stateMgr *state.Manager, syncMgr *syncmanager.Manager, appSettings *settings.Settings) {
 	log.Printf("SD card inserted: %s, mounted at %s", event.DevName, event.MountPath)
 
 	// Update state
@@ -125,8 +127,8 @@ func handleCardInserted(event sdmonitor.Event, stateMgr *state.Manager, syncMgr 
 		return
 	}
 
-	// Get or create card ID
-	cardID, isNewCard, err := sdmonitor.GetOrCreateCardID(event.MountPath)
+	// Get or create card ID (pass monitor so it can remount read-only after writing)
+	cardID, isNewCard, err := sdmonitor.GetOrCreateCardID(event.MountPath, monitor)
 	if err != nil {
 		log.Printf("Error getting card ID: %v", err)
 		stateMgr.SetStatus(state.StatusError)
@@ -153,7 +155,7 @@ func handleCardInserted(event sdmonitor.Event, stateMgr *state.Manager, syncMgr 
 				log.Printf("Card appears to have been reformatted (%.1f%% of previous files)", percentageOfLast*100)
 				log.Println("Creating new card ID for reformatted card")
 
-				newCardID, err := sdmonitor.CreateNewCardID(event.MountPath)
+				newCardID, err := sdmonitor.CreateNewCardID(event.MountPath, monitor)
 				if err != nil {
 					log.Printf("Warning: Failed to create new card ID: %v", err)
 				} else {
