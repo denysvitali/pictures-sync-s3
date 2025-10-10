@@ -19,6 +19,10 @@ type Settings struct {
 	// Card reformat detection threshold (percentage)
 	ReformatThreshold float64 `json:"reformat_threshold"`
 
+	// Rclone parallel transfer settings
+	Transfers int `json:"transfers"` // Number of files to transfer in parallel
+	Checkers  int `json:"checkers"`  // Number of checkers to run in parallel
+
 	mu sync.RWMutex
 }
 
@@ -28,6 +32,8 @@ func DefaultSettings() *Settings {
 		RemoteName:        "remote",
 		RemotePath:        "/photos",
 		ReformatThreshold: 0.3, // 30%
+		Transfers:         4,   // 4 parallel uploads
+		Checkers:          8,   // 8 parallel file checkers
 	}
 }
 
@@ -56,6 +62,12 @@ func Load() (*Settings, error) {
 	}
 	if s.ReformatThreshold == 0 {
 		s.ReformatThreshold = 0.3
+	}
+	if s.Transfers == 0 {
+		s.Transfers = 4
+	}
+	if s.Checkers == 0 {
+		s.Checkers = 8
 	}
 
 	return s, nil
@@ -123,6 +135,36 @@ func (s *Settings) SetReformatThreshold(threshold float64) error {
 	return s.Save()
 }
 
+// GetTransfers returns the number of parallel transfers
+func (s *Settings) GetTransfers() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.Transfers
+}
+
+// GetCheckers returns the number of parallel checkers
+func (s *Settings) GetCheckers() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.Checkers
+}
+
+// SetTransfers updates the number of parallel transfers
+func (s *Settings) SetTransfers(transfers int) error {
+	s.mu.Lock()
+	s.Transfers = transfers
+	s.mu.Unlock()
+	return s.Save()
+}
+
+// SetCheckers updates the number of parallel checkers
+func (s *Settings) SetCheckers(checkers int) error {
+	s.mu.Lock()
+	s.Checkers = checkers
+	s.mu.Unlock()
+	return s.Save()
+}
+
 // ToJSON returns settings as JSON for API responses
 func (s *Settings) ToJSON() map[string]interface{} {
 	s.mu.RLock()
@@ -132,5 +174,7 @@ func (s *Settings) ToJSON() map[string]interface{} {
 		"remote_name":        s.RemoteName,
 		"remote_path":        s.RemotePath,
 		"reformat_threshold": s.ReformatThreshold,
+		"transfers":          s.Transfers,
+		"checkers":           s.Checkers,
 	}
 }

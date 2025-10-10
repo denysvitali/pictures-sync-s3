@@ -1,16 +1,29 @@
 package syncmanager
 
 import (
-	"bufio"
-	"encoding/json"
+	"bytes"
+	"context"
 	"fmt"
 	"log"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
+	"github.com/rclone/rclone/fs"
+	"github.com/rclone/rclone/fs/accounting"
+	"github.com/rclone/rclone/fs/config"
+	"github.com/rclone/rclone/fs/config/configfile"
+	"github.com/rclone/rclone/fs/operations"
+	rcsync "github.com/rclone/rclone/fs/sync"
+
+	// Import storage backends - these register themselves with rclone
+	_ "github.com/rclone/rclone/backend/b2"        // Backblaze B2
+	_ "github.com/rclone/rclone/backend/s3"        // Amazon S3, Wasabi, etc.
+	_ "github.com/rclone/rclone/backend/drive"     // Google Drive (for Google Photos)
+	_ "github.com/rclone/rclone/backend/azureblob" // Azure Blob Storage
+	_ "github.com/rclone/rclone/backend/local"     // Local filesystem (useful for testing)
 )
 
 // Manager manages rclone sync operations
@@ -19,9 +32,13 @@ type Manager struct {
 	remoteName    string
 	remotePath    string
 	stateMgr      *state.Manager
-	currentCmd    *exec.Cmd
+	transfers     int // Number of parallel transfers
+	checkers      int // Number of parallel checkers
 	mu            sync.Mutex
 	progressChans []chan Progress
+	cancelFunc    context.CancelFunc
+	isRunning     bool
+	startTime     time.Time
 }
 
 // Progress represents sync progress
@@ -32,47 +49,19 @@ type Progress struct {
 	TotalFiles       int     `json:"total_files"`
 	Speed            float64 `json:"speed"` // bytes per second
 	ETA              int     `json:"eta"`   // seconds
-}
-
-// RcloneLog represents a log line from rclone JSON output
-type RcloneLog struct {
-	Level   string                 `json:"level"`
-	Msg     string                 `json:"msg"`
-	Source  string                 `json:"source"`
-	Stats   *RcloneStats           `json:"stats,omitempty"`
-	Object  string                 `json:"object,omitempty"`
-	Size    int64                  `json:"size,omitempty"`
-	Fs      map[string]interface{} `json:"fs,omitempty"`
-	Time    string                 `json:"time"`
-}
-
-// RcloneStats represents rclone stats
-type RcloneStats struct {
-	Bytes             int64   `json:"bytes"`
-	Checks            int     `json:"checks"`
-	DeletedDirs       int     `json:"deletedDirs"`
-	Deletes           int     `json:"deletes"`
-	ElapsedTime       float64 `json:"elapsedTime"`
-	Errors            int     `json:"errors"`
-	ETA               int     `json:"eta"`
-	FatalError        bool    `json:"fatalError"`
-	Renames           int     `json:"renames"`
-	RetryError        bool    `json:"retryError"`
-	Speed             float64 `json:"speed"`
-	TotalBytes        int64   `json:"totalBytes"`
-	TotalChecks       int     `json:"totalChecks"`
-	TotalTransfers    int     `json:"totalTransfers"`
-	TransferTime      float64 `json:"transferTime"`
-	Transfers         int     `json:"transfers"`
+	CurrentFile      string  `json:"current_file,omitempty"` // Current file being transferred
+	CurrentFileSize  int64   `json:"current_file_size,omitempty"` // Size of current file
 }
 
 // NewManager creates a new sync manager
-func NewManager(configPath, remoteName, remotePath string, stateMgr *state.Manager) *Manager {
+func NewManager(configPath, remoteName, remotePath string, stateMgr *state.Manager, transfers, checkers int) *Manager {
 	return &Manager{
 		configPath:    configPath,
 		remoteName:    remoteName,
 		remotePath:    remotePath,
 		stateMgr:      stateMgr,
+		transfers:     transfers,
+		checkers:      checkers,
 		progressChans: make([]chan Progress, 0),
 	}
 }
@@ -80,82 +69,173 @@ func NewManager(configPath, remoteName, remotePath string, stateMgr *state.Manag
 // Sync synchronizes files from source to remote
 func (m *Manager) Sync(sourcePath, cardID string, totalFiles int, totalBytes int64) error {
 	m.mu.Lock()
-	if m.currentCmd != nil {
+	if m.isRunning {
 		m.mu.Unlock()
 		return fmt.Errorf("sync already in progress")
 	}
+	m.isRunning = true
 	m.mu.Unlock()
 
-	// Construct rclone command with card-specific folder
-	// Result: remote:/photos/{cardID}/DCIM/
+	defer func() {
+		m.mu.Lock()
+		m.isRunning = false
+		m.cancelFunc = nil
+		m.mu.Unlock()
+	}()
+
+	// Load rclone config from custom path
+	if err := config.SetConfigPath(m.configPath); err != nil {
+		return fmt.Errorf("failed to set config path: %w", err)
+	}
+	configfile.Install()
+	storage := &configfile.Storage{}
+	if err := storage.Load(); err != nil {
+		log.Printf("Warning: failed to load config file: %v", err)
+	}
+
+	// Record start time for elapsed time calculation
+	m.startTime = time.Now()
+
+	// Create context with cancel
+	ctx, cancel := context.WithCancel(context.Background())
+	m.mu.Lock()
+	m.cancelFunc = cancel
+	m.mu.Unlock()
+
+	defer cancel()
+
+	// Construct destination path: remote:/photos/{cardID}/DCIM/
 	destPath := filepath.Join(m.remoteName+":"+m.remotePath, cardID, "DCIM")
 
-	args := []string{
-		"sync",
-		sourcePath,
-		destPath,
-		"--config", m.configPath,
-		"--progress",
-		"--stats", "2s",
-		"--stats-one-line",
-		"--use-json-log",
-		"--log-level", "INFO",
-		"-v",
-	}
+	log.Printf("Syncing from %s to %s", sourcePath, destPath)
 
-	log.Printf("Running rclone: rclone %s", strings.Join(args, " "))
-	log.Printf("Syncing to card-specific folder: %s", destPath)
-
-	cmd := exec.Command("rclone", args...)
-
-	stdout, err := cmd.StdoutPipe()
+	// Create source filesystem
+	srcFs, err := fs.NewFs(ctx, sourcePath)
 	if err != nil {
-		return fmt.Errorf("failed to create stdout pipe: %w", err)
+		return fmt.Errorf("failed to create source filesystem: %w", err)
 	}
 
-	stderr, err := cmd.StderrPipe()
+	// Create destination filesystem
+	dstFs, err := fs.NewFs(ctx, destPath)
 	if err != nil {
-		return fmt.Errorf("failed to create stderr pipe: %w", err)
+		return fmt.Errorf("failed to create destination filesystem: %w", err)
 	}
 
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start rclone: %w", err)
-	}
+	// Set up config for progress tracking and parallel transfers
+	ci := fs.GetConfig(ctx)
+	ci.StatsOneLine = true
+	ci.Progress = true
+	ci.Transfers = m.transfers  // Upload multiple files in parallel for better performance
+	ci.Checkers = m.checkers    // Use multiple checkers to compare files in parallel
 
-	m.mu.Lock()
-	m.currentCmd = cmd
-	m.mu.Unlock()
+	// Create accounting stats
+	stats := accounting.GlobalStats()
 
-	// Process stdout (JSON logs)
-	go func() {
-		scanner := bufio.NewScanner(stdout)
-		for scanner.Scan() {
-			line := scanner.Text()
-			m.processLogLine(line)
-		}
-	}()
+	// Start progress monitoring
+	done := make(chan struct{})
+	go m.monitorProgress(ctx, stats, totalFiles, totalBytes, done)
 
-	// Process stderr (regular logs)
-	go func() {
-		scanner := bufio.NewScanner(stderr)
-		for scanner.Scan() {
-			line := scanner.Text()
-			log.Printf("rclone: %s", line)
-		}
-	}()
+	// Perform sync operation
+	log.Printf("Starting sync operation...")
+	err = rcsync.Sync(ctx, dstFs, srcFs, false)
 
-	// Wait for completion
-	err = cmd.Wait()
-
-	m.mu.Lock()
-	m.currentCmd = nil
-	m.mu.Unlock()
+	// Stop progress monitoring
+	close(done)
 
 	if err != nil {
-		return fmt.Errorf("rclone failed: %w", err)
+		return fmt.Errorf("sync failed: %w", err)
 	}
 
+	log.Printf("Sync completed successfully")
 	return nil
+}
+
+// monitorProgress monitors sync progress and updates state
+func (m *Manager) monitorProgress(ctx context.Context, stats *accounting.StatsInfo, totalFiles int, totalBytes int64, done chan struct{}) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-done:
+			return
+		case <-ticker.C:
+			// Get current stats
+			transferred := stats.GetBytes()
+			transfers := int(stats.GetTransfers())
+
+			// Get current file being transferred from RemoteStats
+			var currentFile string
+			var currentFileSize int64
+
+			// Try to get remote stats which includes current transfers
+			if remoteStats, err := stats.RemoteStats(true); err == nil {
+				if transferring, ok := remoteStats["transferring"].([]interface{}); ok && len(transferring) > 0 {
+					if transfer, ok := transferring[0].(map[string]interface{}); ok {
+						if name, ok := transfer["name"].(string); ok {
+							currentFile = name
+						}
+						if size, ok := transfer["size"].(int64); ok {
+							currentFileSize = size
+						}
+					}
+				}
+			}
+
+			// Calculate speed from elapsed time and bytes
+			elapsed := time.Since(m.startTime)
+			var speed float64
+			if elapsed > 0 {
+				speed = float64(transferred) / elapsed.Seconds()
+			}
+
+			// Calculate percentage
+			var percentage int
+			if totalBytes > 0 {
+				percentage = int((float64(transferred) / float64(totalBytes)) * 100)
+			}
+
+			// Calculate ETA
+			var eta int
+			if speed > 0 {
+				remaining := totalBytes - transferred
+				eta = int(float64(remaining) / speed)
+			}
+
+			// Update state manager with current file info
+			m.stateMgr.UpdateSyncProgress(int64(transfers), transferred, currentFile, currentFileSize)
+
+			// Create progress update
+			progress := Progress{
+				BytesTransferred: transferred,
+				Percentage:       percentage,
+				TransferredFiles: transfers,
+				TotalFiles:       totalFiles,
+				Speed:            speed,
+				ETA:              eta,
+				CurrentFile:      currentFile,
+				CurrentFileSize:  currentFileSize,
+			}
+
+			// Send to subscribers
+			m.mu.Lock()
+			chans := m.progressChans
+			m.mu.Unlock()
+
+			for _, ch := range chans {
+				select {
+				case ch <- progress:
+				default:
+					// Skip if channel is full
+				}
+			}
+
+			log.Printf("Progress: %d/%d files, %d%%, %.2f MB/s",
+				transfers, totalFiles, percentage, speed/(1024*1024))
+		}
+	}
 }
 
 // Cancel cancels the current sync operation
@@ -163,12 +243,12 @@ func (m *Manager) Cancel() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.currentCmd == nil {
+	if !m.isRunning {
 		return fmt.Errorf("no sync in progress")
 	}
 
-	if m.currentCmd.Process != nil {
-		return m.currentCmd.Process.Kill()
+	if m.cancelFunc != nil {
+		m.cancelFunc()
 	}
 
 	return nil
@@ -178,7 +258,7 @@ func (m *Manager) Cancel() error {
 func (m *Manager) IsRunning() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.currentCmd != nil
+	return m.isRunning
 }
 
 // SubscribeProgress returns a channel that receives progress updates
@@ -191,68 +271,34 @@ func (m *Manager) SubscribeProgress() chan Progress {
 	return ch
 }
 
-// processLogLine processes a JSON log line from rclone
-func (m *Manager) processLogLine(line string) {
-	var logEntry RcloneLog
-	if err := json.Unmarshal([]byte(line), &logEntry); err != nil {
-		// Not JSON, just log it
-		log.Printf("rclone: %s", line)
-		return
-	}
-
-	// Log the message
-	if logEntry.Msg != "" {
-		log.Printf("rclone [%s]: %s", logEntry.Level, logEntry.Msg)
-	}
-
-	// Process stats
-	if logEntry.Stats != nil {
-		m.updateProgress(logEntry.Stats)
-	}
-}
-
-// updateProgress updates progress from rclone stats
-func (m *Manager) updateProgress(stats *RcloneStats) {
-	// Update state manager
-	m.stateMgr.UpdateSyncProgress(int64(stats.Transfers), stats.Bytes)
-
-	// Calculate percentage
-	var percentage int
-	if stats.TotalBytes > 0 {
-		percentage = int((float64(stats.Bytes) / float64(stats.TotalBytes)) * 100)
-	}
-
-	// Create progress update
-	progress := Progress{
-		BytesTransferred: stats.Bytes,
-		Percentage:       percentage,
-		TransferredFiles: stats.Transfers,
-		TotalFiles:       stats.TotalTransfers,
-		Speed:            stats.Speed,
-		ETA:              stats.ETA,
-	}
-
-	// Send to subscribers
-	m.mu.Lock()
-	chans := m.progressChans
-	m.mu.Unlock()
-
-	for _, ch := range chans {
-		select {
-		case ch <- progress:
-		default:
-			// Skip if channel is full
-		}
-	}
-}
-
 // TestConnection tests the rclone configuration
 func (m *Manager) TestConnection() error {
-	cmd := exec.Command("rclone", "lsd", m.remoteName+":", "--config", m.configPath)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("connection test failed: %w\nOutput: %s", err, string(output))
+	// Load rclone config from custom path
+	if err := config.SetConfigPath(m.configPath); err != nil {
+		return fmt.Errorf("failed to set config path: %w", err)
 	}
+	configfile.Install()
+	storage := &configfile.Storage{}
+	if err := storage.Load(); err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	ctx := context.Background()
+
+	// Try to create the remote filesystem
+	remotePath := m.remoteName + ":"
+	fsys, err := fs.NewFs(ctx, remotePath)
+	if err != nil {
+		return fmt.Errorf("connection test failed: %w", err)
+	}
+
+	// Try to list the root directory (using a buffer to capture output)
+	var buf bytes.Buffer
+	if err := operations.List(ctx, fsys, &buf); err != nil {
+		return fmt.Errorf("failed to list remote: %w", err)
+	}
+
+	log.Printf("Connection test successful")
 	return nil
 }
 
@@ -271,19 +317,24 @@ func (m *Manager) SetRemote(remoteName, remotePath string) {
 
 // ListRemotes lists configured remotes
 func (m *Manager) ListRemotes() ([]string, error) {
-	cmd := exec.Command("rclone", "listremotes", "--config", m.configPath)
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("failed to list remotes: %w", err)
+	// Load rclone config from custom path
+	if err := config.SetConfigPath(m.configPath); err != nil {
+		return nil, fmt.Errorf("failed to set config path: %w", err)
+	}
+	configfile.Install()
+	storage := &configfile.Storage{}
+	if err := storage.Load(); err != nil {
+		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	remotes := make([]string, 0, len(lines))
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			// Remove trailing colon
-			remotes = append(remotes, strings.TrimSuffix(line, ":"))
+	// Get all configured remotes from the config file
+	sections := storage.GetSectionList()
+
+	remotes := make([]string, 0, len(sections))
+	for _, section := range sections {
+		section = strings.TrimSpace(section)
+		if section != "" {
+			remotes = append(remotes, section)
 		}
 	}
 

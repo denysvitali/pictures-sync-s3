@@ -29,39 +29,59 @@ const (
 
 // SyncRecord represents a completed sync operation
 type SyncRecord struct {
-	ID          string    `json:"id"`
-	StartTime   time.Time `json:"start_time"`
-	EndTime     time.Time `json:"end_time"`
-	Status      string    `json:"status"`
-	FilesTotal  int64     `json:"files_total"`
-	FilesSynced int64     `json:"files_synced"`
-	BytesTotal  int64     `json:"bytes_total"`
-	BytesSynced int64     `json:"bytes_synced"`
-	Error       string    `json:"error,omitempty"`
-	CardID      string    `json:"card_id"`      // Unique ID from .pictures-sync-id file
+	ID              string    `json:"id"`
+	StartTime       time.Time `json:"start_time"`
+	EndTime         time.Time `json:"end_time"`
+	Status          string    `json:"status"`
+	FilesTotal      int64     `json:"files_total"`
+	FilesSynced     int64     `json:"files_synced"`
+	BytesTotal      int64     `json:"bytes_total"`
+	BytesSynced     int64     `json:"bytes_synced"`
+	Error           string    `json:"error,omitempty"`
+	CardID          string    `json:"card_id"` // Unique ID from .pictures-sync-id file
+	CurrentFile     string    `json:"current_file,omitempty"` // Current file being synced
+	CurrentFileSize int64     `json:"current_file_size,omitempty"` // Size of current file
+}
+
+// DeviceInfo represents a detected storage device
+type DeviceInfo struct {
+	DevicePath  string `json:"device_path"`
+	DeviceName  string `json:"device_name"`
+	Size        int64  `json:"size"`
+	SizeHuman   string `json:"size_human"`
+	IsUSB       bool   `json:"is_usb"`
+	IsMounted   bool   `json:"is_mounted"`
+	MountPath   string `json:"mount_path,omitempty"`
+	HasDCIM     bool   `json:"has_dcim"`
+	VolumeLabel string `json:"volume_label,omitempty"`
 }
 
 // CurrentState represents the current system state
 type CurrentState struct {
-	Status       SyncStatus `json:"status"`
-	CurrentSync  *SyncRecord `json:"current_sync,omitempty"`
-	LastSync     *SyncRecord `json:"last_sync,omitempty"`
-	SDCardMounted bool       `json:"sdcard_mounted"`
-	SDCardPath   string     `json:"sdcard_path,omitempty"`
+	Status            SyncStatus    `json:"status"`
+	CurrentSync       *SyncRecord   `json:"current_sync,omitempty"`
+	LastSync          *SyncRecord   `json:"last_sync,omitempty"`
+	SDCardMounted     bool          `json:"sdcard_mounted"`
+	SDCardPath        string        `json:"sdcard_path,omitempty"`
+	AvailableDevices  []DeviceInfo  `json:"available_devices,omitempty"`
+	NeedsDeviceSelect bool          `json:"needs_device_select"`
 }
 
 // Manager manages persistent state
 type Manager struct {
-	mu           sync.RWMutex
-	currentState CurrentState
-	history      []SyncRecord
-	listeners    []chan CurrentState
+	mu                sync.RWMutex
+	currentState      CurrentState
+	history           []SyncRecord
+	listeners         []chan CurrentState
+	lastProgressSave  time.Time
+	progressSaveDelay time.Duration // Throttle disk writes to reduce SD card wear
 }
 
 // NewManager creates a new state manager
 func NewManager() (*Manager, error) {
 	m := &Manager{
-		listeners: make([]chan CurrentState, 0),
+		listeners:         make([]chan CurrentState, 0),
+		progressSaveDelay: 5 * time.Second, // Only save progress every 5 seconds to reduce SD wear
 	}
 
 	// Ensure directories exist
@@ -117,6 +137,34 @@ func (m *Manager) SetSDCard(mounted bool, path string) error {
 	return nil
 }
 
+// SetAvailableDevices updates the list of available storage devices
+func (m *Manager) SetAvailableDevices(devices []DeviceInfo) error {
+	m.mu.Lock()
+	m.currentState.AvailableDevices = devices
+	m.mu.Unlock()
+
+	if err := m.save(); err != nil {
+		return err
+	}
+
+	m.notifyListeners()
+	return nil
+}
+
+// SetNeedsDeviceSelect sets whether manual device selection is needed
+func (m *Manager) SetNeedsDeviceSelect(needs bool) error {
+	m.mu.Lock()
+	m.currentState.NeedsDeviceSelect = needs
+	m.mu.Unlock()
+
+	if err := m.save(); err != nil {
+		return err
+	}
+
+	m.notifyListeners()
+	return nil
+}
+
 // StartSync begins a new sync operation
 func (m *Manager) StartSync(cardID string, totalFiles, totalBytes int64) (*SyncRecord, error) {
 	record := &SyncRecord{
@@ -142,13 +190,29 @@ func (m *Manager) StartSync(cardID string, totalFiles, totalBytes int64) (*SyncR
 }
 
 // UpdateSyncProgress updates the progress of current sync
-func (m *Manager) UpdateSyncProgress(filesSynced, bytesSynced int64) error {
+// Saves to disk only periodically (throttled) to reduce SD card wear
+func (m *Manager) UpdateSyncProgress(filesSynced, bytesSynced int64, currentFile string, currentFileSize int64) error {
 	m.mu.Lock()
 	if m.currentState.CurrentSync != nil {
 		m.currentState.CurrentSync.FilesSynced = filesSynced
 		m.currentState.CurrentSync.BytesSynced = bytesSynced
+		m.currentState.CurrentSync.CurrentFile = currentFile
+		m.currentState.CurrentSync.CurrentFileSize = currentFileSize
+	}
+
+	// Throttle disk writes - only save every progressSaveDelay seconds
+	shouldSave := time.Since(m.lastProgressSave) >= m.progressSaveDelay
+	if shouldSave {
+		m.lastProgressSave = time.Now()
 	}
 	m.mu.Unlock()
+
+	// Save to disk if throttle period has elapsed
+	if shouldSave {
+		if err := m.save(); err != nil {
+			return err
+		}
+	}
 
 	m.notifyListeners()
 	return nil
@@ -281,6 +345,33 @@ func (m *Manager) load() error {
 
 	// Load history
 	return m.loadHistory()
+}
+
+// Reload reads the latest state from disk and notifies listeners
+func (m *Manager) Reload() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	data, err := os.ReadFile(StateFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // No state file yet
+		}
+		return fmt.Errorf("failed to read state file: %w", err)
+	}
+
+	var newState CurrentState
+	if err := json.Unmarshal(data, &newState); err != nil {
+		return fmt.Errorf("failed to unmarshal state: %w", err)
+	}
+
+	// Update current state
+	m.currentState = newState
+
+	// Notify listeners of the updated state
+	go m.notifyListeners()
+
+	return nil
 }
 
 // saveHistory persists sync history to disk

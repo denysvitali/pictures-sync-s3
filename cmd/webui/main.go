@@ -1,19 +1,27 @@
 package main
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/jpeg"
+	_ "image/png"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/denysvitali/pictures-sync-s3/pkg/sdmonitor"
 	"github.com/denysvitali/pictures-sync-s3/pkg/settings"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 	"github.com/denysvitali/pictures-sync-s3/pkg/syncmanager"
 	"github.com/denysvitali/pictures-sync-s3/pkg/wifimanager"
 	"github.com/gorilla/websocket"
+	"github.com/nfnt/resize"
 )
 
 var (
@@ -21,6 +29,7 @@ var (
 	syncMgr    *syncmanager.Manager
 	wifiMgr    *wifimanager.Manager
 	appSettings *settings.Settings
+	authPassword string
 	upgrader   = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
 			return true // Allow all origins for now
@@ -28,8 +37,54 @@ var (
 	}
 )
 
+// logConfiguredWiFiNetworks logs WiFi networks from both gokrazy and app config files
+func logConfiguredWiFiNetworks() {
+	// Log networks from our app's config (/perm/extra-wifi.json)
+	appNetworks := wifiMgr.GetNetworks()
+	log.Printf("WiFi networks in /perm/extra-wifi.json: %d", len(appNetworks))
+	for i, net := range appNetworks {
+		log.Printf("  [%d] SSID: %s (has password: %v)", i+1, net.SSID, net.PSK != "")
+	}
+
+	// Log networks from gokrazy's WiFi config (/perm/wifi.json)
+	type GokrazyNetwork struct {
+		SSID string `json:"ssid"`
+		PSK  string `json:"psk"`
+	}
+	type GokrazyWiFiConfig struct {
+		Networks []GokrazyNetwork `json:"networks"`
+	}
+
+	gokrazyConfigPath := "/perm/wifi.json"
+	if data, err := os.ReadFile(gokrazyConfigPath); err == nil {
+		var config GokrazyWiFiConfig
+		if err := json.Unmarshal(data, &config); err == nil {
+			log.Printf("WiFi networks in %s: %d", gokrazyConfigPath, len(config.Networks))
+			for i, net := range config.Networks {
+				log.Printf("  [%d] SSID: %s (has password: %v)", i+1, net.SSID, net.PSK != "")
+			}
+		} else {
+			log.Printf("WiFi networks in %s: failed to parse (%v)", gokrazyConfigPath, err)
+		}
+	} else if !os.IsNotExist(err) {
+		log.Printf("WiFi networks in %s: failed to read (%v)", gokrazyConfigPath, err)
+	} else {
+		log.Printf("WiFi networks in %s: 0 (file does not exist)", gokrazyConfigPath)
+	}
+}
+
 func main() {
 	log.Println("Photo Backup Station WebUI - Starting...")
+
+	// Load password from gokrazy password file
+	passwordBytes, err := os.ReadFile("/etc/gokr-pw.txt")
+	if err != nil {
+		log.Fatalf("Failed to read password file: %v", err)
+	}
+	authPassword = strings.TrimSpace(string(passwordBytes))
+	if authPassword == "" {
+		log.Fatalf("Password file is empty")
+	}
 
 	// Get port from environment or default to 8080
 	port := os.Getenv("PORT")
@@ -38,7 +93,6 @@ func main() {
 	}
 
 	// Initialize state manager
-	var err error
 	stateMgr, err = state.NewManager()
 	if err != nil {
 		log.Fatalf("Failed to create state manager: %v", err)
@@ -56,12 +110,17 @@ func main() {
 		appSettings.GetRemoteName(),
 		appSettings.GetRemotePath(),
 		stateMgr,
+		appSettings.GetTransfers(),
+		appSettings.GetCheckers(),
 	)
 
 	// Initialize WiFi manager
 	wifiMgr, err = wifimanager.NewManager()
 	if err != nil {
 		log.Printf("Warning: Failed to initialize WiFi manager: %v", err)
+	} else {
+		// Log configured WiFi networks
+		logConfiguredWiFiNetworks()
 	}
 
 	// Setup HTTP handlers
@@ -70,20 +129,48 @@ func main() {
 	http.HandleFunc("/api/config", handleConfig)
 	http.HandleFunc("/api/config/test", handleConfigTest)
 	http.HandleFunc("/api/settings", handleSettings)
+	http.HandleFunc("/api/devices", handleDevices)
+	http.HandleFunc("/api/devices/select", handleDeviceSelect)
 	http.HandleFunc("/api/wifi/scan", handleWiFiScan)
 	http.HandleFunc("/api/wifi/networks", handleWiFiNetworks)
 	http.HandleFunc("/api/wifi/connect", handleWiFiConnect)
 	http.HandleFunc("/api/wifi/disconnect", handleWiFiDisconnect)
 	http.HandleFunc("/api/wifi/status", handleWiFiStatus)
+	http.HandleFunc("/api/thumbnail", handleThumbnail)
 	http.HandleFunc("/ws", handleWebSocket)
 	http.HandleFunc("/", handleIndex)
 
-	// Start server
+	// Wrap default mux with basic auth middleware
+	handler := basicAuthMiddleware(http.DefaultServeMux)
+
+	// Start HTTPS server
 	addr := ":" + port
-	log.Printf("WebUI server listening on %s", addr)
-	if err := http.ListenAndServe(addr, nil); err != nil {
+	certFile := "/etc/ssl/gokrazy-web.pem"
+	keyFile := "/etc/ssl/gokrazy-web.key.pem"
+
+	log.Printf("WebUI HTTPS server listening on %s", addr)
+	if err := http.ListenAndServeTLS(addr, certFile, keyFile, handler); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
+}
+
+// basicAuthMiddleware provides HTTP Basic Authentication
+func basicAuthMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		username, password, ok := r.BasicAuth()
+
+		// Use constant-time comparison to prevent timing attacks
+		usernameMatch := subtle.ConstantTimeCompare([]byte(username), []byte("gokrazy")) == 1
+		passwordMatch := subtle.ConstantTimeCompare([]byte(password), []byte(authPassword)) == 1
+
+		if !ok || !usernameMatch || !passwordMatch {
+			w.Header().Set("WWW-Authenticate", `Basic realm="Photo Backup Station"`)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 // handleIndex serves the main web UI
@@ -461,6 +548,7 @@ func getWebUIHTML() string {
     <div class="container">
         <div class="tabs">
             <button class="tab active" onclick="switchTab('status')">📊 Status</button>
+            <button class="tab" onclick="switchTab('devices')">💾 Devices</button>
             <button class="tab" onclick="switchTab('history')">📚 History</button>
             <button class="tab" onclick="switchTab('wifi')">📡 WiFi</button>
             <button class="tab" onclick="switchTab('config')">⚙️ Configuration</button>
@@ -481,6 +569,23 @@ func getWebUIHTML() string {
             <div class="card" id="sync-details" style="display: none;">
                 <h2>Sync Progress</h2>
                 <div id="sync-progress"></div>
+            </div>
+        </div>
+
+        <!-- Devices Tab -->
+        <div id="devices-tab" class="tab-content">
+            <div class="card">
+                <h2>Available Storage Devices</h2>
+                <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+                    These are all detected storage devices on the system. Select one to sync manually if needed.
+                </p>
+                <button class="btn btn-primary" onclick="refreshDevices()">🔄 Refresh Devices</button>
+                <div id="devices-list" style="margin-top: 1rem;">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>Loading devices...</p>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -508,6 +613,21 @@ func getWebUIHTML() string {
                 <h2>Available Networks</h2>
                 <button class="btn btn-primary" onclick="scanWiFi()">🔍 Scan Networks</button>
                 <div id="wifi-networks" style="margin-top: 1rem;"></div>
+            </div>
+
+            <div class="card">
+                <h2>Add Network Manually</h2>
+                <form onsubmit="addNetworkManually(event)">
+                    <div class="form-group">
+                        <label for="manual-ssid">SSID (Network Name)</label>
+                        <input type="text" id="manual-ssid" class="form-input" placeholder="Enter network name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="manual-password">Password</label>
+                        <input type="password" id="manual-password" class="form-input" placeholder="Enter password (leave empty for open networks)">
+                    </div>
+                    <button type="submit" class="btn btn-primary">➕ Add Network</button>
+                </form>
             </div>
 
             <div class="card">
@@ -549,6 +669,16 @@ key = ..."></textarea>
                         <label for="reformat-threshold">Reformat Detection Threshold (%)</label>
                         <input type="number" id="reformat-threshold" class="form-input" placeholder="30" min="1" max="100" step="1">
                     </div>
+                    <div class="form-group">
+                        <label for="transfers">Parallel Transfers</label>
+                        <input type="number" id="transfers" class="form-input" placeholder="4" min="1" max="16" step="1" title="Number of files to upload simultaneously (default: 4)">
+                        <p style="font-size: 0.875rem; color: var(--text-secondary); margin-top: 0.25rem;">Higher values = faster uploads but more bandwidth/memory usage</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="checkers">Parallel File Checkers</label>
+                        <input type="number" id="checkers" class="form-input" placeholder="8" min="1" max="32" step="1" title="Number of file integrity checkers (default: 8)">
+                        <p style="font-size: 0.875rem; color: var(--text-secondary); margin-top: 0.25rem;">Determines how many files are compared in parallel</p>
+                    </div>
                     <button type="submit" class="btn btn-primary">💾 Save Settings</button>
                 </form>
             </div>
@@ -568,6 +698,7 @@ key = ..."></textarea>
             document.getElementById(tabName + '-tab').classList.add('active');
 
             // Load data for the selected tab
+            if (tabName === 'devices') refreshDevices();
             if (tabName === 'history') loadHistory();
             if (tabName === 'wifi') loadWiFiStatus();
             if (tabName === 'config') loadConfig();
@@ -638,24 +769,101 @@ key = ..."></textarea>
         function updateSyncProgress(sync) {
             const progressDiv = document.getElementById('sync-progress');
             const percent = sync.files_total > 0 ? (sync.files_synced / sync.files_total * 100) : 0;
+            const bytesPercent = sync.bytes_total > 0 ? (sync.bytes_synced / sync.bytes_total * 100) : 0;
 
-            let html = '<div class="progress">';
+            // Main progress bar showing file count
+            let html = '<div style="margin-bottom: 0.5rem;">';
+            html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">';
+            html += '<label style="font-size: 0.875rem; font-weight: 600; color: var(--text-secondary);">File Progress</label>';
+            html += '<span style="font-size: 0.875rem; font-weight: 600; color: var(--text);">' + sync.files_synced + ' / ' + sync.files_total + ' files</span>';
+            html += '</div>';
+            html += '<div class="progress">';
             html += '<div class="progress-bar" style="width: ' + percent.toFixed(1) + '%">' + percent.toFixed(1) + '%</div>';
             html += '</div>';
+            html += '</div>';
 
+            // Data transfer progress bar
+            html += '<div style="margin-bottom: 1.5rem;">';
+            html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">';
+            html += '<label style="font-size: 0.875rem; font-weight: 600; color: var(--text-secondary);">Data Transfer</label>';
+            html += '<span style="font-size: 0.875rem; font-weight: 600; color: var(--text);">' + formatBytes(sync.bytes_synced) + ' / ' + formatBytes(sync.bytes_total) + '</span>';
+            html += '</div>';
+            html += '<div class="progress">';
+            html += '<div class="progress-bar" style="width: ' + bytesPercent.toFixed(1) + '%">' + bytesPercent.toFixed(1) + '%</div>';
+            html += '</div>';
+            html += '</div>';
+
+            // Stats grid
             html += '<div class="info-grid">';
-            html += '<div class="info-item"><label>Files</label><value>' + sync.files_synced + ' / ' + sync.files_total + '</value></div>';
-            html += '<div class="info-item"><label>Data Transferred</label><value>' + formatBytes(sync.bytes_transferred) + '</value></div>';
 
             if (sync.transfer_speed) {
-                html += '<div class="info-item"><label>Speed</label><value>' + formatBytes(sync.transfer_speed) + '/s</value></div>';
+                html += '<div class="info-item"><label>Transfer Speed</label><value>' + formatBytes(sync.transfer_speed) + '/s</value></div>';
             }
 
             if (sync.eta) {
-                html += '<div class="info-item"><label>ETA</label><value>' + sync.eta + '</value></div>';
+                html += '<div class="info-item"><label>Time Remaining</label><value>' + sync.eta + '</value></div>';
+            }
+
+            // Show start time if available
+            if (sync.start_time) {
+                const startTime = new Date(sync.start_time);
+                const elapsed = Math.floor((Date.now() - startTime.getTime()) / 1000);
+                html += '<div class="info-item"><label>Elapsed Time</label><value>' + formatDuration(elapsed * 1000) + '</value></div>';
             }
 
             html += '</div>';
+
+            // Show current file being synced
+            if (sync.current_file) {
+                html += '<div style="margin-top: 1.5rem; padding: 1.5rem; background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); border-radius: 0.5rem; border: 2px solid var(--primary); box-shadow: var(--shadow-lg);">';
+                html += '<label style="display: block; font-size: 0.875rem; font-weight: 700; text-transform: uppercase; color: var(--primary); margin-bottom: 1rem; letter-spacing: 0.05em;">⚡ Currently Syncing</label>';
+
+                // Show thumbnail if it's a JPEG
+                const fileName = sync.current_file.split('/').pop();
+                const isJpeg = fileName.toLowerCase().endsWith('.jpg') || fileName.toLowerCase().endsWith('.jpeg');
+
+                html += '<div style="display: flex; gap: 1.5rem; align-items: center;">';
+
+                if (isJpeg) {
+                    const thumbnailUrl = '/api/thumbnail?path=' + encodeURIComponent(sync.current_file);
+                    html += '<div style="position: relative; flex-shrink: 0;">';
+                    html += '<img src="' + thumbnailUrl + '" alt="Preview" style="width: 120px; height: 120px; object-fit: cover; border-radius: 0.5rem; border: 3px solid white; box-shadow: 0 4px 12px rgba(0,0,0,0.15);" onerror="this.style.display=\'none\'">';
+                    html += '<div style="position: absolute; bottom: -8px; right: -8px; width: 32px; height: 32px; background: var(--primary); border-radius: 50%; border: 3px solid white; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(0,0,0,0.2);">';
+                    html += '<span style="color: white; font-size: 1rem;">📷</span>';
+                    html += '</div>';
+                    html += '</div>';
+                } else {
+                    // Show generic file icon for non-JPEG files
+                    html += '<div style="width: 120px; height: 120px; background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); border-radius: 0.5rem; border: 3px solid white; box-shadow: 0 4px 12px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: center; flex-shrink: 0;">';
+                    html += '<span style="font-size: 3rem;">📄</span>';
+                    html += '</div>';
+                }
+
+                html += '<div style="flex: 1; min-width: 0;">';
+                html += '<div style="font-weight: 700; font-size: 1.125rem; color: var(--text); margin-bottom: 0.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="' + escapeHtml(fileName) + '">' + escapeHtml(fileName) + '</div>';
+                html += '<div style="font-size: 1rem; color: var(--text-secondary); font-weight: 500;">';
+                html += '<span style="display: inline-block; padding: 0.25rem 0.75rem; background: white; border-radius: 0.25rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">';
+                html += '📦 ' + formatBytes(sync.current_file_size);
+                html += '</span>';
+                html += '</div>';
+
+                // Show file progress bar if we have current file size info
+                if (sync.current_file_size > 0 && sync.bytes_synced > 0) {
+                    const filePercent = Math.min(100, (sync.bytes_synced / sync.current_file_size) * 100);
+                    if (filePercent > 0) {
+                        html += '<div style="margin-top: 1rem;">';
+                        html += '<div style="font-size: 0.75rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.25rem;">File Transfer Progress</div>';
+                        html += '<div class="progress" style="height: 0.5rem;">';
+                        html += '<div class="progress-bar" style="width: ' + filePercent.toFixed(1) + '%"></div>';
+                        html += '</div>';
+                        html += '</div>';
+                    }
+                }
+                html += '</div>';
+
+                html += '</div>';
+                html += '</div>';
+            }
 
             progressDiv.innerHTML = html;
         }
@@ -677,16 +885,21 @@ key = ..."></textarea>
                         const statusClass = item.error ? 'error' : 'success';
                         const statusIcon = item.error ? '❌' : '✓';
 
+                        // Use start_time for the timestamp
+                        const timestamp = item.start_time ? new Date(item.start_time).toLocaleString() : 'N/A';
+
                         html += '<div class="history-item ' + statusClass + '">';
                         html += '<div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">';
-                        html += '<strong>' + statusIcon + ' ' + new Date(item.timestamp).toLocaleString() + '</strong>';
+                        html += '<strong>' + statusIcon + ' ' + timestamp + '</strong>';
                         html += '<span class="code">' + (item.card_id || 'N/A') + '</span>';
                         html += '</div>';
 
                         if (item.files_synced) {
-                            html += '<p>Files: ' + item.files_synced + ' (' + formatBytes(item.bytes_transferred || 0) + ')';
-                            if (item.duration) {
-                                html += ' in ' + formatDuration(item.duration);
+                            html += '<p>Files: ' + item.files_synced + ' (' + formatBytes(item.bytes_synced || 0) + ')';
+                            // Calculate duration from start_time and end_time
+                            if (item.start_time && item.end_time) {
+                                const durationMs = new Date(item.end_time) - new Date(item.start_time);
+                                html += ' in ' + formatDuration(durationMs);
                             }
                             html += '</p>';
                         }
@@ -729,7 +942,14 @@ key = ..."></textarea>
             networksDiv.innerHTML = '<div class="loading"><div class="spinner"></div><p>Scanning...</p></div>';
 
             fetch('/api/wifi/scan', { method: 'POST' })
-                .then(r => r.json())
+                .then(r => {
+                    if (!r.ok) {
+                        return r.text().then(text => {
+                            throw new Error(text || 'Network scan failed');
+                        });
+                    }
+                    return r.json();
+                })
                 .then(networks => {
                     if (!networks || networks.length === 0) {
                         networksDiv.innerHTML = '<p class="loading">No networks found</p>';
@@ -741,13 +961,13 @@ key = ..."></textarea>
                         const signalStrength = getSignalStrength(network.signal);
                         html += '<div class="wifi-network">';
                         html += '<div><strong>' + network.ssid + '</strong>';
-                        if (network.security) html += ' 🔒';
+                        if (network.encrypted) html += ' 🔒';
                         html += '</div>';
                         html += '<div style="display: flex; gap: 1rem; align-items: center;">';
                         html += '<div class="signal-strength signal-' + signalStrength + '">';
                         html += '<div class="signal-bar"></div><div class="signal-bar"></div><div class="signal-bar"></div><div class="signal-bar"></div>';
                         html += '</div>';
-                        html += '<button class="btn btn-primary" onclick="connectWiFi(\'' + network.ssid + '\')">Connect</button>';
+                        html += '<button class="btn btn-primary" onclick="connectWiFi(\'' + escapeHtml(network.ssid) + '\', ' + network.encrypted + ')">Connect</button>';
                         html += '</div></div>';
                     });
 
@@ -758,21 +978,59 @@ key = ..."></textarea>
                 });
         }
 
-        function connectWiFi(ssid) {
-            const password = prompt('Enter password for ' + ssid + ':');
-            if (!password) return;
+        function connectWiFi(ssid, encrypted) {
+            let password = '';
+            if (encrypted !== false) {
+                password = prompt('Enter password for ' + ssid + ':');
+                if (password === null) return; // User cancelled
+            }
 
             fetch('/api/wifi/connect', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ssid, password })
+                body: JSON.stringify({ ssid: ssid, password: password })
             })
-            .then(r => r.json())
+            .then(r => {
+                if (!r.ok) {
+                    return r.text().then(text => {
+                        throw new Error(text || 'Failed to add network');
+                    });
+                }
+                return r.json();
+            })
             .then(data => {
-                alert('WiFi network added. Connection may take a few moments.');
-                loadWiFiStatus();
+                alert('WiFi network added successfully!');
+                loadSavedNetworks();
             })
             .catch(err => alert('Failed to connect: ' + err.message));
+        }
+
+        function addNetworkManually(event) {
+            event.preventDefault();
+
+            const ssid = document.getElementById('manual-ssid').value;
+            const password = document.getElementById('manual-password').value;
+
+            fetch('/api/wifi/connect', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ssid: ssid, password: password })
+            })
+            .then(r => {
+                if (!r.ok) {
+                    return r.text().then(text => {
+                        throw new Error(text || 'Failed to add network');
+                    });
+                }
+                return r.json();
+            })
+            .then(data => {
+                alert('Network added successfully!');
+                document.getElementById('manual-ssid').value = '';
+                document.getElementById('manual-password').value = '';
+                loadSavedNetworks();
+            })
+            .catch(err => alert('Failed to add network: ' + err.message));
         }
 
         function loadSavedNetworks() {
@@ -822,6 +1080,90 @@ key = ..."></textarea>
             return 'weak';
         }
 
+        // Device management functions
+        function refreshDevices() {
+            const devicesDiv = document.getElementById('devices-list');
+            devicesDiv.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading devices...</p></div>';
+
+            fetch('/api/devices')
+                .then(r => {
+                    if (!r.ok) {
+                        return r.text().then(text => {
+                            throw new Error(text || 'Failed to load devices');
+                        });
+                    }
+                    return r.json();
+                })
+                .then(devices => {
+                    if (!devices || devices.length === 0) {
+                        devicesDiv.innerHTML = '<p class="alert alert-info">No storage devices detected</p>';
+                        return;
+                    }
+
+                    let html = '<div style="display: grid; gap: 1rem; margin-top: 1rem;">';
+                    devices.forEach(device => {
+                        const statusColor = device.has_dcim ? 'var(--success)' : 'var(--text-secondary)';
+                        const usbBadge = device.is_usb ? '<span class="status-badge badge-idle" style="font-size: 0.75rem;">USB</span>' : '';
+                        const dcimBadge = device.has_dcim ? '<span class="status-badge badge-success" style="font-size: 0.75rem;">HAS DCIM</span>' : '';
+                        const mountedBadge = device.is_mounted ? '<span class="status-badge badge-syncing" style="font-size: 0.75rem;">MOUNTED</span>' : '';
+
+                        html += '<div class="card" style="margin: 0; border-left: 4px solid ' + statusColor + ';">';
+                        html += '<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem;">';
+                        html += '<div style="flex: 1;">';
+                        html += '<h3 style="margin: 0 0 0.5rem 0; font-size: 1.125rem;">';
+                        html += '<strong>' + device.device_name + '</strong> ' + usbBadge + ' ' + mountedBadge + ' ' + dcimBadge;
+                        html += '</h3>';
+                        html += '<p style="margin: 0; color: var(--text-secondary);" class="code">' + device.device_path + '</p>';
+                        html += '</div>';
+                        if (device.has_dcim) {
+                            html += '<button class="btn btn-primary" onclick="selectDevice(\'' + device.device_path + '\')">▶️ Use This Device</button>';
+                        }
+                        html += '</div>';
+
+                        html += '<div class="info-grid">';
+                        html += '<div class="info-item"><label>Size</label><value>' + device.size_human + '</value></div>';
+                        if (device.volume_label) {
+                            html += '<div class="info-item"><label>Label</label><value>' + escapeHtml(device.volume_label) + '</value></div>';
+                        }
+                        if (device.is_mounted && device.mount_path) {
+                            html += '<div class="info-item"><label>Mounted At</label><value class="code">' + device.mount_path + '</value></div>';
+                        }
+                        html += '</div>';
+
+                        html += '</div>';
+                    });
+                    html += '</div>';
+
+                    devicesDiv.innerHTML = html;
+                })
+                .catch(err => {
+                    devicesDiv.innerHTML = '<p class="alert alert-error">Failed to load devices: ' + err.message + '</p>';
+                });
+        }
+
+        function selectDevice(devicePath) {
+            if (!confirm('Select device ' + devicePath + ' for syncing?')) return;
+
+            fetch('/api/devices/select', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ device_path: devicePath })
+            })
+            .then(r => {
+                if (!r.ok) {
+                    return r.text().then(text => {
+                        throw new Error(text || 'Failed to select device');
+                    });
+                }
+                return r.json();
+            })
+            .then(data => {
+                alert('Device selected: ' + data.message);
+                switchTab('status');
+            })
+            .catch(err => alert('Failed to select device: ' + err.message));
+        }
+
         // Configuration functions
         function loadConfig() {
             fetch('/api/config')
@@ -840,6 +1182,8 @@ key = ..."></textarea>
                     if (data.remote_name) document.getElementById('remote-name').value = data.remote_name;
                     if (data.remote_path) document.getElementById('remote-path').value = data.remote_path;
                     if (data.reformat_threshold) document.getElementById('reformat-threshold').value = data.reformat_threshold * 100;
+                    if (data.transfers) document.getElementById('transfers').value = data.transfers;
+                    if (data.checkers) document.getElementById('checkers').value = data.checkers;
                 });
         }
 
@@ -882,7 +1226,9 @@ key = ..."></textarea>
             const settings = {
                 remote_name: document.getElementById('remote-name').value,
                 remote_path: document.getElementById('remote-path').value,
-                reformat_threshold: parseFloat(document.getElementById('reformat-threshold').value) / 100
+                reformat_threshold: parseFloat(document.getElementById('reformat-threshold').value) / 100,
+                transfers: parseInt(document.getElementById('transfers').value) || 4,
+                checkers: parseInt(document.getElementById('checkers').value) || 8
             };
 
             fetch('/api/settings', {
@@ -892,7 +1238,7 @@ key = ..."></textarea>
             })
             .then(r => r.json())
             .then(data => {
-                showConfigAlert('Settings saved successfully!', 'success');
+                showConfigAlert('Settings saved successfully! Restart pictures-sync service for changes to take effect.', 'success');
             })
             .catch(err => {
                 showConfigAlert('Failed to save settings: ' + err.message, 'error');
@@ -924,6 +1270,12 @@ key = ..."></textarea>
             return seconds + 's';
         }
 
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
         // Initialize
         connectWebSocket();
         loadHistory();
@@ -937,6 +1289,11 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
+	}
+
+	// Reload state from disk to get latest updates from pictures-sync service
+	if err := stateMgr.Reload(); err != nil {
+		log.Printf("Failed to reload state: %v", err)
 	}
 
 	status := stateMgr.GetState()
@@ -1022,6 +1379,8 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 			RemoteName        string  `json:"remote_name"`
 			RemotePath        string  `json:"remote_path"`
 			ReformatThreshold float64 `json:"reformat_threshold"`
+			Transfers         int     `json:"transfers"`
+			Checkers          int     `json:"checkers"`
 		}
 
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1041,6 +1400,20 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 
 		if req.ReformatThreshold > 0 {
 			if err := appSettings.SetReformatThreshold(req.ReformatThreshold); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		if req.Transfers > 0 {
+			if err := appSettings.SetTransfers(req.Transfers); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		if req.Checkers > 0 {
+			if err := appSettings.SetCheckers(req.Checkers); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -1189,14 +1562,15 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// Subscribe to state updates
 	updates := stateMgr.Subscribe()
 
-	// Send initial state
+	// Send initial state (reload from disk first to get latest from pictures-sync service)
+	stateMgr.Reload()
 	status := stateMgr.GetState()
 	if err := conn.WriteJSON(status); err != nil {
 		return
 	}
 
-	// Send updates
-	ticker := time.NewTicker(1 * time.Second)
+	// Send updates and periodically reload state from disk
+	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -1206,11 +1580,138 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		case <-ticker.C:
-			// Ping to keep connection alive
-			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+			// Reload state from disk (in case pictures-sync service updated it)
+			if err := stateMgr.Reload(); err != nil {
+				log.Printf("Failed to reload state: %v", err)
+			}
+
+			// Send updated state
+			status := stateMgr.GetState()
+			if err := conn.WriteJSON(status); err != nil {
 				return
 			}
 		}
+	}
+}
+
+// handleDevices lists all available storage devices
+func handleDevices(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	devices, err := sdmonitor.ListAllStorageDevices()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to list devices: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Convert to state.DeviceInfo to match the state manager's type
+	stateDevices := make([]state.DeviceInfo, len(devices))
+	for i, d := range devices {
+		stateDevices[i] = state.DeviceInfo{
+			DevicePath:  d.DevicePath,
+			DeviceName:  d.DeviceName,
+			Size:        d.Size,
+			SizeHuman:   d.SizeHuman,
+			IsUSB:       d.IsUSB,
+			IsMounted:   d.IsMounted,
+			MountPath:   d.MountPath,
+			HasDCIM:     d.HasDCIM,
+			VolumeLabel: d.VolumeLabel,
+		}
+	}
+
+	// Update state manager with available devices
+	stateMgr.SetAvailableDevices(stateDevices)
+
+	jsonResponse(w, devices)
+}
+
+// handleDeviceSelect handles manual device selection
+func handleDeviceSelect(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		DevicePath string `json:"device_path"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if req.DevicePath == "" {
+		http.Error(w, "device_path is required", http.StatusBadRequest)
+		return
+	}
+
+	log.Printf("Manual device selection: %s", req.DevicePath)
+
+	// TODO: Trigger sync for the selected device
+	// This needs to be integrated with the main pictures-sync service
+
+	jsonResponse(w, map[string]string{
+		"status": "ok",
+		"message": "Device selection received. Integration with sync service pending.",
+	})
+}
+
+// handleThumbnail serves thumbnail images for files being synced
+func handleThumbnail(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get file path from query param
+	filePath := r.URL.Query().Get("path")
+	if filePath == "" {
+		http.Error(w, "path parameter required", http.StatusBadRequest)
+		return
+	}
+
+	// Security: Ensure the file is within the SD card mount path
+	mountPath := state.MountDir
+	if !strings.HasPrefix(filepath.Clean(filePath), filepath.Clean(mountPath)) {
+		http.Error(w, "access denied", http.StatusForbidden)
+		return
+	}
+
+	// Check if file is a JPEG
+	ext := strings.ToLower(filepath.Ext(filePath))
+	if ext != ".jpg" && ext != ".jpeg" {
+		http.Error(w, "only JPEG images supported", http.StatusBadRequest)
+		return
+	}
+
+	// Open and decode the image
+	file, err := os.Open(filePath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to open image: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer file.Close()
+
+	img, _, err := image.Decode(file)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to decode image: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Resize to thumbnail (max 200px width, preserve aspect ratio)
+	thumbnail := resize.Thumbnail(200, 200, img, resize.Lanczos3)
+
+	// Encode as JPEG and send
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+
+	if err := jpeg.Encode(w, thumbnail, &jpeg.Options{Quality: 80}); err != nil {
+		log.Printf("Failed to encode thumbnail: %v", err)
 	}
 }
 
