@@ -5,6 +5,8 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 echo "=== Photo Backup Station - Gokrazy Setup ==="
 echo ""
 
@@ -34,33 +36,49 @@ echo ""
 echo "Setting up Gokrazy instance: $INSTANCE_NAME"
 echo ""
 
+INSTANCE_DIR="$HOME/gokrazy/$INSTANCE_NAME"
+
 # Initialize instance if it doesn't exist
-if [ ! -d "$HOME/gokrazy/$INSTANCE_NAME" ]; then
+if [ ! -d "$INSTANCE_DIR" ]; then
     echo "Creating new instance..."
     gok -i "$INSTANCE_NAME" new
 fi
 
-# Add required packages
-echo "Adding packages..."
+# Create go.mod with replace directive for private module
+# Use absolute path to ensure it works regardless of where gok is run from
+ABSOLUTE_PROJECT_PATH="$(cd "$SCRIPT_DIR" && pwd)"
+echo "Creating go.mod with replace directive..."
+cat > "$INSTANCE_DIR/go.mod" <<EOF
+module gokrazy-instance
+
+go 1.24
+
+replace github.com/denysvitali/pictures-sync-s3 => $ABSOLUTE_PROJECT_PATH
+EOF
+
+echo "go.mod created with replace directive pointing to: $ABSOLUTE_PROJECT_PATH"
+echo ""
+
+# Add public packages only (private packages will be added via config.json)
+echo "Adding public packages..."
 gok -i "$INSTANCE_NAME" add github.com/gokrazy/fbstatus
 gok -i "$INSTANCE_NAME" add github.com/gokrazy/mkfs
 gok -i "$INSTANCE_NAME" add github.com/gokrazy/wifi
 gok -i "$INSTANCE_NAME" add tailscale.com/cmd/tailscaled
 gok -i "$INSTANCE_NAME" add tailscale.com/cmd/tailscale
-gok -i "$INSTANCE_NAME" add github.com/yourusername/pictures-sync-s3/cmd/pictures-sync
-gok -i "$INSTANCE_NAME" add github.com/yourusername/pictures-sync-s3/cmd/webui
 
-echo "Packages added successfully!"
+echo "Public packages added successfully!"
+echo "Note: Private packages will be added via config.json"
 echo ""
 
 # Create config.json
-CONFIG_FILE="$HOME/gokrazy/$INSTANCE_NAME/config.json"
+CONFIG_FILE="$INSTANCE_DIR/config.json"
 echo "Creating configuration at: $CONFIG_FILE"
 
 cat > "$CONFIG_FILE" <<EOF
 {
   "Hostname": "$INSTANCE_NAME",
-  "DeviceType": "raspberrypi4b",
+  "DeviceType": "rpi4b",
   "Update": {
     "HTTPPort": "80",
     "HTTPSPort": "443",
@@ -72,8 +90,8 @@ cat > "$CONFIG_FILE" <<EOF
     "github.com/gokrazy/wifi",
     "tailscale.com/cmd/tailscaled",
     "tailscale.com/cmd/tailscale",
-    "github.com/yourusername/pictures-sync-s3/cmd/pictures-sync",
-    "github.com/yourusername/pictures-sync-s3/cmd/webui"
+    "github.com/denysvitali/pictures-sync-s3/cmd/pictures-sync",
+    "github.com/denysvitali/pictures-sync-s3/cmd/webui"
   ],
   "PackageConfig": {
 EOF
@@ -92,10 +110,10 @@ EOF
 fi
 
 cat >> "$CONFIG_FILE" <<EOF
-    "github.com/yourusername/pictures-sync-s3/cmd/webui": {
-      "Environment": {
-        "PORT": "8080"
-      }
+    "github.com/denysvitali/pictures-sync-s3/cmd/webui": {
+      "Environment": [
+        "PORT=8080"
+      ]
     }
   }
 }
@@ -106,7 +124,7 @@ echo ""
 
 # Create WiFi config if provided
 if [ -n "$WIFI_SSID" ]; then
-    WIFI_FILE="$HOME/gokrazy/$INSTANCE_NAME/wifi.json"
+    WIFI_FILE="$INSTANCE_DIR/wifi.json"
     echo "Creating WiFi configuration at: $WIFI_FILE"
     cat > "$WIFI_FILE" <<EOF
 [
@@ -131,9 +149,11 @@ echo "4. Insert the SD card into your Raspberry Pi 4 and power on"
 echo "5. Access the web UI at: https://$INSTANCE_NAME.local or http://$INSTANCE_NAME.local:8080"
 echo "6. Configure rclone settings (remote name, path, and credentials) via the web UI"
 echo ""
-echo "Configuration file: $CONFIG_FILE"
+echo "Configuration files:"
+echo "  - Config: $CONFIG_FILE"
+echo "  - Go module: $INSTANCE_DIR/go.mod (with replace directive for local code)"
 if [ -n "$WIFI_SSID" ]; then
-    echo "WiFi config: $WIFI_FILE (copy to device /perm/wifi.json)"
+    echo "  - WiFi: $WIFI_FILE (copy to device /perm/wifi.json)"
 fi
 echo ""
 echo "All runtime settings (remote name/path) are configured via web UI and persist automatically."

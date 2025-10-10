@@ -100,17 +100,21 @@ Supporting packages:
    cd pictures-sync-s3
    ```
 
-2. Initialize a Gokrazy instance:
+2. Run the setup script to configure the instance:
    ```bash
-   gok new
+   ./setup-gokrazy.sh
    ```
 
-3. Edit the instance configuration:
-   ```bash
-   gok edit
-   ```
+   The script will:
+   - Create a new gokrazy instance in `~/gokrazy/<instance-name>`
+   - Add all required packages
+   - Create `go.mod` with replace directive pointing to your local code
+   - Configure hostname and Tailscale (optional)
+   - Set up WiFi (optional)
 
-   Update `config.json` with the following structure:
+   **Note**: The key to making this work with a private repository is the `replace` directive in `~/gokrazy/<instance-name>/go.mod` that tells gokrazy to use your local code instead of fetching from GitHub.
+
+3. Alternatively, manually configure the instance:
 
    ```json
    {
@@ -127,8 +131,8 @@ Supporting packages:
        "github.com/gokrazy/wifi",
        "tailscale.com/cmd/tailscaled",
        "tailscale.com/cmd/tailscale",
-       "github.com/yourusername/pictures-sync-s3/cmd/pictures-sync",
-       "github.com/yourusername/pictures-sync-s3/cmd/webui"
+       "github.com/denysvitali/pictures-sync-s3/cmd/pictures-sync",
+       "github.com/denysvitali/pictures-sync-s3/cmd/webui"
      ],
      "PackageConfig": {
        "tailscale.com/cmd/tailscale": {
@@ -139,10 +143,10 @@ Supporting packages:
            "--ssh"
          ]
        },
-       "github.com/yourusername/pictures-sync-s3/cmd/webui": {
-         "Environment": {
-           "PORT": "8080"
-         }
+       "github.com/denysvitali/pictures-sync-s3/cmd/webui": {
+         "Environment": [
+           "PORT=8080"
+         ]
        }
      }
    }
@@ -153,13 +157,15 @@ Supporting packages:
    - Generate a new auth key (disable key expiry for persistent access)
    - Replace `YOUR_TAILSCALE_AUTH_KEY` in config.json
 
-5. Build and write to SD card:
+4. Build and write to SD card:
    ```bash
    # Insert SD card and identify device (e.g., /dev/sdb)
-   gok overwrite --full /dev/sdX
+   gok -i <instance-name> overwrite --full /dev/sdX
    ```
 
-6. Boot the Raspberry Pi with the new SD card
+   The `gok` tool will use the `go.mod` with the replace directive from `~/gokrazy/<instance-name>/` to build your local code.
+
+5. Boot the Raspberry Pi with the new SD card
 
 ## Configuration
 
@@ -379,13 +385,16 @@ go test ./pkg/syncmanager
 
 ### Making Changes
 
-1. Modify code
+1. Modify code in your project directory
 2. Test locally if possible
 3. Deploy to device:
    ```bash
-   gok overwrite /dev/sdX
+   gok -i <instance-name> overwrite /dev/sdX  # Full overwrite for SD card
+   # OR
+   gok -i <instance-name> update              # Over-the-air update if device is already running
    ```
-   Or use `gok update` if device is already running
+
+   The `replace` directive in `~/gokrazy/<instance-name>/go.mod` ensures your local changes are always used.
 
 ## Security Considerations
 

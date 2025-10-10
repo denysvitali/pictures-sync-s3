@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // Event represents an SD card event
@@ -159,8 +161,8 @@ func (m *Monitor) findUSBStorageDevice() string {
 		}
 	}
 
-	// Also check /dev/mmcblk* for SD card readers
-	matches, err = filepath.Glob("/dev/mmcblk[0-9]p1")
+	// Also check /dev/mmcblk* for SD card readers (but exclude mmcblk0 which is the Pi's boot SD)
+	matches, err = filepath.Glob("/dev/mmcblk[1-9]p1")
 	if err == nil {
 		for _, dev := range matches {
 			if !m.isMountedElsewhere(dev) {
@@ -204,22 +206,22 @@ func (m *Monitor) mount(device string) error {
 	}
 
 	// Unmount if anything is currently mounted at our path
-	exec.Command("umount", m.mountPath).Run()
+	unix.Unmount(m.mountPath, 0)
 
 	// Try to mount with various filesystem types
 	fstypes := []string{"vfat", "exfat", "ext4", "ntfs"}
 
 	for _, fstype := range fstypes {
-		cmd := exec.Command("mount", "-t", fstype, "-o", "ro", device, m.mountPath)
-		if err := cmd.Run(); err == nil {
+		err := unix.Mount(device, m.mountPath, fstype, unix.MS_RDONLY, "")
+		if err == nil {
 			log.Printf("Mounted %s as %s at %s", device, fstype, m.mountPath)
 			return nil
 		}
 	}
 
-	// Try auto-detect
-	cmd := exec.Command("mount", "-o", "ro", device, m.mountPath)
-	if err := cmd.Run(); err != nil {
+	// Try auto-detect (empty fstype)
+	err = unix.Mount(device, m.mountPath, "", unix.MS_RDONLY, "")
+	if err != nil {
 		return fmt.Errorf("failed to mount device: %w", err)
 	}
 
@@ -229,8 +231,7 @@ func (m *Monitor) mount(device string) error {
 
 // unmount unmounts the current device
 func (m *Monitor) unmount() error {
-	cmd := exec.Command("umount", m.mountPath)
-	if err := cmd.Run(); err != nil {
+	if err := unix.Unmount(m.mountPath, 0); err != nil {
 		log.Printf("Failed to unmount %s: %v", m.mountPath, err)
 		return err
 	}
