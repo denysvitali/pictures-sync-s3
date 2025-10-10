@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:gokrazy.org)",
+      "Read(//home/dvitali/gokrazy/photo-backup/**)",
+      "Bash(go get:*)",
+      "Bash(go build:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nAdd modern web UI with tabbed interface and real-time updates\n\nImplemented a complete UI overhaul for the Photo Backup Station web interface:\n\n- Created modern, responsive web UI with 4 tabbed sections (Status, History, WiFi, Configuration)\n- Added real-time WebSocket updates with automatic reconnection\n- Implemented visual progress bars with live sync statistics\n- Added WiFi management with network scanning and signal strength indicators\n- Created configuration interface for rclone setup and settings management\n- Designed clean, card-based layout with professional styling\n- Added mobile-responsive design with optimized layouts for all screen sizes\n- Included loading states, animations, and comprehensive error handling\n\nThe new UI provides a much more professional and user-friendly experience for monitoring photo backups and managing the device.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
