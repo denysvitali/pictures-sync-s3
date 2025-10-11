@@ -113,6 +113,8 @@ func main() {
 		appSettings.GetTransfers(),
 		appSettings.GetCheckers(),
 	)
+	// Update Google Photos settings
+	syncMgr.SetGooglePhotos(appSettings.GetGooglePhotosEnabled(), appSettings.GetGooglePhotosRemoteName())
 
 	// Initialize WiFi manager
 	wifiMgr, err = wifimanager.NewManager()
@@ -136,6 +138,8 @@ func main() {
 	http.HandleFunc("/api/wifi/connect", handleWiFiConnect)
 	http.HandleFunc("/api/wifi/disconnect", handleWiFiDisconnect)
 	http.HandleFunc("/api/wifi/status", handleWiFiStatus)
+	http.HandleFunc("/api/files", handleFiles)
+	http.HandleFunc("/api/files/view", handleFileView)
 	http.HandleFunc("/api/thumbnail", handleThumbnail)
 	http.HandleFunc("/ws", handleWebSocket)
 	http.HandleFunc("/", handleIndex)
@@ -550,6 +554,7 @@ func getWebUIHTML() string {
             <button class="tab active" onclick="switchTab('status')">📊 Status</button>
             <button class="tab" onclick="switchTab('devices')">💾 Devices</button>
             <button class="tab" onclick="switchTab('history')">📚 History</button>
+            <button class="tab" onclick="switchTab('files')">📁 Files</button>
             <button class="tab" onclick="switchTab('wifi')">📡 WiFi</button>
             <button class="tab" onclick="switchTab('config')">⚙️ Configuration</button>
         </div>
@@ -682,6 +687,52 @@ key = ..."></textarea>
                     <button type="submit" class="btn btn-primary">💾 Save Settings</button>
                 </form>
             </div>
+
+            <div class="card">
+                <h2>Google Photos Upload (Optional)</h2>
+                <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+                    Optionally upload JPG files to Google Photos after syncing to your primary remote.
+                    You must configure a Google Photos remote in rclone (using Google Drive backend) before enabling this feature.
+                </p>
+                <form onsubmit="saveSettings(event)">
+                    <div class="form-group">
+                        <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                            <input type="checkbox" id="google-photos-enabled" style="width: auto; cursor: pointer;">
+                            <span>Enable Google Photos Upload</span>
+                        </label>
+                        <p style="font-size: 0.875rem; color: var(--text-secondary); margin-top: 0.25rem;">When enabled, JPG files will be uploaded to Google Photos after the main sync completes</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="google-photos-remote">Google Photos Remote Name</label>
+                        <input type="text" id="google-photos-remote" class="form-input" placeholder="e.g., googlephotos">
+                        <p style="font-size: 0.875rem; color: var(--text-secondary); margin-top: 0.25rem;">The name of your Google Photos rclone remote (configured via rclone config)</p>
+                    </div>
+                    <button type="submit" class="btn btn-primary">💾 Save Google Photos Settings</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Files Tab -->
+        <div id="files-tab" class="tab-content">
+            <div class="card">
+                <h2>Remote Files</h2>
+                <div id="files-alert"></div>
+
+                <div style="margin-bottom: 1rem;">
+                    <div id="current-path" style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 0.5rem;">
+                        Path: <span class="code" id="path-display">/</span>
+                    </div>
+                    <button class="btn btn-secondary" onclick="loadFiles('')">🏠 Root</button>
+                    <button class="btn btn-secondary" onclick="refreshFiles()">🔄 Refresh</button>
+                </div>
+
+                <div id="files-display">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>Loading files...</p>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -700,6 +751,7 @@ key = ..."></textarea>
             // Load data for the selected tab
             if (tabName === 'devices') refreshDevices();
             if (tabName === 'history') loadHistory();
+            if (tabName === 'files') loadFiles('');
             if (tabName === 'wifi') loadWiFiStatus();
             if (tabName === 'config') loadConfig();
         }
@@ -796,11 +848,11 @@ key = ..."></textarea>
             // Stats grid
             html += '<div class="info-grid">';
 
-            if (sync.transfer_speed) {
+            if (sync.transfer_speed && sync.transfer_speed > 0) {
                 html += '<div class="info-item"><label>Transfer Speed</label><value>' + formatBytes(sync.transfer_speed) + '/s</value></div>';
             }
 
-            if (sync.eta) {
+            if (sync.eta && sync.eta !== '') {
                 html += '<div class="info-item"><label>Time Remaining</label><value>' + sync.eta + '</value></div>';
             }
 
@@ -1184,6 +1236,14 @@ key = ..."></textarea>
                     if (data.reformat_threshold) document.getElementById('reformat-threshold').value = data.reformat_threshold * 100;
                     if (data.transfers) document.getElementById('transfers').value = data.transfers;
                     if (data.checkers) document.getElementById('checkers').value = data.checkers;
+
+                    // Load Google Photos settings
+                    if (data.google_photos_enabled !== undefined) {
+                        document.getElementById('google-photos-enabled').checked = data.google_photos_enabled;
+                    }
+                    if (data.google_photos_remote_name) {
+                        document.getElementById('google-photos-remote').value = data.google_photos_remote_name;
+                    }
                 });
         }
 
@@ -1228,7 +1288,9 @@ key = ..."></textarea>
                 remote_path: document.getElementById('remote-path').value,
                 reformat_threshold: parseFloat(document.getElementById('reformat-threshold').value) / 100,
                 transfers: parseInt(document.getElementById('transfers').value) || 4,
-                checkers: parseInt(document.getElementById('checkers').value) || 8
+                checkers: parseInt(document.getElementById('checkers').value) || 8,
+                google_photos_enabled: document.getElementById('google-photos-enabled').checked,
+                google_photos_remote_name: document.getElementById('google-photos-remote').value
             };
 
             fetch('/api/settings', {
@@ -1249,6 +1311,158 @@ key = ..."></textarea>
             const alertDiv = document.getElementById('config-alert');
             alertDiv.innerHTML = '<p class="alert alert-' + type + '">' + message + '</p>';
             setTimeout(() => { alertDiv.innerHTML = ''; }, 5000);
+        }
+
+        // Files browser functions
+        let currentFilesPath = '';
+
+        function loadFiles(path) {
+            currentFilesPath = path;
+            const pathDisplay = document.getElementById('path-display');
+            pathDisplay.textContent = path || '/';
+
+            const filesDisplay = document.getElementById('files-display');
+            filesDisplay.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading files...</p></div>';
+
+            fetch('/api/files?path=' + encodeURIComponent(path))
+                .then(r => r.json())
+                .then(data => {
+                    if (data.error) {
+                        showFilesAlert(data.error, 'error');
+                        filesDisplay.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 2rem;">Failed to load files</p>';
+                        return;
+                    }
+
+                    displayFiles(data.files, path);
+                })
+                .catch(err => {
+                    showFilesAlert('Failed to load files: ' + err.message, 'error');
+                    filesDisplay.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 2rem;">Failed to load files</p>';
+                });
+        }
+
+        function refreshFiles() {
+            loadFiles(currentFilesPath);
+        }
+
+        function displayFiles(files, path) {
+            const filesDisplay = document.getElementById('files-display');
+
+            if (!files || files.length === 0) {
+                filesDisplay.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 2rem;">No files found</p>';
+                return;
+            }
+
+            // Sort files: directories first, then by name
+            files.sort((a, b) => {
+                if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
+                return a.name.localeCompare(b.name);
+            });
+
+            let html = '<div style="overflow-x: auto;"><table style="width: 100%; border-collapse: collapse;">';
+            html += '<thead style="background: var(--bg); border-bottom: 2px solid var(--border);">';
+            html += '<tr>';
+            html += '<th style="text-align: left; padding: 0.75rem;">Name</th>';
+            html += '<th style="text-align: right; padding: 0.75rem;">Size</th>';
+            html += '<th style="text-align: right; padding: 0.75rem;">Modified</th>';
+            html += '</tr>';
+            html += '</thead>';
+            html += '<tbody>';
+
+            files.forEach(file => {
+                const fileName = file.name;
+                const fileSize = file.is_dir ? '-' : formatBytes(file.size);
+                const modTime = new Date(file.mod_time).toLocaleString();
+                const filePath = path ? path + '/' + fileName : fileName;
+
+                // Check if file is an image
+                const ext = fileName.toLowerCase().split('.').pop();
+                const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
+                const icon = file.is_dir ? '📁' : (isImage ? '🖼️' : '📄');
+
+                html += '<tr style="border-bottom: 1px solid var(--border);">';
+
+                if (file.is_dir) {
+                    html += '<td style="padding: 0.75rem;"><a href="#" onclick="loadFiles(\'' + filePath + '\'); return false;" style="color: var(--primary); text-decoration: none; font-weight: 500;">' + icon + ' ' + fileName + '</a></td>';
+                } else if (isImage) {
+                    html += '<td style="padding: 0.75rem;"><a href="#" onclick="viewImage(\'' + filePath.replace(/'/g, "\\'") + '\', \'' + fileName.replace(/'/g, "\\'") + '\'); return false;" style="color: var(--primary); text-decoration: none; font-weight: 500;">' + icon + ' ' + fileName + '</a></td>';
+                } else {
+                    html += '<td style="padding: 0.75rem;">' + icon + ' ' + fileName + '</td>';
+                }
+
+                html += '<td style="text-align: right; padding: 0.75rem; color: var(--text-secondary);">' + fileSize + '</td>';
+                html += '<td style="text-align: right; padding: 0.75rem; color: var(--text-secondary); font-size: 0.875rem;">' + modTime + '</td>';
+                html += '</tr>';
+            });
+
+            html += '</tbody></table></div>';
+            filesDisplay.innerHTML = html;
+        }
+
+        function showFilesAlert(message, type) {
+            const alertDiv = document.getElementById('files-alert');
+            alertDiv.innerHTML = '<p class="alert alert-' + type + '">' + message + '</p>';
+            setTimeout(() => { alertDiv.innerHTML = ''; }, 5000);
+        }
+
+        function viewImage(filePath, fileName) {
+            // Create modal overlay
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.9); z-index: 10000; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem;';
+
+            // Close button
+            const closeBtn = document.createElement('button');
+            closeBtn.innerHTML = '✕ Close';
+            closeBtn.className = 'btn btn-secondary';
+            closeBtn.style.cssText = 'position: absolute; top: 1rem; right: 1rem; z-index: 10001;';
+            closeBtn.onclick = () => document.body.removeChild(modal);
+
+            // Image title
+            const title = document.createElement('div');
+            title.textContent = fileName;
+            title.style.cssText = 'color: white; font-size: 1.25rem; font-weight: 600; margin-bottom: 1rem; position: absolute; top: 1rem; left: 1rem;';
+
+            // Loading spinner
+            const loading = document.createElement('div');
+            loading.innerHTML = '<div class="spinner"></div><p style="color: white; margin-top: 1rem;">Loading image...</p>';
+            loading.style.cssText = 'display: flex; flex-direction: column; align-items: center;';
+
+            // Image element
+            const img = document.createElement('img');
+            img.style.cssText = 'max-width: 90%; max-height: 80vh; object-fit: contain; display: none; box-shadow: 0 10px 40px rgba(0,0,0,0.5); border-radius: 0.5rem;';
+            img.src = '/api/files/view?path=' + encodeURIComponent(filePath);
+
+            img.onload = () => {
+                loading.style.display = 'none';
+                img.style.display = 'block';
+            };
+
+            img.onerror = () => {
+                loading.innerHTML = '<p style="color: #ef4444;">Failed to load image</p>';
+            };
+
+            modal.appendChild(closeBtn);
+            modal.appendChild(title);
+            modal.appendChild(loading);
+            modal.appendChild(img);
+
+            // Close on background click
+            modal.onclick = (e) => {
+                if (e.target === modal) {
+                    document.body.removeChild(modal);
+                }
+            };
+
+            // Close on Escape key
+            const escHandler = (e) => {
+                if (e.key === 'Escape') {
+                    document.body.removeChild(modal);
+                    document.removeEventListener('keydown', escHandler);
+                }
+            };
+            document.addEventListener('keydown', escHandler);
+
+            document.body.appendChild(modal);
         }
 
         // Utility functions
@@ -1376,11 +1590,13 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPost:
 		var req struct {
-			RemoteName        string  `json:"remote_name"`
-			RemotePath        string  `json:"remote_path"`
-			ReformatThreshold float64 `json:"reformat_threshold"`
-			Transfers         int     `json:"transfers"`
-			Checkers          int     `json:"checkers"`
+			RemoteName             string  `json:"remote_name"`
+			RemotePath             string  `json:"remote_path"`
+			ReformatThreshold      float64 `json:"reformat_threshold"`
+			Transfers              int     `json:"transfers"`
+			Checkers               int     `json:"checkers"`
+			GooglePhotosEnabled    bool    `json:"google_photos_enabled"`
+			GooglePhotosRemoteName string  `json:"google_photos_remote_name"`
 		}
 
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1418,6 +1634,14 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+
+		// Update Google Photos settings
+		if err := appSettings.SetGooglePhotos(req.GooglePhotosEnabled, req.GooglePhotosRemoteName); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		// Update sync manager with Google Photos settings
+		syncMgr.SetGooglePhotos(req.GooglePhotosEnabled, req.GooglePhotosRemoteName)
 
 		log.Println("Settings updated")
 		jsonResponse(w, map[string]string{"status": "ok"})
@@ -1662,6 +1886,72 @@ func handleDeviceSelect(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleThumbnail serves thumbnail images for files being synced
+func handleFiles(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get path from query param (defaults to root)
+	path := r.URL.Query().Get("path")
+
+	// List files on remote
+	files, err := syncMgr.ListFiles(path)
+	if err != nil {
+		jsonResponse(w, map[string]interface{}{
+			"error": fmt.Sprintf("Failed to list files: %v", err),
+		})
+		return
+	}
+
+	jsonResponse(w, map[string]interface{}{
+		"files": files,
+		"path":  path,
+	})
+}
+
+func handleFileView(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get file path from query param
+	filePath := r.URL.Query().Get("path")
+	if filePath == "" {
+		http.Error(w, "path parameter required", http.StatusBadRequest)
+		return
+	}
+
+	// Check if file is an image
+	ext := strings.ToLower(filepath.Ext(filePath))
+	var contentType string
+	switch ext {
+	case ".jpg", ".jpeg":
+		contentType = "image/jpeg"
+	case ".png":
+		contentType = "image/png"
+	case ".gif":
+		contentType = "image/gif"
+	case ".webp":
+		contentType = "image/webp"
+	default:
+		http.Error(w, "unsupported file type", http.StatusBadRequest)
+		return
+	}
+
+	// Set content type header
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+
+	// Stream the file from remote
+	if err := syncMgr.GetFile(filePath, w); err != nil {
+		log.Printf("Failed to get file %s: %v", filePath, err)
+		http.Error(w, fmt.Sprintf("failed to retrieve file: %v", err), http.StatusInternalServerError)
+		return
+	}
+}
+
 func handleThumbnail(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)

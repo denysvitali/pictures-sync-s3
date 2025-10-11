@@ -23,6 +23,10 @@ type Settings struct {
 	Transfers int `json:"transfers"` // Number of files to transfer in parallel
 	Checkers  int `json:"checkers"`  // Number of checkers to run in parallel
 
+	// Google Photos optional upload settings
+	GooglePhotosEnabled    bool   `json:"google_photos_enabled"`     // Enable uploading JPG files to Google Photos
+	GooglePhotosRemoteName string `json:"google_photos_remote_name"` // Google Photos rclone remote name
+
 	mu sync.RWMutex
 }
 
@@ -165,16 +169,41 @@ func (s *Settings) SetCheckers(checkers int) error {
 	return s.Save()
 }
 
+// GetGooglePhotosEnabled returns whether Google Photos upload is enabled
+func (s *Settings) GetGooglePhotosEnabled() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.GooglePhotosEnabled
+}
+
+// GetGooglePhotosRemoteName returns the Google Photos remote name
+func (s *Settings) GetGooglePhotosRemoteName() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.GooglePhotosRemoteName
+}
+
+// SetGooglePhotos updates the Google Photos settings
+func (s *Settings) SetGooglePhotos(enabled bool, remoteName string) error {
+	s.mu.Lock()
+	s.GooglePhotosEnabled = enabled
+	s.GooglePhotosRemoteName = remoteName
+	s.mu.Unlock()
+	return s.Save()
+}
+
 // ToJSON returns settings as JSON for API responses
 func (s *Settings) ToJSON() map[string]interface{} {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	return map[string]interface{}{
-		"remote_name":        s.RemoteName,
-		"remote_path":        s.RemotePath,
-		"reformat_threshold": s.ReformatThreshold,
-		"transfers":          s.Transfers,
-		"checkers":           s.Checkers,
+		"remote_name":              s.RemoteName,
+		"remote_path":              s.RemotePath,
+		"reformat_threshold":       s.ReformatThreshold,
+		"transfers":                s.Transfers,
+		"checkers":                 s.Checkers,
+		"google_photos_enabled":    s.GooglePhotosEnabled,
+		"google_photos_remote_name": s.GooglePhotosRemoteName,
 	}
 }
