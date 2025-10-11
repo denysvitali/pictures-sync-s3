@@ -41,6 +41,8 @@ type SyncRecord struct {
 	CardID          string    `json:"card_id"` // Unique ID from .pictures-sync-id file
 	CurrentFile     string    `json:"current_file,omitempty"` // Current file being synced
 	CurrentFileSize int64     `json:"current_file_size,omitempty"` // Size of current file
+	TransferSpeed   float64   `json:"transfer_speed,omitempty"` // Bytes per second
+	ETA             string    `json:"eta,omitempty"` // Estimated time remaining (formatted)
 }
 
 // DeviceInfo represents a detected storage device
@@ -191,13 +193,15 @@ func (m *Manager) StartSync(cardID string, totalFiles, totalBytes int64) (*SyncR
 
 // UpdateSyncProgress updates the progress of current sync
 // Saves to disk only periodically (throttled) to reduce SD card wear
-func (m *Manager) UpdateSyncProgress(filesSynced, bytesSynced int64, currentFile string, currentFileSize int64) error {
+func (m *Manager) UpdateSyncProgress(filesSynced, bytesSynced int64, currentFile string, currentFileSize int64, transferSpeed float64, eta string) error {
 	m.mu.Lock()
 	if m.currentState.CurrentSync != nil {
 		m.currentState.CurrentSync.FilesSynced = filesSynced
 		m.currentState.CurrentSync.BytesSynced = bytesSynced
 		m.currentState.CurrentSync.CurrentFile = currentFile
 		m.currentState.CurrentSync.CurrentFileSize = currentFileSize
+		m.currentState.CurrentSync.TransferSpeed = transferSpeed
+		m.currentState.CurrentSync.ETA = eta
 	}
 
 	// Throttle disk writes - only save every progressSaveDelay seconds
@@ -294,14 +298,34 @@ func (m *Manager) Subscribe() chan CurrentState {
 	return ch
 }
 
+// Unsubscribe removes a channel from the listeners list and closes it
+func (m *Manager) Unsubscribe(ch chan CurrentState) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Find and remove the channel
+	for i, listener := range m.listeners {
+		if listener == ch {
+			// Remove from slice
+			m.listeners = append(m.listeners[:i], m.listeners[i+1:]...)
+			// Close the channel to signal the subscriber
+			close(ch)
+			break
+		}
+	}
+}
+
 // notifyListeners sends current state to all subscribers
 func (m *Manager) notifyListeners() {
 	m.mu.RLock()
 	state := m.currentState
-	listeners := m.listeners
+	// Deep copy the listeners slice to avoid race conditions
+	listenersCopy := make([]chan CurrentState, len(m.listeners))
+	copy(listenersCopy, m.listeners)
 	m.mu.RUnlock()
 
-	for _, ch := range listeners {
+	// Send to listeners without holding the lock
+	for _, ch := range listenersCopy {
 		select {
 		case ch <- state:
 		default:
@@ -312,7 +336,10 @@ func (m *Manager) notifyListeners() {
 
 // save persists current state to disk
 func (m *Manager) save() error {
+	// Hold read lock while marshaling to prevent race conditions
+	m.mu.RLock()
 	data, err := json.MarshalIndent(m.currentState, "", "  ")
+	m.mu.RUnlock()
 	if err != nil {
 		return fmt.Errorf("failed to marshal state: %w", err)
 	}
@@ -349,9 +376,6 @@ func (m *Manager) load() error {
 
 // Reload reads the latest state from disk and notifies listeners
 func (m *Manager) Reload() error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	data, err := os.ReadFile(StateFile)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -365,11 +389,13 @@ func (m *Manager) Reload() error {
 		return fmt.Errorf("failed to unmarshal state: %w", err)
 	}
 
-	// Update current state
+	// Update current state with lock
+	m.mu.Lock()
 	m.currentState = newState
+	m.mu.Unlock()
 
-	// Notify listeners of the updated state
-	go m.notifyListeners()
+	// Notify listeners synchronously after releasing the lock to avoid deadlock
+	m.notifyListeners()
 
 	return nil
 }

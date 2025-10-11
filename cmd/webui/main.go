@@ -798,11 +798,11 @@ key = ..."></textarea>
             html += '<div class="info-item"><label>SD Card</label><value>' + (data.sdcard_mounted ? '✓ Mounted' : '✗ Not mounted') + '</value></div>';
 
             if (data.sdcard_path) {
-                html += '<div class="info-item"><label>Mount Path</label><value class="code">' + data.sdcard_path + '</value></div>';
+                html += '<div class="info-item"><label>Mount Path</label><value class="code">' + escapeHtml(data.sdcard_path) + '</value></div>';
             }
 
             if (data.card_id) {
-                html += '<div class="info-item"><label>Card ID</label><value class="code">' + data.card_id + '</value></div>';
+                html += '<div class="info-item"><label>Card ID</label><value class="code">' + escapeHtml(data.card_id) + '</value></div>';
             }
 
             html += '</div>';
@@ -1012,7 +1012,7 @@ key = ..."></textarea>
                     networks.forEach(network => {
                         const signalStrength = getSignalStrength(network.signal);
                         html += '<div class="wifi-network">';
-                        html += '<div><strong>' + network.ssid + '</strong>';
+                        html += '<div><strong>' + escapeHtml(network.ssid) + '</strong>';
                         if (network.encrypted) html += ' 🔒';
                         html += '</div>';
                         html += '<div style="display: flex; gap: 1rem; align-items: center;">';
@@ -1099,8 +1099,8 @@ key = ..."></textarea>
                     let html = '';
                     networks.forEach(network => {
                         html += '<div class="wifi-network">';
-                        html += '<strong>' + network.ssid + '</strong>';
-                        html += '<button class="btn btn-secondary" onclick="removeWiFi(\'' + network.ssid + '\')">Remove</button>';
+                        html += '<strong>' + escapeHtml(network.ssid) + '</strong>';
+                        html += '<button class="btn btn-secondary" onclick="removeWiFi(\'' + escapeHtml(network.ssid) + '\')">Remove</button>';
                         html += '</div>';
                     });
 
@@ -1221,6 +1221,11 @@ key = ..."></textarea>
             fetch('/api/config')
                 .then(r => r.json())
                 .then(data => {
+                    // Populate the config textarea with actual content
+                    if (data.content) {
+                        document.getElementById('rclone-config').value = data.content;
+                    }
+
                     if (data.configured) {
                         showConfigAlert('Rclone is configured (' + (data.remotes ? data.remotes.length : 0) + ' remotes)', 'success');
                     } else {
@@ -1529,17 +1534,27 @@ func handleHistory(w http.ResponseWriter, r *http.Request) {
 func handleConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		// Return current config status
+		// Return current config status and content
 		hasConfig, err := state.EnsureRcloneConfig()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
+		// Read the actual config content
+		configContent := ""
+		if hasConfig {
+			content, err := os.ReadFile(state.GetRcloneConfigPath())
+			if err == nil {
+				configContent = string(content)
+			}
+		}
+
 		remotes, _ := syncMgr.ListRemotes()
 		jsonResponse(w, map[string]interface{}{
 			"configured": hasConfig,
 			"remotes":    remotes,
+			"content":    configContent,
 		})
 
 	case http.MethodPost:
@@ -1785,6 +1800,8 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// Subscribe to state updates
 	updates := stateMgr.Subscribe()
+	// IMPORTANT: Unsubscribe when WebSocket closes to prevent memory leak
+	defer stateMgr.Unsubscribe(updates)
 
 	// Send initial state (reload from disk first to get latest from pictures-sync service)
 	stateMgr.Reload()
@@ -1799,7 +1816,11 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	for {
 		select {
-		case state := <-updates:
+		case state, ok := <-updates:
+			if !ok {
+				// Channel was closed by Unsubscribe
+				return
+			}
 			if err := conn.WriteJSON(state); err != nil {
 				return
 			}
@@ -1959,18 +1980,34 @@ func handleThumbnail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get file path from query param
-	filePath := r.URL.Query().Get("path")
-	if filePath == "" {
+	requestedPath := r.URL.Query().Get("path")
+	if requestedPath == "" {
 		http.Error(w, "path parameter required", http.StatusBadRequest)
 		return
 	}
 
-	// Security: Ensure the file is within the SD card mount path
+	// Security: Properly validate path to prevent traversal attacks
 	mountPath := state.MountDir
-	if !strings.HasPrefix(filepath.Clean(filePath), filepath.Clean(mountPath)) {
+
+	// Clean the mount path and ensure it ends with separator
+	cleanMountPath := filepath.Clean(mountPath)
+	if !strings.HasSuffix(cleanMountPath, string(os.PathSeparator)) {
+		cleanMountPath += string(os.PathSeparator)
+	}
+
+	// Join mount path with requested path and clean the result
+	// This resolves any .. or . in the path
+	fullPath := filepath.Join(mountPath, filepath.Clean("/"+requestedPath))
+	cleanFullPath := filepath.Clean(fullPath)
+
+	// Verify the cleaned path is still within the mount directory
+	if !strings.HasPrefix(cleanFullPath, cleanMountPath) {
 		http.Error(w, "access denied", http.StatusForbidden)
 		return
 	}
+
+	// Use the validated path
+	filePath := cleanFullPath
 
 	// Check if file is a JPEG
 	ext := strings.ToLower(filepath.Ext(filePath))

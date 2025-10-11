@@ -51,7 +51,7 @@ echo "Creating go.mod with replace directive..."
 cat > "$INSTANCE_DIR/go.mod" <<EOF
 module gokrazy-instance
 
-go 1.24
+go 1.23
 
 replace github.com/denysvitali/pictures-sync-s3 => $ABSOLUTE_PROJECT_PATH
 EOF

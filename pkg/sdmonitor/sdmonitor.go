@@ -38,18 +38,24 @@ const (
 
 // Monitor monitors for SD card insertion/removal
 type Monitor struct {
-	eventChan  chan Event
-	stopChan   chan struct{}
-	mountPath  string
-	lastDevice string
+	eventChan    chan Event
+	stopChan     chan struct{}
+	mountPath    string
+	lastDevice   string
+
+	// Cache for /proc/mounts to reduce I/O
+	cachedMounts    string
+	mountsCacheTime time.Time
+	mountsCacheTTL  time.Duration
 }
 
 // NewMonitor creates a new SD card monitor
 func NewMonitor(mountPath string) *Monitor {
 	return &Monitor{
-		eventChan: make(chan Event, 10),
-		stopChan:  make(chan struct{}),
-		mountPath: mountPath,
+		eventChan:      make(chan Event, 10),
+		stopChan:       make(chan struct{}),
+		mountPath:      mountPath,
+		mountsCacheTTL: 2 * time.Second, // Cache for same duration as polling interval
 	}
 }
 
@@ -91,9 +97,29 @@ func (m *Monitor) pollDevices() {
 		case <-m.stopChan:
 			return
 		case <-ticker.C:
+			// Invalidate cache at each poll to get fresh data
+			m.mountsCacheTime = time.Time{}
 			m.checkDevices()
 		}
 	}
+}
+
+// getCachedMounts returns cached /proc/mounts content or refreshes if expired
+func (m *Monitor) getCachedMounts() (string, error) {
+	// Check if cache is still valid
+	if time.Since(m.mountsCacheTime) < m.mountsCacheTTL {
+		return m.cachedMounts, nil
+	}
+
+	// Refresh cache
+	data, err := os.ReadFile("/proc/mounts")
+	if err != nil {
+		return "", err
+	}
+
+	m.cachedMounts = string(data)
+	m.mountsCacheTime = time.Now()
+	return m.cachedMounts, nil
 }
 
 // checkDevices checks for new or removed devices
@@ -167,20 +193,31 @@ func (m *Monitor) findUSBStorageDevice() string {
 
 // isMountedElsewhere checks if device is already mounted somewhere else
 func (m *Monitor) isMountedElsewhere(device string) bool {
-	data, err := os.ReadFile("/proc/mounts")
+	mounts, err := m.getCachedMounts()
 	if err != nil {
 		return false
 	}
 
-	lines := strings.Split(string(data), "\n")
-	for _, line := range lines {
-		if strings.HasPrefix(line, device) {
-			// Check if mounted to our mount path
-			fields := strings.Fields(line)
-			if len(fields) >= 2 && fields[1] != m.mountPath {
-				return true
-			}
-		}
+	// Use strings.Index for faster search instead of splitting all lines
+	devicePrefix := device + " "
+	idx := strings.Index(mounts, devicePrefix)
+	if idx == -1 {
+		return false
+	}
+
+	// Find the end of the line containing the device
+	lineStart := strings.LastIndex(mounts[:idx], "\n") + 1
+	lineEnd := strings.Index(mounts[idx:], "\n")
+	if lineEnd == -1 {
+		lineEnd = len(mounts)
+	} else {
+		lineEnd += idx
+	}
+
+	line := mounts[lineStart:lineEnd]
+	fields := strings.Fields(line)
+	if len(fields) >= 2 && fields[1] != m.mountPath {
+		return true
 	}
 
 	return false
@@ -188,16 +225,22 @@ func (m *Monitor) isMountedElsewhere(device string) bool {
 
 // mount mounts the device (initially read-write for card ID setup)
 func (m *Monitor) mount(device string) error {
-	// Check if already mounted
-	data, err := os.ReadFile("/proc/mounts")
+	// Check if already mounted using cached data
+	mounts, err := m.getCachedMounts()
 	if err == nil {
-		if strings.Contains(string(data), device+" "+m.mountPath) {
+		if strings.Contains(mounts, device+" "+m.mountPath) {
 			return nil // Already mounted
 		}
 	}
 
 	// Unmount if anything is currently mounted at our path
-	unix.Unmount(m.mountPath, 0)
+	if err := unix.Unmount(m.mountPath, 0); err != nil {
+		// Only log if it's not "not mounted" error
+		if err != unix.EINVAL {
+			log.Printf("Warning: Failed to unmount existing mount at %s: %v", m.mountPath, err)
+			// Try to continue anyway, as the mount might succeed
+		}
+	}
 
 	// Mount read-write initially to allow writing card ID
 	// We'll remount read-only after card ID is written
@@ -311,7 +354,9 @@ func GetOrCreateCardID(mountPath string, monitor *Monitor) (string, bool, error)
 			// Remount read-only now that we've read the ID
 			if monitor != nil {
 				if err := monitor.RemountReadOnly(); err != nil {
-					log.Printf("Warning: Failed to remount read-only: %v", err)
+					log.Printf("ERROR: Failed to remount read-only after reading card ID: %v", err)
+					// This is critical - SD card remains read-write and could be corrupted
+					return cardID, false, fmt.Errorf("failed to remount read-only: %w", err)
 				}
 			}
 			return cardID, false, nil
@@ -324,8 +369,9 @@ func GetOrCreateCardID(mountPath string, monitor *Monitor) (string, bool, error)
 
 	// Write to card (filesystem should be read-write at this point)
 	if err := os.WriteFile(idPath, []byte(newID+"\n"), 0644); err != nil {
-		log.Printf("Warning: Could not write card ID to %s: %v", idPath, err)
-		// Continue anyway - we'll use this ID for this session
+		log.Printf("ERROR: Could not write card ID to %s: %v", idPath, err)
+		// This means the card will get a different ID next time
+		return newID, true, fmt.Errorf("failed to write card ID: %w", err)
 	} else {
 		log.Printf("Successfully wrote card ID to %s", idPath)
 	}
@@ -333,7 +379,9 @@ func GetOrCreateCardID(mountPath string, monitor *Monitor) (string, bool, error)
 	// Remount read-only now that we've written the ID
 	if monitor != nil {
 		if err := monitor.RemountReadOnly(); err != nil {
-			log.Printf("Warning: Failed to remount read-only: %v", err)
+			log.Printf("ERROR: Failed to remount read-only after writing card ID: %v", err)
+			// This is critical - SD card remains read-write and could be corrupted
+			return newID, true, fmt.Errorf("failed to remount read-only: %w", err)
 		}
 	}
 
