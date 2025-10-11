@@ -49,6 +49,8 @@ func main() {
 		appSettings.GetTransfers(),
 		appSettings.GetCheckers(),
 	)
+	// Update Google Photos settings
+	syncMgr.SetGooglePhotos(appSettings.GetGooglePhotosEnabled(), appSettings.GetGooglePhotosRemoteName())
 
 	// Initialize LED controller
 	ledCtrl, err := ledcontroller.NewController()
