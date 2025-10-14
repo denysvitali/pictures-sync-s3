@@ -129,7 +129,7 @@ func (m *Monitor) checkDevices() {
 
 	if device != "" && device != m.lastDevice {
 		// New device detected
-		log.Printf("SD card detected: %s", device)
+		log.Printf("SD card detected: %s (lastDevice was: %s)", device, m.lastDevice)
 
 		// Try to mount it
 		if err := m.mount(device); err != nil {
@@ -138,6 +138,7 @@ func (m *Monitor) checkDevices() {
 		}
 
 		m.lastDevice = device
+		log.Printf("SD card inserted: %s, mounted at %s", filepath.Base(device), m.mountPath)
 		m.eventChan <- Event{
 			Type:      EventInserted,
 			DevPath:   device,
@@ -174,6 +175,8 @@ func (m *Monitor) findUSBStorageDevice() string {
 	for _, dev := range matches {
 		if !m.isMountedElsewhere(dev) {
 			return dev
+		} else {
+			log.Printf("Device %s is mounted elsewhere, skipping", dev)
 		}
 	}
 
