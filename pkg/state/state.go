@@ -114,8 +114,9 @@ func (m *Manager) GetState() CurrentState {
 // SetStatus updates the current status
 func (m *Manager) SetStatus(status SyncStatus) error {
 	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.currentState.Status = status
-	m.mu.Unlock()
 
 	if err := m.save(); err != nil {
 		return err
@@ -128,9 +129,10 @@ func (m *Manager) SetStatus(status SyncStatus) error {
 // SetSDCard updates SD card mount status
 func (m *Manager) SetSDCard(mounted bool, path string) error {
 	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.currentState.SDCardMounted = mounted
 	m.currentState.SDCardPath = path
-	m.mu.Unlock()
 
 	if err := m.save(); err != nil {
 		return err
@@ -143,8 +145,9 @@ func (m *Manager) SetSDCard(mounted bool, path string) error {
 // SetAvailableDevices updates the list of available storage devices
 func (m *Manager) SetAvailableDevices(devices []DeviceInfo) error {
 	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.currentState.AvailableDevices = devices
-	m.mu.Unlock()
 
 	if err := m.save(); err != nil {
 		return err
@@ -157,8 +160,9 @@ func (m *Manager) SetAvailableDevices(devices []DeviceInfo) error {
 // SetNeedsDeviceSelect sets whether manual device selection is needed
 func (m *Manager) SetNeedsDeviceSelect(needs bool) error {
 	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.currentState.NeedsDeviceSelect = needs
-	m.mu.Unlock()
 
 	if err := m.save(); err != nil {
 		return err
@@ -202,9 +206,10 @@ func (m *Manager) StartSync(cardID string, totalFiles, totalBytes int64) (*SyncR
 // Saves to disk only periodically (throttled) to reduce SD card wear
 func (m *Manager) UpdateSyncProgress(filesSynced, bytesSynced int64, currentFile string, currentFileSize int64, transferSpeed float64, eta string) error {
 	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	// Return error if no sync is in progress (fail-fast instead of silent failure)
 	if m.currentState.CurrentSync == nil {
-		m.mu.Unlock()
 		return fmt.Errorf("no sync in progress")
 	}
 
@@ -220,11 +225,7 @@ func (m *Manager) UpdateSyncProgress(filesSynced, bytesSynced int64, currentFile
 	shouldSave := time.Since(m.lastProgressSave) >= m.progressSaveDelay
 	if shouldSave {
 		m.lastProgressSave = time.Now()
-	}
-	m.mu.Unlock()
-
-	// Save to disk if throttle period has elapsed
-	if shouldSave {
+		// Save to disk if throttle period has elapsed
 		if err := m.save(); err != nil {
 			return err
 		}
