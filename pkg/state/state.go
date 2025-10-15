@@ -202,14 +202,19 @@ func (m *Manager) StartSync(cardID string, totalFiles, totalBytes int64) (*SyncR
 // Saves to disk only periodically (throttled) to reduce SD card wear
 func (m *Manager) UpdateSyncProgress(filesSynced, bytesSynced int64, currentFile string, currentFileSize int64, transferSpeed float64, eta string) error {
 	m.mu.Lock()
-	if m.currentState.CurrentSync != nil {
-		m.currentState.CurrentSync.FilesSynced = filesSynced
-		m.currentState.CurrentSync.BytesSynced = bytesSynced
-		m.currentState.CurrentSync.CurrentFile = currentFile
-		m.currentState.CurrentSync.CurrentFileSize = currentFileSize
-		m.currentState.CurrentSync.TransferSpeed = transferSpeed
-		m.currentState.CurrentSync.ETA = eta
+	// Return error if no sync is in progress (fail-fast instead of silent failure)
+	if m.currentState.CurrentSync == nil {
+		m.mu.Unlock()
+		return fmt.Errorf("no sync in progress")
 	}
+
+	// Update all fields while holding lock to prevent race conditions
+	m.currentState.CurrentSync.FilesSynced = filesSynced
+	m.currentState.CurrentSync.BytesSynced = bytesSynced
+	m.currentState.CurrentSync.CurrentFile = currentFile
+	m.currentState.CurrentSync.CurrentFileSize = currentFileSize
+	m.currentState.CurrentSync.TransferSpeed = transferSpeed
+	m.currentState.CurrentSync.ETA = eta
 
 	// Throttle disk writes - only save every progressSaveDelay seconds
 	shouldSave := time.Since(m.lastProgressSave) >= m.progressSaveDelay
