@@ -3,6 +3,7 @@ package state
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"sync"
 	"time"
@@ -169,6 +170,13 @@ func (m *Manager) SetNeedsDeviceSelect(needs bool) error {
 
 // StartSync begins a new sync operation
 func (m *Manager) StartSync(cardID string, totalFiles, totalBytes int64) (*SyncRecord, error) {
+	// Check if sync is already in progress
+	m.mu.Lock()
+	if m.currentState.CurrentSync != nil {
+		m.mu.Unlock()
+		return nil, fmt.Errorf("sync already in progress for card %s", m.currentState.CurrentSync.CardID)
+	}
+
 	record := &SyncRecord{
 		ID:          fmt.Sprintf("%d", time.Now().Unix()),
 		StartTime:   time.Now(),
@@ -178,7 +186,6 @@ func (m *Manager) StartSync(cardID string, totalFiles, totalBytes int64) (*SyncR
 		CardID:      cardID,
 	}
 
-	m.mu.Lock()
 	m.currentState.CurrentSync = record
 	m.currentState.Status = StatusSyncing
 	m.mu.Unlock()
@@ -326,11 +333,20 @@ func (m *Manager) notifyListeners() {
 
 	// Send to listeners without holding the lock
 	for _, ch := range listenersCopy {
-		select {
-		case ch <- state:
-		default:
-			// Skip if channel is full
-		}
+		// Use panic recovery to handle closed channels gracefully
+		func(c chan CurrentState) {
+			defer func() {
+				if r := recover(); r != nil {
+					// Channel was closed, log and continue
+					log.Printf("Warning: Failed to notify listener (channel closed): %v", r)
+				}
+			}()
+			select {
+			case c <- state:
+			default:
+				// Skip if channel is full
+			}
+		}(ch)
 	}
 }
 
@@ -402,7 +418,10 @@ func (m *Manager) Reload() error {
 
 // saveHistory persists sync history to disk
 func (m *Manager) saveHistory() error {
+	// Hold read lock while marshaling to prevent race conditions
+	m.mu.RLock()
 	data, err := json.MarshalIndent(m.history, "", "  ")
+	m.mu.RUnlock()
 	if err != nil {
 		return fmt.Errorf("failed to marshal history: %w", err)
 	}

@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,7 +36,36 @@ var (
 	authPassword string
 	upgrader   = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
-			return true // Allow all origins for now
+			// Allow same-origin requests and local network addresses
+			origin := r.Header.Get("Origin")
+			if origin == "" {
+				return true // Allow requests without Origin header (same-origin)
+			}
+
+			// Parse the origin URL
+			u, err := url.Parse(origin)
+			if err != nil {
+				return false
+			}
+
+			// Allow same host
+			if u.Host == r.Host {
+				return true
+			}
+
+			// Allow local network addresses (for Gokrazy appliance access)
+			// This includes private IP ranges and .local domains
+			host := strings.ToLower(u.Hostname())
+			if strings.HasSuffix(host, ".local") ||
+				strings.HasPrefix(host, "192.168.") ||
+				strings.HasPrefix(host, "10.") ||
+				strings.HasPrefix(host, "172.") ||
+				host == "localhost" ||
+				host == "127.0.0.1" {
+				return true
+			}
+
+			return false
 		},
 	}
 )
@@ -2653,27 +2683,19 @@ func handleHistory(w http.ResponseWriter, r *http.Request) {
 func handleConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		// Return current config status and content
+		// Return current config status (but NOT the content with credentials)
 		hasConfig, err := state.EnsureRcloneConfig()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		// Read the actual config content
-		configContent := ""
-		if hasConfig {
-			content, err := os.ReadFile(state.GetRcloneConfigPath())
-			if err == nil {
-				configContent = string(content)
-			}
-		}
-
 		remotes, _ := syncMgr.ListRemotes()
 		jsonResponse(w, map[string]interface{}{
 			"configured": hasConfig,
 			"remotes":    remotes,
-			"content":    configContent,
+			// SECURITY: Never return config content - it contains cloud credentials
+			// Users can view/edit config via rclone config commands on the device
 		})
 
 	case http.MethodPost:
@@ -2910,6 +2932,16 @@ func handleWiFiStatus(w http.ResponseWriter, r *http.Request) {
 
 // handleWebSocket provides real-time status updates
 func handleWebSocket(w http.ResponseWriter, r *http.Request) {
+	// Enforce authentication on WebSocket connections
+	username, password, ok := r.BasicAuth()
+	usernameMatch := subtle.ConstantTimeCompare([]byte(username), []byte("gokrazy")) == 1
+	passwordMatch := subtle.ConstantTimeCompare([]byte(password), []byte(authPassword)) == 1
+
+	if !ok || !usernameMatch || !passwordMatch {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("WebSocket upgrade error: %v", err)

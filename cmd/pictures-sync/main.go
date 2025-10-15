@@ -141,6 +141,14 @@ func handleCardInserted(event sdmonitor.Event, monitor *sdmonitor.Monitor, state
 			return
 		}
 
+		// Handle empty cards (zero files) with user-friendly message
+		if totalFiles == 0 {
+			log.Println("Note: Card has no photos yet")
+			// Set at least 1 file to avoid division by zero in progress bar
+			totalFiles = 1
+			totalBytes = 1
+		}
+
 		// Get or create card ID (pass monitor so it can remount read-only after writing)
 		cardID, isNewCard, err := sdmonitor.GetOrCreateCardID(event.MountPath, monitor)
 		if err != nil {
@@ -156,8 +164,9 @@ func handleCardInserted(event sdmonitor.Event, monitor *sdmonitor.Monitor, state
 
 			// Check if card was reformatted
 			lastSync := stateMgr.FindLastSyncByCardID(cardID)
-			if lastSync != nil {
+			if lastSync != nil && lastSync.FilesTotal > 0 {
 				// Calculate percentage of files compared to last sync
+				// Note: totalFiles has been adjusted to at least 1 above if it was 0
 				percentageOfLast := float64(totalFiles) / float64(lastSync.FilesTotal)
 				threshold := appSettings.GetReformatThreshold()
 
