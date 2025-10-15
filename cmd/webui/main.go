@@ -1403,21 +1403,70 @@ key = ..."></textarea>
         <!-- Files Tab -->
         <div id="files-tab" class="tab-content">
             <div class="card">
-                <h2>Remote Files</h2>
+                <h2>📁 Remote Files Browser</h2>
                 <div id="files-alert"></div>
 
-                <div style="margin-bottom: 1rem;">
-                    <div id="current-path" style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 0.5rem;">
-                        Path: <span class="code" id="path-display">/</span>
-                    </div>
-                    <button class="btn btn-secondary" onclick="loadFiles('')">🏠 Root</button>
-                    <button class="btn btn-secondary" onclick="refreshFiles()">🔄 Refresh</button>
+                <!-- View Selector -->
+                <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
+                    <button class="btn btn-secondary" id="view-cards-btn" onclick="switchFilesView('cards')">
+                        🗂️ Browse by Card
+                    </button>
+                    <button class="btn btn-secondary" id="view-folder-btn" onclick="switchFilesView('folder')">
+                        📂 Browse by Folder
+                    </button>
+                    <button class="btn btn-secondary" onclick="refreshFilesView()">🔄 Refresh</button>
                 </div>
 
-                <div id="files-display">
-                    <div class="loading">
-                        <div class="spinner"></div>
-                        <p>Loading files...</p>
+                <!-- Cards View -->
+                <div id="files-cards-view" style="display: none;">
+                    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+                        Browse photos organized by SD card. Each card represents a unique SD card that has been synced.
+                    </p>
+                    <div id="cards-list">
+                        <div class="loading">
+                            <div class="spinner"></div>
+                            <p>Loading cards...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Folder View -->
+                <div id="files-folder-view" style="display: none;">
+                    <!-- Breadcrumb Navigation -->
+                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
+                        <span style="color: var(--text-secondary); font-size: 0.875rem;">📍 Path:</span>
+                        <div id="breadcrumb-nav" style="display: flex; align-items: center; gap: 0.25rem; flex-wrap: wrap;"></div>
+                    </div>
+
+                    <!-- Search Box -->
+                    <div style="margin-bottom: 1rem;">
+                        <input
+                            type="text"
+                            id="files-search"
+                            placeholder="🔍 Search files..."
+                            style="width: 100%; padding: 0.75rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text);"
+                            oninput="filterFiles()"
+                        />
+                    </div>
+
+                    <!-- Files Display -->
+                    <div id="files-display">
+                        <div class="loading">
+                            <div class="spinner"></div>
+                            <p>Loading files...</p>
+                        </div>
+                    </div>
+
+                    <!-- Pagination Controls -->
+                    <div id="pagination-controls" style="display: none; margin-top: 1rem; text-align: center;">
+                        <div style="display: inline-flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                            <button class="btn btn-secondary" id="prev-page-btn" onclick="loadPrevPage()">← Previous</button>
+                            <span id="page-info" style="padding: 0 1rem; color: var(--text-secondary);"></span>
+                            <button class="btn btn-secondary" id="next-page-btn" onclick="loadNextPage()">Next →</button>
+                        </div>
+                        <div style="margin-top: 0.5rem; color: var(--text-secondary); font-size: 0.875rem;">
+                            <span id="items-info"></span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1468,7 +1517,7 @@ key = ..."></textarea>
             if (tabName === 'devices') refreshDevices();
             if (tabName === 'gallery') loadGallery('DCIM');
             if (tabName === 'history') loadHistory();
-            if (tabName === 'files') loadFiles('');
+            if (tabName === 'files') switchFilesView('cards');
             if (tabName === 'wifi') loadWiFiStatus();
             if (tabName === 'network') loadNetworkInfo();
             if (tabName === 'config') loadConfig();
@@ -2093,17 +2142,125 @@ key = ..."></textarea>
         }
 
         // Files browser functions
+        // Remote Files Browser State
         let currentFilesPath = '';
+        let currentFilesView = 'cards'; // 'cards' or 'folder'
+        let currentPage = 1;
+        let currentPageSize = 100;
+        let currentPaginationData = null;
+        let allFilesCache = []; // For client-side search
 
-        function loadFiles(path) {
+        // Switch between card view and folder view
+        function switchFilesView(view) {
+            currentFilesView = view;
+
+            const cardsBtn = document.getElementById('view-cards-btn');
+            const folderBtn = document.getElementById('view-folder-btn');
+            const cardsView = document.getElementById('files-cards-view');
+            const folderView = document.getElementById('files-folder-view');
+
+            if (view === 'cards') {
+                cardsBtn.classList.add('btn-primary');
+                cardsBtn.classList.remove('btn-secondary');
+                folderBtn.classList.remove('btn-primary');
+                folderBtn.classList.add('btn-secondary');
+                cardsView.style.display = 'block';
+                folderView.style.display = 'none';
+                loadCards();
+            } else {
+                folderBtn.classList.add('btn-primary');
+                folderBtn.classList.remove('btn-secondary');
+                cardsBtn.classList.remove('btn-primary');
+                cardsBtn.classList.add('btn-secondary');
+                folderView.style.display = 'block';
+                cardsView.style.display = 'none';
+                loadFilesPaginated('', 1);
+            }
+        }
+
+        function refreshFilesView() {
+            if (currentFilesView === 'cards') {
+                loadCards();
+            } else {
+                loadFilesPaginated(currentFilesPath, currentPage);
+            }
+        }
+
+        // Load cards list
+        function loadCards() {
+            const cardsList = document.getElementById('cards-list');
+            cardsList.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading cards...</p></div>';
+
+            fetch('/api/files/cards')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.error) {
+                        showFilesAlert(data.error, 'error');
+                        cardsList.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 2rem;">Failed to load cards</p>';
+                        return;
+                    }
+
+                    displayCards(data.cards);
+                })
+                .catch(err => {
+                    showFilesAlert('Failed to load cards: ' + err.message, 'error');
+                    cardsList.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 2rem;">Failed to load cards</p>';
+                });
+        }
+
+        function displayCards(cards) {
+            const cardsList = document.getElementById('cards-list');
+
+            if (!cards || cards.length === 0) {
+                cardsList.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 2rem;">No cards found. Insert an SD card and sync to see it here.</p>';
+                return;
+            }
+
+            let html = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem;">';
+
+            cards.forEach(card => {
+                const cardName = card.name;
+                const modTime = new Date(card.mod_time).toLocaleString();
+
+                html += '<div style="border: 1px solid var(--border); border-radius: 8px; padding: 1.5rem; cursor: pointer; transition: all 0.2s; background: var(--bg);" ';
+                html += 'onclick="browseCard(\'' + cardName + '\')" ';
+                html += 'onmouseover="this.style.borderColor=\'var(--primary)\'; this.style.transform=\'translateY(-2px)\'; this.style.boxShadow=\'0 4px 12px rgba(0,0,0,0.1)\';" ';
+                html += 'onmouseout="this.style.borderColor=\'var(--border)\'; this.style.transform=\'translateY(0)\'; this.style.boxShadow=\'none\';">';
+                html += '<div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem;">';
+                html += '<span style="font-size: 2rem;">💾</span>';
+                html += '<div>';
+                html += '<div style="font-weight: 600; font-size: 1.1rem; color: var(--text);">' + cardName + '</div>';
+                html += '<div style="font-size: 0.875rem; color: var(--text-secondary); margin-top: 0.25rem;">Last synced: ' + modTime + '</div>';
+                html += '</div>';
+                html += '</div>';
+                html += '<div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border);">';
+                html += '<span style="color: var(--primary); font-size: 0.875rem; font-weight: 500;">Browse photos →</span>';
+                html += '</div>';
+                html += '</div>';
+            });
+
+            html += '</div>';
+            cardsList.innerHTML = html;
+        }
+
+        function browseCard(cardName) {
+            switchFilesView('folder');
+            loadFilesPaginated(cardName + '/DCIM', 1);
+        }
+
+        // Load files with pagination
+        function loadFilesPaginated(path, page) {
             currentFilesPath = path;
-            const pathDisplay = document.getElementById('path-display');
-            pathDisplay.textContent = path || '/';
+            currentPage = page;
+
+            updateBreadcrumb(path);
 
             const filesDisplay = document.getElementById('files-display');
             filesDisplay.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading files...</p></div>';
 
-            fetch('/api/files?path=' + encodeURIComponent(path))
+            const url = '/api/files/paginated?path=' + encodeURIComponent(path) + '&page=' + page + '&page_size=' + currentPageSize;
+
+            fetch(url)
                 .then(r => r.json())
                 .then(data => {
                     if (data.error) {
@@ -2112,7 +2269,10 @@ key = ..."></textarea>
                         return;
                     }
 
-                    displayFiles(data.files, path);
+                    currentPaginationData = data;
+                    allFilesCache = data.files; // Cache for search
+                    displayFilesPaginated(data);
+                    updatePaginationControls(data);
                 })
                 .catch(err => {
                     showFilesAlert('Failed to load files: ' + err.message, 'error');
@@ -2120,17 +2280,75 @@ key = ..."></textarea>
                 });
         }
 
-        function refreshFiles() {
-            loadFiles(currentFilesPath);
+        function loadPrevPage() {
+            if (currentPage > 1) {
+                loadFilesPaginated(currentFilesPath, currentPage - 1);
+            }
         }
 
-        function displayFiles(files, path) {
+        function loadNextPage() {
+            if (currentPaginationData && currentPaginationData.has_more) {
+                loadFilesPaginated(currentFilesPath, currentPage + 1);
+            }
+        }
+
+        function updateBreadcrumb(path) {
+            const breadcrumbNav = document.getElementById('breadcrumb-nav');
+
+            const parts = path ? path.split('/').filter(p => p) : [];
+            let html = '<a href="#" onclick="loadFilesPaginated(\'\', 1); return false;" style="color: var(--primary); text-decoration: none; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.875rem;">🏠 Root</a>';
+
+            let currentPath = '';
+            parts.forEach((part, index) => {
+                currentPath += (index > 0 ? '/' : '') + part;
+                const pathForLink = currentPath;
+                html += '<span style="color: var(--text-secondary);">/</span>';
+                html += '<a href="#" onclick="loadFilesPaginated(\'' + pathForLink + '\', 1); return false;" style="color: var(--primary); text-decoration: none; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.875rem;">' + part + '</a>';
+            });
+
+            breadcrumbNav.innerHTML = html;
+        }
+
+        function updatePaginationControls(data) {
+            const controls = document.getElementById('pagination-controls');
+            const prevBtn = document.getElementById('prev-page-btn');
+            const nextBtn = document.getElementById('next-page-btn');
+            const pageInfo = document.getElementById('page-info');
+            const itemsInfo = document.getElementById('items-info');
+
+            if (data.total_pages > 1) {
+                controls.style.display = 'block';
+                prevBtn.disabled = data.page === 1;
+                nextBtn.disabled = !data.has_more;
+                pageInfo.textContent = 'Page ' + data.page + ' of ' + data.total_pages;
+
+                const start = (data.page - 1) * data.page_size + 1;
+                const end = Math.min(data.page * data.page_size, data.total);
+                itemsInfo.textContent = 'Showing ' + start + '-' + end + ' of ' + data.total + ' items';
+            } else {
+                controls.style.display = 'none';
+            }
+        }
+
+        // Backward compatibility
+        function refreshFiles() {
+            refreshFilesView();
+        }
+
+        function loadFiles(path) {
+            loadFilesPaginated(path, 1);
+        }
+
+        function displayFilesPaginated(data) {
             const filesDisplay = document.getElementById('files-display');
 
-            if (!files || files.length === 0) {
+            if (!data || !data.files || data.files.length === 0) {
                 filesDisplay.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 2rem;">No files found</p>';
                 return;
             }
+
+            const files = data.files;
+            const path = data.path;
 
             // Sort files: directories first, then by name
             files.sort((a, b) => {
@@ -2159,10 +2377,10 @@ key = ..."></textarea>
                 const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
                 const icon = file.is_dir ? '📁' : (isImage ? '🖼️' : '📄');
 
-                html += '<tr style="border-bottom: 1px solid var(--border);">';
+                html += '<tr style="border-bottom: 1px solid var(--border); transition: background 0.2s;" onmouseover="this.style.background=\'var(--bg)\'" onmouseout="this.style.background=\'transparent\'">';
 
                 if (file.is_dir) {
-                    html += '<td style="padding: 0.75rem;"><a href="#" onclick="loadFiles(\'' + filePath + '\'); return false;" style="color: var(--primary); text-decoration: none; font-weight: 500;">' + icon + ' ' + fileName + '</a></td>';
+                    html += '<td style="padding: 0.75rem;"><a href="#" onclick="loadFilesPaginated(\'' + filePath + '\', 1); return false;" style="color: var(--primary); text-decoration: none; font-weight: 500;">' + icon + ' ' + fileName + '</a></td>';
                 } else if (isImage) {
                     html += '<td style="padding: 0.75rem;"><a href="#" onclick="viewImage(\'' + filePath.replace(/'/g, "\\'") + '\', \'' + fileName.replace(/'/g, "\\'") + '\'); return false;" style="color: var(--primary); text-decoration: none; font-weight: 500;">' + icon + ' ' + fileName + '</a></td>';
                 } else {
@@ -2176,6 +2394,41 @@ key = ..."></textarea>
 
             html += '</tbody></table></div>';
             filesDisplay.innerHTML = html;
+        }
+
+        function filterFiles() {
+            const searchInput = document.getElementById('files-search');
+            const query = searchInput.value.toLowerCase().trim();
+
+            if (!currentPaginationData || !currentPaginationData.files) {
+                return;
+            }
+
+            const files = currentPaginationData.files;
+
+            if (!query) {
+                // Show all files if no search query
+                displayFilesPaginated(currentPaginationData);
+                return;
+            }
+
+            // Filter files by name
+            const filtered = files.filter(file =>
+                file.name.toLowerCase().includes(query)
+            );
+
+            // Create filtered result
+            const filteredData = {
+                files: filtered,
+                path: currentPaginationData.path,
+                total: filtered.length,
+                page: 1,
+                page_size: filtered.length,
+                total_pages: 1,
+                has_more: false
+            };
+
+            displayFilesPaginated(filteredData);
         }
 
         function showFilesAlert(message, type) {
