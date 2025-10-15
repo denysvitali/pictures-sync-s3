@@ -207,6 +207,8 @@ func (m *Manager) save() error {
 		return fmt.Errorf("failed to write wifi config: %w", err)
 	}
 	if err := os.Rename(tmpFile, WiFiConfigPath); err != nil {
+		// Clean up temp file on rename failure
+		os.Remove(tmpFile)
 		return fmt.Errorf("failed to rename wifi config: %w", err)
 	}
 
