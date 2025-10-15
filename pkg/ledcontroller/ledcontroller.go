@@ -29,10 +29,13 @@ var (
 
 // Controller manages LED indicators
 type Controller struct {
-	actLED      *LED
-	pwrLED      *LED
+	actLED         *LED
+	pwrLED         *LED
 	currentPattern LEDPattern
-	stopChan    chan struct{}
+	stopChan       chan struct{} // Stops the main monitoring goroutine
+	patternStopChan chan struct{} // Stops the current LED pattern goroutine
+	stateUpdates   chan state.CurrentState // State subscription channel
+	stateMgr       *state.Manager // Reference to state manager for cleanup
 }
 
 // LED represents a single LED
@@ -45,7 +48,8 @@ type LED struct {
 // NewController creates a new LED controller
 func NewController() (*Controller, error) {
 	c := &Controller{
-		stopChan: make(chan struct{}),
+		stopChan:       make(chan struct{}),
+		patternStopChan: make(chan struct{}),
 	}
 
 	// Try to find ACT LED (green, primary status indicator)
@@ -98,8 +102,11 @@ func (c *Controller) Start(stateMgr *state.Manager) error {
 		return nil
 	}
 
+	// Store reference for cleanup
+	c.stateMgr = stateMgr
+
 	// Subscribe to state changes
-	stateUpdates := stateMgr.Subscribe()
+	c.stateUpdates = stateMgr.Subscribe()
 
 	go func() {
 		var currentStatus state.SyncStatus
@@ -107,7 +114,7 @@ func (c *Controller) Start(stateMgr *state.Manager) error {
 			select {
 			case <-c.stopChan:
 				return
-			case state := <-stateUpdates:
+			case state := <-c.stateUpdates:
 				if state.Status != currentStatus {
 					currentStatus = state.Status
 					c.updatePattern(currentStatus)
@@ -119,29 +126,41 @@ func (c *Controller) Start(stateMgr *state.Manager) error {
 	return nil
 }
 
-// Stop stops the LED controller
+// Stop stops the LED controller and cleans up resources
 func (c *Controller) Stop() {
+	// Stop the main monitoring goroutine
 	close(c.stopChan)
+
+	// Stop the current pattern goroutine
+	if c.patternStopChan != nil {
+		close(c.patternStopChan)
+	}
+
+	// Unsubscribe from state updates to prevent memory leak
+	if c.stateMgr != nil && c.stateUpdates != nil {
+		c.stateMgr.Unsubscribe(c.stateUpdates)
+	}
+
 	// Turn off LEDs
 	if c.actLED != nil && c.actLED.available {
 		c.actLED.SetBrightness(0)
+	}
+	if c.pwrLED != nil && c.pwrLED.available {
+		c.pwrLED.SetBrightness(0)
 	}
 }
 
 // updatePattern updates the LED pattern based on status
 func (c *Controller) updatePattern(status state.SyncStatus) {
-	// Stop current pattern by sending signal on existing channel
-	if c.stopChan != nil {
-		select {
-		case c.stopChan <- struct{}{}:
-		default:
-		}
+	// Stop current pattern goroutine
+	if c.patternStopChan != nil {
+		close(c.patternStopChan)
 		// Wait a bit for goroutine to stop
 		time.Sleep(10 * time.Millisecond)
 	}
 
 	// Create new stop channel for the new pattern
-	c.stopChan = make(chan struct{})
+	c.patternStopChan = make(chan struct{})
 
 	switch status {
 	case state.StatusIdle:
@@ -181,7 +200,7 @@ func (c *Controller) runPattern(led *LED, pattern LEDPattern) {
 	count := 0
 	for {
 		select {
-		case <-c.stopChan:
+		case <-c.patternStopChan:
 			return
 		default:
 		}
@@ -195,6 +214,14 @@ func (c *Controller) runPattern(led *LED, pattern LEDPattern) {
 		// Turn on
 		led.SetBrightness(255)
 		time.Sleep(pattern.OnDuration)
+
+		// Check if stopped during sleep
+		select {
+		case <-c.patternStopChan:
+			led.SetBrightness(0)
+			return
+		default:
+		}
 
 		// Turn off
 		led.SetBrightness(0)
