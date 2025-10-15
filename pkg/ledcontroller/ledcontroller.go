@@ -130,13 +130,17 @@ func (c *Controller) Stop() {
 
 // updatePattern updates the LED pattern based on status
 func (c *Controller) updatePattern(status state.SyncStatus) {
-	// Stop current pattern
-	select {
-	case c.stopChan <- struct{}{}:
-	default:
+	// Stop current pattern by sending signal on existing channel
+	if c.stopChan != nil {
+		select {
+		case c.stopChan <- struct{}{}:
+		default:
+		}
+		// Wait a bit for goroutine to stop
+		time.Sleep(10 * time.Millisecond)
 	}
 
-	// Start new pattern
+	// Create new stop channel for the new pattern
 	c.stopChan = make(chan struct{})
 
 	switch status {

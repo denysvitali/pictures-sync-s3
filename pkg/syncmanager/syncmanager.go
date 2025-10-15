@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +27,62 @@ import (
 	_ "github.com/rclone/rclone/backend/azureblob" // Azure Blob Storage
 	_ "github.com/rclone/rclone/backend/local"     // Local filesystem (useful for testing)
 )
+
+// validateCardID checks if a card ID is safe to use in paths
+func validateCardID(cardID string) error {
+	if cardID == "" {
+		return fmt.Errorf("card ID cannot be empty")
+	}
+
+	// Check for path traversal attempts
+	if strings.Contains(cardID, "..") || strings.Contains(cardID, "/") || strings.Contains(cardID, "\\") {
+		return fmt.Errorf("card ID contains invalid characters")
+	}
+
+	// Ensure card ID matches expected format (card-XXXXXXXX)
+	validCardID := regexp.MustCompile(`^card-[a-zA-Z0-9]{8}$`)
+	if !validCardID.MatchString(cardID) {
+		return fmt.Errorf("card ID format invalid, expected: card-XXXXXXXX")
+	}
+
+	return nil
+}
+
+// isRetryableError determines if an error is worth retrying
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errStr := strings.ToLower(err.Error())
+
+	// Network-related errors
+	if strings.Contains(errStr, "connection refused") ||
+		strings.Contains(errStr, "connection reset") ||
+		strings.Contains(errStr, "timeout") ||
+		strings.Contains(errStr, "temporary failure") ||
+		strings.Contains(errStr, "no such host") ||
+		strings.Contains(errStr, "network is unreachable") ||
+		strings.Contains(errStr, "broken pipe") {
+		return true
+	}
+
+	// Rate limiting errors
+	if strings.Contains(errStr, "rate limit") ||
+		strings.Contains(errStr, "too many requests") ||
+		strings.Contains(errStr, "429") {
+		return true
+	}
+
+	// Temporary server errors
+	if strings.Contains(errStr, "503") ||
+		strings.Contains(errStr, "502") ||
+		strings.Contains(errStr, "500") {
+		return true
+	}
+
+	return false
+}
 
 // Manager manages rclone sync operations
 type Manager struct {
@@ -71,6 +128,11 @@ func NewManager(configPath, remoteName, remotePath string, stateMgr *state.Manag
 
 // GetRemoteSize returns the total size of files already on the remote for a given card ID
 func (m *Manager) GetRemoteSize(cardID string) (int64, error) {
+	// Sanitize cardID to prevent path traversal
+	if err := validateCardID(cardID); err != nil {
+		return 0, fmt.Errorf("invalid card ID: %w", err)
+	}
+
 	// Load rclone config from custom path
 	if err := config.SetConfigPath(m.configPath); err != nil {
 		return 0, fmt.Errorf("failed to set config path: %w", err)
@@ -107,6 +169,11 @@ func (m *Manager) GetRemoteSize(cardID string) (int64, error) {
 
 // Sync synchronizes files from source to remote
 func (m *Manager) Sync(sourcePath, cardID string, totalFiles int, totalBytes int64) error {
+	// Sanitize cardID to prevent path traversal
+	if err := validateCardID(cardID); err != nil {
+		return fmt.Errorf("invalid card ID: %w", err)
+	}
+
 	m.mu.Lock()
 	if m.isRunning {
 		m.mu.Unlock()
@@ -184,15 +251,51 @@ func (m *Manager) Sync(sourcePath, cardID string, totalFiles int, totalBytes int
 	done := make(chan struct{})
 	go m.monitorProgress(ctx, stats, totalFiles, totalBytes, alreadySyncedBytes, done)
 
-	// Perform sync operation
+	// Perform sync operation with retry logic
 	log.Printf("Starting sync operation...")
-	err = rcsync.Sync(ctx, dstFs, srcFs, false)
+	const maxRetries = 3
+	var lastErr error
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		// Check if context was cancelled
+		select {
+		case <-ctx.Done():
+			close(done)
+			return fmt.Errorf("sync cancelled")
+		default:
+		}
+
+		err = rcsync.Sync(ctx, dstFs, srcFs, false)
+		if err == nil {
+			// Success!
+			break
+		}
+
+		lastErr = err
+
+		// Check if it's a network error and we should retry
+		if attempt < maxRetries && isRetryableError(err) {
+			log.Printf("Sync attempt %d failed with retryable error: %v. Retrying in 5 seconds...", attempt, err)
+
+			// Wait before retry (with context cancellation check)
+			select {
+			case <-time.After(5 * time.Second):
+				// Continue to next attempt
+			case <-ctx.Done():
+				close(done)
+				return fmt.Errorf("sync cancelled during retry wait")
+			}
+		} else {
+			// Non-retryable error or last attempt
+			break
+		}
+	}
 
 	// Stop progress monitoring
 	close(done)
 
-	if err != nil {
-		return fmt.Errorf("sync failed: %w", err)
+	if lastErr != nil {
+		return fmt.Errorf("sync failed after %d attempts: %w", maxRetries, lastErr)
 	}
 
 	log.Printf("Sync completed successfully")
