@@ -356,11 +356,10 @@ func (m *Manager) notifyListeners() {
 }
 
 // save persists current state to disk
+// IMPORTANT: Caller must hold at least a read lock (RLock or Lock)
 func (m *Manager) save() error {
-	// Hold read lock while marshaling to prevent race conditions
-	m.mu.RLock()
+	// Marshal state (caller already holds lock)
 	data, err := json.MarshalIndent(m.currentState, "", "  ")
-	m.mu.RUnlock()
 	if err != nil {
 		return fmt.Errorf("failed to marshal state: %w", err)
 	}
@@ -424,11 +423,10 @@ func (m *Manager) Reload() error {
 }
 
 // saveHistory persists sync history to disk
+// IMPORTANT: Caller must hold at least a read lock (RLock or Lock)
 func (m *Manager) saveHistory() error {
-	// Hold read lock while marshaling to prevent race conditions
-	m.mu.RLock()
+	// Marshal history (caller already holds lock)
 	data, err := json.MarshalIndent(m.history, "", "  ")
-	m.mu.RUnlock()
 	if err != nil {
 		return fmt.Errorf("failed to marshal history: %w", err)
 	}
