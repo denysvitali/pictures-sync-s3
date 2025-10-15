@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/rand"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -15,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/sdmonitor"
@@ -29,12 +32,14 @@ import (
 )
 
 var (
-	stateMgr   *state.Manager
-	syncMgr    *syncmanager.Manager
-	wifiMgr    *wifimanager.Manager
-	appSettings *settings.Settings
+	stateMgr     *state.Manager
+	syncMgr      *syncmanager.Manager
+	wifiMgr      *wifimanager.Manager
+	appSettings  *settings.Settings
 	authPassword string
-	upgrader   = websocket.Upgrader{
+	csrfToken    string
+	csrfMutex    sync.RWMutex
+	upgrader     = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
 			// Allow same-origin requests and local network addresses
 			origin := r.Header.Get("Origin")
@@ -106,6 +111,48 @@ func logConfiguredWiFiNetworks() {
 	}
 }
 
+// generateCSRFToken creates a new CSRF token
+func generateCSRFToken() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		log.Fatal("Failed to generate CSRF token:", err)
+	}
+	return base64.StdEncoding.EncodeToString(b)
+}
+
+// getCSRFToken returns the current CSRF token
+func getCSRFToken() string {
+	csrfMutex.RLock()
+	defer csrfMutex.RUnlock()
+	return csrfToken
+}
+
+// validateCSRFToken checks if the provided token matches the current token
+func validateCSRFToken(token string) bool {
+	if token == "" {
+		return false
+	}
+	csrfMutex.RLock()
+	defer csrfMutex.RUnlock()
+	return subtle.ConstantTimeCompare([]byte(token), []byte(csrfToken)) == 1
+}
+
+// csrfProtection is middleware that validates CSRF tokens for state-changing requests
+func csrfProtection(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Only check CSRF for state-changing methods
+		if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodDelete {
+			token := r.Header.Get("X-CSRF-Token")
+			if !validateCSRFToken(token) {
+				http.Error(w, "Invalid CSRF token", http.StatusForbidden)
+				log.Printf("CSRF validation failed for %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
+				return
+			}
+		}
+		next(w, r)
+	}
+}
+
 func main() {
 	// Enable caller reporting in logs (file:line)
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
@@ -161,20 +208,27 @@ func main() {
 		logConfiguredWiFiNetworks()
 	}
 
+	// Initialize CSRF token
+	csrfMutex.Lock()
+	csrfToken = generateCSRFToken()
+	csrfMutex.Unlock()
+	log.Println("CSRF protection enabled")
+
 	// Setup HTTP handlers
+	http.HandleFunc("/api/csrf-token", handleCSRFToken) // GET endpoint for CSRF token
 	http.HandleFunc("/api/status", handleStatus)
 	http.HandleFunc("/api/history", handleHistory)
-	http.HandleFunc("/api/config", handleConfig)
-	http.HandleFunc("/api/config/test", handleConfigTest)
-	http.HandleFunc("/api/settings", handleSettings)
+	http.HandleFunc("/api/config", csrfProtection(handleConfig))                  // CSRF protected
+	http.HandleFunc("/api/config/test", csrfProtection(handleConfigTest))          // CSRF protected
+	http.HandleFunc("/api/settings", csrfProtection(handleSettings))               // CSRF protected
 	http.HandleFunc("/api/devices", handleDevices)
-	http.HandleFunc("/api/devices/select", handleDeviceSelect)
-	http.HandleFunc("/api/sync/start", handleSyncStart)
-	http.HandleFunc("/api/sync/cancel", handleSyncCancel)
+	http.HandleFunc("/api/devices/select", csrfProtection(handleDeviceSelect))     // CSRF protected
+	http.HandleFunc("/api/sync/start", csrfProtection(handleSyncStart))            // CSRF protected
+	http.HandleFunc("/api/sync/cancel", csrfProtection(handleSyncCancel))          // CSRF protected
 	http.HandleFunc("/api/wifi/scan", handleWiFiScan)
 	http.HandleFunc("/api/wifi/networks", handleWiFiNetworks)
-	http.HandleFunc("/api/wifi/connect", handleWiFiConnect)
-	http.HandleFunc("/api/wifi/disconnect", handleWiFiDisconnect)
+	http.HandleFunc("/api/wifi/connect", csrfProtection(handleWiFiConnect))        // CSRF protected
+	http.HandleFunc("/api/wifi/disconnect", csrfProtection(handleWiFiDisconnect))  // CSRF protected
 	http.HandleFunc("/api/wifi/status", handleWiFiStatus)
 	http.HandleFunc("/api/files", handleFiles)
 	http.HandleFunc("/api/files/view", handleFileView)
@@ -2650,6 +2704,18 @@ key = ..."></textarea>
     </script>
 </body>
 </html>`
+}
+
+// handleCSRFToken returns the current CSRF token
+func handleCSRFToken(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	jsonResponse(w, map[string]string{
+		"csrf_token": getCSRFToken(),
+	})
 }
 
 // handleStatus returns current system status
