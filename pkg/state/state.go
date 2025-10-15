@@ -371,6 +371,8 @@ func (m *Manager) save() error {
 		return fmt.Errorf("failed to write state file: %w", err)
 	}
 	if err := os.Rename(tmpFile, StateFile); err != nil {
+		// Clean up temp file on rename failure
+		os.Remove(tmpFile)
 		return fmt.Errorf("failed to rename state file: %w", err)
 	}
 
@@ -436,6 +438,8 @@ func (m *Manager) saveHistory() error {
 		return fmt.Errorf("failed to write history file: %w", err)
 	}
 	if err := os.Rename(tmpFile, HistoryFile); err != nil {
+		// Clean up temp file on rename failure
+		os.Remove(tmpFile)
 		return fmt.Errorf("failed to rename history file: %w", err)
 	}
 

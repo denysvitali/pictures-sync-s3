@@ -93,6 +93,8 @@ func (s *Settings) Save() error {
 		return fmt.Errorf("failed to write settings file: %w", err)
 	}
 	if err := os.Rename(tmpFile, SettingsFile); err != nil {
+		// Clean up temp file on rename failure
+		os.Remove(tmpFile)
 		return fmt.Errorf("failed to rename settings file: %w", err)
 	}
 
