@@ -8,6 +8,7 @@ import (
 	"log"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -531,6 +532,118 @@ type FileInfo struct {
 	Size    int64     `json:"size"`
 	ModTime time.Time `json:"mod_time"`
 	IsDir   bool      `json:"is_dir"`
+}
+
+// FileListResult represents paginated file listing result
+type FileListResult struct {
+	Files      []FileInfo `json:"files"`
+	Path       string     `json:"path"`
+	Total      int        `json:"total"`
+	Page       int        `json:"page"`
+	PageSize   int        `json:"page_size"`
+	TotalPages int        `json:"total_pages"`
+	HasMore    bool       `json:"has_more"`
+}
+
+// ListCardIDs lists all card IDs (card-* directories) in the photos folder
+func (m *Manager) ListCardIDs() ([]FileInfo, error) {
+	// Load rclone config
+	if err := config.SetConfigPath(m.configPath); err != nil {
+		return nil, fmt.Errorf("failed to set config path: %w", err)
+	}
+	configfile.Install()
+	storage := &configfile.Storage{}
+	if err := storage.Load(); err != nil {
+		return nil, fmt.Errorf("failed to load config: %w", err)
+	}
+
+	ctx := context.Background()
+
+	// List root photos directory
+	fullPath := m.remoteName + ":" + m.remotePath
+	fsys, err := fs.NewFs(ctx, fullPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to access remote path: %w", err)
+	}
+
+	entries, err := fsys.List(ctx, "")
+	if err != nil {
+		return nil, fmt.Errorf("failed to list entries: %w", err)
+	}
+
+	var cardDirs []FileInfo
+	for _, entry := range entries {
+		if dir, ok := entry.(fs.Directory); ok {
+			name := dir.Remote()
+			// Only include card-* directories
+			if strings.HasPrefix(name, "card-") {
+				cardDirs = append(cardDirs, FileInfo{
+					Name:    name,
+					Path:    name,
+					Size:    0,
+					ModTime: dir.ModTime(ctx),
+					IsDir:   true,
+				})
+			}
+		}
+	}
+
+	// Sort by modification time (most recent first)
+	sort.Slice(cardDirs, func(i, j int) bool {
+		return cardDirs[i].ModTime.After(cardDirs[j].ModTime)
+	})
+
+	return cardDirs, nil
+}
+
+// ListFilesPaginated lists files with pagination support
+func (m *Manager) ListFilesPaginated(path string, page, pageSize int) (*FileListResult, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 1000 {
+		pageSize = 100 // Default page size
+	}
+
+	// Get all files first (we'll optimize this later with streaming)
+	allFiles, err := m.ListFiles(path)
+	if err != nil {
+		return nil, err
+	}
+
+	total := len(allFiles)
+	totalPages := (total + pageSize - 1) / pageSize
+
+	// Calculate slice bounds for pagination
+	start := (page - 1) * pageSize
+	end := start + pageSize
+
+	if start >= total {
+		// Page beyond available data
+		return &FileListResult{
+			Files:      []FileInfo{},
+			Path:       path,
+			Total:      total,
+			Page:       page,
+			PageSize:   pageSize,
+			TotalPages: totalPages,
+			HasMore:    false,
+		}, nil
+	}
+
+	if end > total {
+		end = total
+	}
+
+	return &FileListResult{
+		Files:      allFiles[start:end],
+		Path:       path,
+		Total:      total,
+		Page:       page,
+		PageSize:   pageSize,
+		TotalPages: totalPages,
+		HasMore:    page < totalPages,
+	}, nil
 }
 
 // ListFiles lists files and directories at the given path on the remote

@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -230,7 +231,9 @@ func main() {
 	http.HandleFunc("/api/wifi/connect", csrfProtection(handleWiFiConnect))        // CSRF protected
 	http.HandleFunc("/api/wifi/disconnect", csrfProtection(handleWiFiDisconnect))  // CSRF protected
 	http.HandleFunc("/api/wifi/status", handleWiFiStatus)
+	http.HandleFunc("/api/files/cards", handleFileCards)
 	http.HandleFunc("/api/files", handleFiles)
+	http.HandleFunc("/api/files/paginated", handleFilesPaginated)
 	http.HandleFunc("/api/files/view", handleFileView)
 	http.HandleFunc("/api/thumbnail", handleThumbnail)
 	http.HandleFunc("/api/sdcard/files", handleSDCardFiles)
@@ -3241,6 +3244,60 @@ func handleSyncCancel(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleThumbnail serves thumbnail images for files being synced
+// handleFileCards returns list of card IDs
+func handleFileCards(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	cards, err := syncMgr.ListCardIDs()
+	if err != nil {
+		jsonResponse(w, map[string]interface{}{
+			"error": fmt.Sprintf("Failed to list cards: %v", err),
+		})
+		return
+	}
+
+	jsonResponse(w, map[string]interface{}{
+		"cards": cards,
+	})
+}
+
+// handleFilesPaginated returns paginated file listing
+func handleFilesPaginated(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	path := r.URL.Query().Get("path")
+	page := 1
+	pageSize := 100
+
+	if p := r.URL.Query().Get("page"); p != "" {
+		if parsed, err := strconv.Atoi(p); err == nil && parsed > 0 {
+			page = parsed
+		}
+	}
+
+	if ps := r.URL.Query().Get("page_size"); ps != "" {
+		if parsed, err := strconv.Atoi(ps); err == nil && parsed > 0 && parsed <= 1000 {
+			pageSize = parsed
+		}
+	}
+
+	result, err := syncMgr.ListFilesPaginated(path, page, pageSize)
+	if err != nil {
+		jsonResponse(w, map[string]interface{}{
+			"error": fmt.Sprintf("Failed to list files: %v", err),
+		})
+		return
+	}
+
+	jsonResponse(w, result)
+}
+
 func handleFiles(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
