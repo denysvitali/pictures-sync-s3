@@ -434,6 +434,23 @@ func (m *Manager) SubscribeProgress() chan Progress {
 	return ch
 }
 
+// UnsubscribeProgress removes a channel from progress updates and closes it
+func (m *Manager) UnsubscribeProgress(ch chan Progress) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Find and remove the channel
+	for i, progressChan := range m.progressChans {
+		if progressChan == ch {
+			// Remove from slice
+			m.progressChans = append(m.progressChans[:i], m.progressChans[i+1:]...)
+			// Close the channel to signal the subscriber
+			close(ch)
+			break
+		}
+	}
+}
+
 // TestConnection tests the rclone configuration
 func (m *Manager) TestConnection() error {
 	// Load rclone config from custom path
