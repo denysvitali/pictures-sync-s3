@@ -143,28 +143,20 @@ func (m *Manager) GetRemoteSize(cardID string) (int64, error) {
 		log.Printf("Warning: failed to load config file: %v", err)
 	}
 
-	ctx := context.Background()
+	// OPTIMIZATION: Skip remote size calculation - it's too slow with many files
+	// The remote size was only used for resume support, but rclone handles that internally
+	// Listing thousands of files just to get total size can take minutes with large backups
+	// Instead, return 0 and let rclone handle sync efficiently with its own internal tracking
 
-	// Construct destination path
-	destPath := filepath.Join(m.remoteName+":"+m.remotePath, cardID, "DCIM")
+	// Note: This means we can't show "X MB already synced" in logs,
+	// but it's a worthwhile tradeoff for performance (minutes → seconds)
 
-	// Create destination filesystem
-	dstFs, err := fs.NewFs(ctx, destPath)
-	if err != nil {
-		// If destination doesn't exist, that's fine - return 0
-		return 0, nil
-	}
+	// Rclone's sync algorithm handles resume/incremental sync efficiently:
+	// - Only transfers files that don't exist or have changed
+	// - Uses checksums to detect changes
+	// - Handles partial transfers automatically
 
-	// Calculate total size of files on remote
-	var totalSize int64
-	err = operations.ListFn(ctx, dstFs, func(obj fs.Object) {
-		totalSize += obj.Size()
-	})
-	if err != nil {
-		return 0, fmt.Errorf("failed to calculate remote size: %w", err)
-	}
-
-	return totalSize, nil
+	return 0, nil
 }
 
 // Sync synchronizes files from source to remote
