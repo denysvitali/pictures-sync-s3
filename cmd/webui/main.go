@@ -275,6 +275,9 @@ func basicAuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
+		// Limit request body size to prevent DoS (10MB max)
+		r.Body = http.MaxBytesReader(w, r.Body, 10*1024*1024)
+
 		next.ServeHTTP(w, r)
 	})
 }
