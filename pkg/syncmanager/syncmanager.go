@@ -648,6 +648,18 @@ func (m *Manager) ListFilesPaginated(path string, page, pageSize int) (*FileList
 
 // ListFiles lists files and directories at the given path on the remote
 func (m *Manager) ListFiles(path string) ([]FileInfo, error) {
+	// Validate path to prevent directory traversal
+	if strings.Contains(path, "..") {
+		return nil, fmt.Errorf("invalid path: contains directory traversal")
+	}
+
+	// Clean the path to remove any potential traversal attempts
+	path = filepath.Clean(path)
+
+	// Ensure path doesn't start with / or \ (should be relative)
+	path = strings.TrimPrefix(path, "/")
+	path = strings.TrimPrefix(path, "\\")
+
 	// Load rclone config from custom path
 	if err := config.SetConfigPath(m.configPath); err != nil {
 		return nil, fmt.Errorf("failed to set config path: %w", err)
@@ -708,6 +720,18 @@ func (m *Manager) ListFiles(path string) ([]FileInfo, error) {
 
 // GetFile retrieves a file from the remote and writes it to the provided writer
 func (m *Manager) GetFile(path string, w io.Writer) error {
+	// Validate path to prevent directory traversal
+	if strings.Contains(path, "..") {
+		return fmt.Errorf("invalid path: contains directory traversal")
+	}
+
+	// Clean the path to remove any potential traversal attempts
+	path = filepath.Clean(path)
+
+	// Ensure path doesn't start with / or \ (should be relative)
+	path = strings.TrimPrefix(path, "/")
+	path = strings.TrimPrefix(path, "\\")
+
 	// Load rclone config from custom path
 	if err := config.SetConfigPath(m.configPath); err != nil {
 		return fmt.Errorf("failed to set config path: %w", err)
