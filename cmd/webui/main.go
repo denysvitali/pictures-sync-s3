@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/denysvitali/pictures-sync-s3/pkg/events"
 	"github.com/denysvitali/pictures-sync-s3/pkg/sdmonitor"
 	"github.com/denysvitali/pictures-sync-s3/pkg/settings"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
@@ -36,10 +37,13 @@ var (
 	stateMgr     *state.Manager
 	syncMgr      *syncmanager.Manager
 	wifiMgr      *wifimanager.Manager
+	eventMgr     *events.Manager
 	appSettings  *settings.Settings
 	authPassword string
 	csrfToken    string
 	csrfMutex    sync.RWMutex
+	wsTokens     = make(map[string]time.Time) // WebSocket auth tokens with expiry
+	wsTokenMutex sync.RWMutex
 	upgrader     = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
 			// Allow same-origin requests and local network addresses
@@ -121,6 +125,65 @@ func generateCSRFToken() string {
 	return base64.StdEncoding.EncodeToString(b)
 }
 
+// generateWSToken creates a new WebSocket auth token
+func generateWSToken() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		log.Fatal("Failed to generate WebSocket token:", err)
+	}
+	return base64.URLEncoding.EncodeToString(b)
+}
+
+// createWSToken generates and stores a new WebSocket token
+func createWSToken() string {
+	token := generateWSToken()
+	wsTokenMutex.Lock()
+	defer wsTokenMutex.Unlock()
+	wsTokens[token] = time.Now().Add(5 * time.Minute) // Token valid for 5 minutes
+	return token
+}
+
+// validateWSToken checks if a WebSocket token is valid and not expired
+func validateWSToken(token string) bool {
+	if token == "" {
+		return false
+	}
+	wsTokenMutex.RLock()
+	expiry, exists := wsTokens[token]
+	wsTokenMutex.RUnlock()
+
+	if !exists {
+		return false
+	}
+
+	if time.Now().After(expiry) {
+		// Token expired, remove it
+		wsTokenMutex.Lock()
+		delete(wsTokens, token)
+		wsTokenMutex.Unlock()
+		return false
+	}
+
+	return true
+}
+
+// cleanupExpiredWSTokens removes expired tokens periodically
+func cleanupExpiredWSTokens() {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		now := time.Now()
+		wsTokenMutex.Lock()
+		for token, expiry := range wsTokens {
+			if now.After(expiry) {
+				delete(wsTokens, token)
+			}
+		}
+		wsTokenMutex.Unlock()
+	}
+}
+
 // getCSRFToken returns the current CSRF token
 func getCSRFToken() string {
 	csrfMutex.RLock()
@@ -160,14 +223,18 @@ func main() {
 
 	log.Println("Photo Backup Station WebUI - Starting...")
 
-	// Load password from gokrazy password file
+	// Load password from gokrazy password file or use default for development
 	passwordBytes, err := os.ReadFile("/etc/gokr-pw.txt")
 	if err != nil {
-		log.Fatalf("Failed to read password file: %v", err)
-	}
-	authPassword = strings.TrimSpace(string(passwordBytes))
-	if authPassword == "" {
-		log.Fatalf("Password file is empty")
+		log.Printf("Warning: Failed to read password file: %v", err)
+		log.Println("Using default development password")
+		authPassword = "dev"
+	} else {
+		authPassword = strings.TrimSpace(string(passwordBytes))
+		if authPassword == "" {
+			log.Println("Password file is empty, using default development password")
+			authPassword = "dev"
+		}
 	}
 
 	// Get port from environment or default to 8080
@@ -175,6 +242,12 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
+
+	// Start WebSocket token cleanup goroutine
+	go cleanupExpiredWSTokens()
+
+	// Initialize event manager
+	eventMgr = events.NewManager()
 
 	// Initialize state manager
 	stateMgr, err = state.NewManager()
@@ -217,6 +290,7 @@ func main() {
 
 	// Setup HTTP handlers
 	http.HandleFunc("/api/csrf-token", handleCSRFToken) // GET endpoint for CSRF token
+	http.HandleFunc("/api/ws-token", handleWSToken)     // GET endpoint for WebSocket token
 	http.HandleFunc("/api/status", handleStatus)
 	http.HandleFunc("/api/history", handleHistory)
 	http.HandleFunc("/api/config", csrfProtection(handleConfig))                  // CSRF protected
@@ -767,6 +841,58 @@ func getWebUIHTML() string {
             letter-spacing: 0.5px;
         }
 
+        .manual-sync-section {
+            margin-top: 1.5rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid var(--border);
+        }
+
+        .manual-sync-section h3 {
+            margin: 0 0 0.5rem 0;
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        .manual-sync-description {
+            margin: 0 0 1rem 0;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            line-height: 1.4;
+        }
+
+        .manual-sync-buttons {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .manual-sync-buttons .btn {
+            flex: 1;
+            min-width: 120px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1rem;
+            font-weight: 500;
+        }
+
+        .manual-sync-buttons .btn-icon {
+            font-size: 1rem;
+        }
+
+        #start-sync-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            background: var(--text-secondary);
+        }
+
+        #start-sync-btn:disabled:hover {
+            background: var(--text-secondary);
+            transform: none;
+        }
+
         .sync-stats {
             display: flex;
             justify-content: space-around;
@@ -1171,43 +1297,17 @@ func getWebUIHTML() string {
         }
 
         .spinner {
-            position: relative;
-            width: 50px;
-            height: 50px;
+            width: 40px;
+            height: 40px;
             margin: 0 auto 1.5rem;
-        }
-
-        .spinner::before,
-        .spinner::after {
-            content: '';
-            position: absolute;
-            border: 3px solid transparent;
+            border: 4px solid rgba(59, 130, 246, 0.2);
             border-top-color: var(--primary);
-            border-right-color: var(--primary);
             border-radius: 50%;
-            animation: spin 1.5s cubic-bezier(0.68, -0.55, 0.265, 1.55) infinite;
-        }
-
-        .spinner::before {
-            width: 100%;
-            height: 100%;
-            animation-duration: 1.5s;
-        }
-
-        .spinner::after {
-            width: 70%;
-            height: 70%;
-            top: 15%;
-            left: 15%;
-            animation-duration: 2s;
-            animation-direction: reverse;
-            border-top-color: var(--primary-dark);
-            border-right-color: var(--primary-dark);
+            animation: spin 0.8s linear infinite;
         }
 
         @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+            to { transform: rotate(360deg); }
         }
 
         @media (max-width: 768px) {
@@ -1303,6 +1403,43 @@ func getWebUIHTML() string {
         }
 
         /* Gallery Styles */
+        .gallery-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .gallery-controls {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .gallery-controls select,
+        .gallery-controls button {
+            margin: 0;
+        }
+
+        .gallery-breadcrumb {
+            padding: 0.5rem 0;
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+
+        .gallery-breadcrumb a {
+            color: var(--primary);
+            text-decoration: none;
+            cursor: pointer;
+        }
+
+        .gallery-breadcrumb a:hover {
+            text-decoration: underline;
+        }
+
         .gallery-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -1359,60 +1496,37 @@ func getWebUIHTML() string {
             background: rgba(0, 0, 0, 0.95);
             z-index: 9999;
             animation: fadeIn 0.2s;
+            align-items: center;
+            justify-content: center;
         }
 
         .lightbox.active {
             display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
         }
 
         .lightbox-content {
             position: relative;
-            max-width: 95vw;
-            max-height: 85vh;
+            max-width: 90vw;
+            max-height: 90vh;
             display: flex;
+            flex-direction: column;
             align-items: center;
-            justify-content: center;
+            background: var(--bg);
+            border-radius: 0.5rem;
+            overflow: hidden;
         }
 
-        .lightbox-image {
+        .lightbox-content img {
             max-width: 100%;
-            max-height: 85vh;
+            max-height: 70vh;
             object-fit: contain;
+            background: #000;
         }
 
-        .lightbox-controls {
+        .lightbox-close,
+        .lightbox-prev,
+        .lightbox-next {
             position: absolute;
-            top: 1rem;
-            right: 1rem;
-            display: flex;
-            gap: 0.5rem;
-        }
-
-        .lightbox-btn {
-            background: rgba(255, 255, 255, 0.9);
-            border: none;
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            cursor: pointer;
-            font-size: 1.25rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: background 0.2s;
-        }
-
-        .lightbox-btn:hover {
-            background: white;
-        }
-
-        .lightbox-nav {
-            position: absolute;
-            top: 50%;
-            transform: translateY(-50%);
             background: rgba(255, 255, 255, 0.9);
             border: none;
             width: 50px;
@@ -1423,29 +1537,50 @@ func getWebUIHTML() string {
             display: flex;
             align-items: center;
             justify-content: center;
-            transition: background 0.2s;
+            transition: all 0.2s;
+            z-index: 10000;
         }
 
-        .lightbox-nav:hover {
+        .lightbox-close {
+            top: 1rem;
+            right: 1rem;
+        }
+
+        .lightbox-prev {
+            left: 1rem;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+
+        .lightbox-next {
+            right: 1rem;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+
+        .lightbox-close:hover,
+        .lightbox-prev:hover,
+        .lightbox-next:hover {
             background: white;
+            transform: scale(1.1);
         }
 
-        .lightbox-nav.prev {
-            left: 2rem;
+        .lightbox-prev:hover {
+            transform: translateY(-50%) scale(1.1);
         }
 
-        .lightbox-nav.next {
-            right: 2rem;
+        .lightbox-next:hover {
+            transform: translateY(-50%) scale(1.1);
         }
 
         .lightbox-info {
-            background: rgba(0, 0, 0, 0.8);
-            color: white;
-            padding: 1rem 2rem;
-            border-radius: 0.5rem;
-            margin-top: 1rem;
+            width: 100%;
             max-width: 800px;
-            width: 90vw;
+            background: var(--card-bg);
+            color: var(--text);
+            padding: 1rem;
+            max-height: 20vh;
+            overflow-y: auto;
         }
 
         .lightbox-exif {
@@ -1551,6 +1686,10 @@ func getWebUIHTML() string {
                 <span class="tab-icon">📡</span>
                 <span class="tab-text">WiFi</span>
             </button>
+            <button class="tab" onclick="switchTab('gallery')">
+                <span class="tab-icon">🖼️</span>
+                <span class="tab-text">Gallery</span>
+            </button>
             <button class="tab" onclick="switchTab('config')">
                 <span class="tab-icon">⚙️</span>
                 <span class="tab-text">Configuration</span>
@@ -1566,6 +1705,21 @@ func getWebUIHTML() string {
                         <div class="loading">
                             <div class="spinner"></div>
                             <p>Loading status...</p>
+                        </div>
+                    </div>
+
+                    <div id="manual-sync-controls" class="manual-sync-section">
+                        <h3>Manual Sync</h3>
+                        <p class="manual-sync-description">Force a sync of the currently mounted SD card</p>
+                        <div class="manual-sync-buttons">
+                            <button id="start-sync-btn" class="btn btn-primary" onclick="startSync()" disabled>
+                                <span class="btn-icon">💾</span>
+                                <span>Checking...</span>
+                            </button>
+                            <button id="refresh-status-btn" class="btn btn-secondary" onclick="loadStatus()">
+                                <span class="btn-icon">♻️</span>
+                                <span>Refresh Status</span>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -1754,6 +1908,43 @@ key = your-application-key"></textarea>
             </div>
         </div>
 
+        <!-- Gallery Tab -->
+        <div id="gallery-tab" class="tab-content">
+            <div class="card">
+                <div class="gallery-header">
+                    <h2>Photo Gallery</h2>
+                    <div class="gallery-controls">
+                        <select id="gallery-source" class="form-input" onchange="switchGallerySource()">
+                            <option value="sdcard">SD Card</option>
+                            <option value="cloud">Cloud Storage</option>
+                        </select>
+                        <select id="gallery-card" class="form-input" style="display:none;" onchange="loadGalleryPhotos()">
+                            <option value="">Select Card...</option>
+                        </select>
+                        <button class="btn btn-secondary" onclick="refreshGallery()">Refresh</button>
+                    </div>
+                </div>
+                <div id="gallery-path" class="gallery-breadcrumb"></div>
+                <div id="gallery-loading" class="loading" style="display:none;">
+                    <div class="spinner"></div>
+                    <p>Loading photos...</p>
+                </div>
+                <div id="gallery-error" class="alert alert-error" style="display:none;"></div>
+                <div id="gallery-grid" class="gallery-grid"></div>
+            </div>
+        </div>
+
+        <!-- Lightbox Modal -->
+        <div id="lightbox" class="lightbox" style="display:none;" onclick="closeLightbox()">
+            <button class="lightbox-close" onclick="closeLightbox()">&times;</button>
+            <button class="lightbox-prev" onclick="navigateLightbox(-1); event.stopPropagation();">&#8249;</button>
+            <button class="lightbox-next" onclick="navigateLightbox(1); event.stopPropagation();">&#8250;</button>
+            <div class="lightbox-content" onclick="event.stopPropagation();">
+                <img id="lightbox-image" src="" alt="Full size photo">
+                <div id="lightbox-info" class="lightbox-info"></div>
+            </div>
+        </div>
+
     </div>
 
     <script>
@@ -1800,38 +1991,75 @@ key = your-application-key"></textarea>
             if (tabName === 'history') loadHistory();
             if (tabName === 'wifi') loadWiFiStatus();
             if (tabName === 'config') loadConfig();
+            if (tabName === 'gallery') initGallery();
         }
 
         // WebSocket connection
-        function connectWebSocket() {
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = protocol + '//' + window.location.host + '/ws';
+        async function connectWebSocket() {
+            try {
+                // Fetch WebSocket token from API
+                const response = await fetch('/api/ws-token');
+                if (!response.ok) {
+                    throw new Error('Failed to get WebSocket token');
+                }
+                const data = await response.json();
+                const token = data.ws_token;
 
-            ws = new WebSocket(wsUrl);
+                // Connect to WebSocket
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = protocol + '//' + window.location.host + '/ws';
 
-            ws.onopen = () => {
-                console.log('WebSocket connected');
-                clearInterval(reconnectInterval);
-                updateConnectionStatus(true);
-            };
+                ws = new WebSocket(wsUrl);
 
-            ws.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                updateStatus(data);
-            };
+                ws.onopen = () => {
+                    console.log('WebSocket opened, sending auth token...');
+                    // Send token as first message
+                    ws.send(JSON.stringify({
+                        type: 'auth',
+                        token: token
+                    }));
+                };
 
-            ws.onerror = (error) => {
-                console.error('WebSocket error:', error);
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+
+                    // Handle auth success
+                    if (data.type === 'auth_success') {
+                        console.log('WebSocket authenticated successfully');
+                        clearInterval(reconnectInterval);
+                        updateConnectionStatus(true);
+                        return;
+                    }
+
+                    // Handle auth error
+                    if (data.type === 'error') {
+                        console.error('WebSocket error:', data.error);
+                        ws.close();
+                        return;
+                    }
+
+                    // Handle normal status updates
+                    updateStatus(data);
+                };
+
+                ws.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    updateConnectionStatus(false);
+                };
+
+                ws.onclose = () => {
+                    console.log('WebSocket disconnected, reconnecting...');
+                    updateConnectionStatus(false);
+                    reconnectInterval = setInterval(() => {
+                        connectWebSocket();
+                    }, 5000);
+                };
+            } catch (error) {
+                console.error('Failed to connect WebSocket:', error);
                 updateConnectionStatus(false);
-            };
-
-            ws.onclose = () => {
-                console.log('WebSocket disconnected, reconnecting...');
-                updateConnectionStatus(false);
-                reconnectInterval = setInterval(() => {
-                    connectWebSocket();
-                }, 5000);
-            };
+                // Retry after delay
+                setTimeout(() => connectWebSocket(), 5000);
+            }
         }
 
         // Update connection status indicator
@@ -2009,18 +2237,33 @@ key = your-application-key"></textarea>
 
             statusDiv.innerHTML = html;
 
-            // Show/hide sync controls based on state
-            if (data.sdcard_mounted) {
+            // Update manual sync button state
+            const startSyncBtn = document.getElementById('start-sync-btn');
+            if (startSyncBtn) {
+                if (data.sdcard_mounted && data.status !== 'syncing') {
+                    startSyncBtn.disabled = false;
+                    startSyncBtn.innerHTML = '<span class="btn-icon">🔄</span><span>Start Sync</span>';
+                } else if (data.status === 'syncing') {
+                    startSyncBtn.disabled = true;
+                    startSyncBtn.innerHTML = '<span class="btn-icon">⏳</span><span>Syncing...</span>';
+                } else {
+                    startSyncBtn.disabled = true;
+                    startSyncBtn.innerHTML = '<span class="btn-icon">💾</span><span>No SD Card</span>';
+                }
+            }
+
+            // Show/hide sync controls based on state (legacy code)
+            if (typeof syncControls !== 'undefined' && data.sdcard_mounted) {
                 syncControls.style.display = 'block';
 
                 if (data.status === 'syncing') {
-                    startBtn.style.display = 'none';
-                    cancelBtn.style.display = 'inline-block';
+                    if (typeof startBtn !== 'undefined') startBtn.style.display = 'none';
+                    if (typeof cancelBtn !== 'undefined') cancelBtn.style.display = 'inline-block';
                 } else {
-                    startBtn.style.display = 'inline-block';
-                    cancelBtn.style.display = 'none';
+                    if (typeof startBtn !== 'undefined') startBtn.style.display = 'inline-block';
+                    if (typeof cancelBtn !== 'undefined') cancelBtn.style.display = 'none';
                 }
-            } else {
+            } else if (typeof syncControls !== 'undefined') {
                 syncControls.style.display = 'none';
             }
 
@@ -2319,20 +2562,26 @@ key = your-application-key"></textarea>
 
                     let html = '';
                     networks.forEach(network => {
-                        const signalBars = getSignalBars(network.signal);
-
                         html += '<div class="network-item">';
                         html += '<div class="network-info">';
                         html += '<div class="network-name">' + escapeHtml(network.ssid);
                         if (network.encrypted) html += ' 🔒';
                         html += '</div>';
                         html += '<div class="network-signal">';
-                        html += '<div class="signal-bars">';
-                        for (let i = 0; i < 4; i++) {
-                            html += '<div class="signal-bar' + (i < signalBars ? ' active' : '') + '"></div>';
+
+                        // Only show signal bars if we have real signal data
+                        if (network.signal && network.signal !== 0) {
+                            const signalBars = getSignalBars(network.signal);
+                            html += '<div class="signal-bars">';
+                            for (let i = 0; i < 4; i++) {
+                                html += '<div class="signal-bar' + (i < signalBars ? ' active' : '') + '"></div>';
+                            }
+                            html += '</div>';
+                            html += '<span>' + network.signal + ' dBm</span>';
+                        } else {
+                            html += '<span style="color: var(--text-tertiary); font-size: 0.875rem;">Signal unknown</span>';
                         }
-                        html += '</div>';
-                        html += '<span>' + network.signal + ' dBm</span>';
+
                         html += '</div>';
                         html += '</div>';
                         html += '<button class="btn btn-primary" onclick="connectWiFi(\'' + escapeHtml(network.ssid).replace(/'/g, "\\'") + '\', ' + network.encrypted + ')">Connect</button>';
@@ -3457,6 +3706,287 @@ key = your-application-key"></textarea>
             return div.innerHTML;
         }
 
+        // Gallery functionality
+        let galleryPhotos = [];
+        let currentPhotoIndex = 0;
+        let gallerySource = 'sdcard';
+        let currentGalleryPath = '';
+        let galleryInitialized = false;
+
+        function initGallery() {
+            if (!galleryInitialized) {
+                galleryInitialized = true;
+                loadCardList();
+            }
+            loadGalleryPhotos();
+        }
+
+        async function loadCardList() {
+            try {
+                const response = await fetch('/api/files/cards');
+                const data = await response.json();
+
+                const cardSelect = document.getElementById('gallery-card');
+                cardSelect.innerHTML = '<option value="">Select Card...</option>';
+
+                if (data.cards && data.cards.length > 0) {
+                    data.cards.forEach(card => {
+                        const option = document.createElement('option');
+                        option.value = card;
+                        option.textContent = card;
+                        cardSelect.appendChild(option);
+                    });
+                }
+            } catch (error) {
+                console.error('Failed to load card list:', error);
+            }
+        }
+
+        function switchGallerySource() {
+            const sourceSelect = document.getElementById('gallery-source');
+            const cardSelect = document.getElementById('gallery-card');
+            gallerySource = sourceSelect.value;
+
+            if (gallerySource === 'cloud') {
+                cardSelect.style.display = 'inline-block';
+            } else {
+                cardSelect.style.display = 'none';
+            }
+
+            currentGalleryPath = '';
+            loadGalleryPhotos();
+        }
+
+        async function loadGalleryPhotos() {
+            const loadingEl = document.getElementById('gallery-loading');
+            const errorEl = document.getElementById('gallery-error');
+            const gridEl = document.getElementById('gallery-grid');
+            const pathEl = document.getElementById('gallery-path');
+
+            loadingEl.style.display = 'flex';
+            errorEl.style.display = 'none';
+            gridEl.innerHTML = '';
+
+            try {
+                let url;
+                if (gallerySource === 'sdcard') {
+                    url = '/api/sdcard/files?path=' + encodeURIComponent(currentGalleryPath || 'DCIM');
+                } else {
+                    const cardSelect = document.getElementById('gallery-card');
+                    const selectedCard = cardSelect.value;
+                    if (!selectedCard) {
+                        loadingEl.style.display = 'none';
+                        errorEl.textContent = 'Please select a card to view';
+                        errorEl.style.display = 'block';
+                        return;
+                    }
+                    url = '/api/files?path=' + encodeURIComponent(selectedCard + '/' + (currentGalleryPath || 'DCIM'));
+                }
+
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                loadingEl.style.display = 'none';
+
+                // Update breadcrumb
+                updateGalleryBreadcrumb(currentGalleryPath);
+
+                // Process files
+                const files = data.files || [];
+                galleryPhotos = [];
+
+                if (files.length === 0) {
+                    gridEl.innerHTML = '<p style="padding: 2rem; text-align: center; color: var(--text-secondary);">No photos found</p>';
+                    return;
+                }
+
+                files.forEach((file, index) => {
+                    if (file.is_dir) {
+                        // Create folder item
+                        const folderDiv = document.createElement('div');
+                        folderDiv.className = 'gallery-item';
+                        folderDiv.onclick = () => navigateToFolder(file.path);
+                        folderDiv.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 100%; background: var(--bg-secondary); font-size: 3rem;">📁</div>' +
+                            '<div class="gallery-item-info"><div>' + escapeHtml(file.name) + '</div></div>';
+                        gridEl.appendChild(folderDiv);
+                    } else if (file.is_image) {
+                        // Create photo item
+                        galleryPhotos.push(file);
+                        const photoIndex = galleryPhotos.length - 1;
+
+                        const photoDiv = document.createElement('div');
+                        photoDiv.className = 'gallery-item';
+                        photoDiv.onclick = () => openLightbox(photoIndex);
+
+                        const cardSelect = document.getElementById('gallery-card');
+                        const selectedCard = cardSelect.value;
+                        const thumbnailUrl = gallerySource === 'sdcard'
+                            ? '/api/thumbnail?path=' + encodeURIComponent(file.path)
+                            : '/api/files/view?path=' + encodeURIComponent(selectedCard + '/' + file.path);
+
+                        photoDiv.innerHTML = '<img src="' + thumbnailUrl + '" alt="' + escapeHtml(file.name) + '" loading="lazy">' +
+                            '<div class="gallery-item-info">' +
+                            '<div>' + escapeHtml(file.name) + '</div>' +
+                            '<div style="font-size: 0.7rem; opacity: 0.8;">' + formatFileSize(file.size) + '</div>' +
+                            '</div>';
+                        gridEl.appendChild(photoDiv);
+                    }
+                });
+
+            } catch (error) {
+                loadingEl.style.display = 'none';
+                errorEl.textContent = 'Failed to load photos: ' + error.message;
+                errorEl.style.display = 'block';
+                console.error('Gallery error:', error);
+            }
+        }
+
+        function updateGalleryBreadcrumb(path) {
+            const pathEl = document.getElementById('gallery-path');
+            if (!path) {
+                pathEl.innerHTML = '<a onclick="navigateToFolder(\'\')">📁 Root</a>';
+                return;
+            }
+
+            const parts = path.split('/').filter(p => p);
+            let breadcrumb = '<a onclick="navigateToFolder(\'\')">📁 Root</a>';
+            let currentPath = '';
+
+            parts.forEach((part, index) => {
+                currentPath += (currentPath ? '/' : '') + part;
+                const linkPath = currentPath;
+                breadcrumb += ' / <a onclick="navigateToFolder(\'' + linkPath + '\')">' + escapeHtml(part) + '</a>';
+            });
+
+            pathEl.innerHTML = breadcrumb;
+        }
+
+        function navigateToFolder(path) {
+            currentGalleryPath = path;
+            loadGalleryPhotos();
+        }
+
+        function refreshGallery() {
+            if (gallerySource === 'cloud') {
+                loadCardList();
+            }
+            loadGalleryPhotos();
+        }
+
+        function openLightbox(index) {
+            currentPhotoIndex = index;
+            showLightboxPhoto();
+
+            const lightbox = document.getElementById('lightbox');
+            lightbox.style.display = 'flex';
+            setTimeout(() => lightbox.classList.add('active'), 10);
+        }
+
+        function closeLightbox() {
+            const lightbox = document.getElementById('lightbox');
+            lightbox.classList.remove('active');
+            setTimeout(() => lightbox.style.display = 'none', 200);
+        }
+
+        function navigateLightbox(direction) {
+            currentPhotoIndex += direction;
+            if (currentPhotoIndex < 0) currentPhotoIndex = galleryPhotos.length - 1;
+            if (currentPhotoIndex >= galleryPhotos.length) currentPhotoIndex = 0;
+            showLightboxPhoto();
+        }
+
+        function showLightboxPhoto() {
+            if (galleryPhotos.length === 0) return;
+
+            const photo = galleryPhotos[currentPhotoIndex];
+            const img = document.getElementById('lightbox-image');
+            const info = document.getElementById('lightbox-info');
+
+            const cardSelect = document.getElementById('gallery-card');
+            const selectedCard = cardSelect.value;
+
+            const photoUrl = gallerySource === 'sdcard'
+                ? '/api/sdcard/preview?path=' + encodeURIComponent(photo.path)
+                : '/api/files/view?path=' + encodeURIComponent(selectedCard + '/' + photo.path);
+
+            img.src = photoUrl;
+
+            // Build info display
+            let infoHtml = '<h3>' + escapeHtml(photo.name) + '</h3>';
+            infoHtml += '<p>Size: ' + formatFileSize(photo.size) + '</p>';
+
+            if (photo.exif && Object.keys(photo.exif).length > 0) {
+                infoHtml += '<div class="lightbox-exif">';
+
+                if (photo.exif.camera_make || photo.exif.camera_model) {
+                    infoHtml += '<div class="lightbox-exif-item">';
+                    infoHtml += '<div class="lightbox-exif-label">Camera</div>';
+                    infoHtml += escapeHtml((photo.exif.camera_make || '') + ' ' + (photo.exif.camera_model || ''));
+                    infoHtml += '</div>';
+                }
+
+                if (photo.exif.date_time) {
+                    infoHtml += '<div class="lightbox-exif-item">';
+                    infoHtml += '<div class="lightbox-exif-label">Date</div>';
+                    infoHtml += escapeHtml(photo.exif.date_time);
+                    infoHtml += '</div>';
+                }
+
+                if (photo.exif.f_number) {
+                    infoHtml += '<div class="lightbox-exif-item">';
+                    infoHtml += '<div class="lightbox-exif-label">Aperture</div>';
+                    infoHtml += escapeHtml(photo.exif.f_number);
+                    infoHtml += '</div>';
+                }
+
+                if (photo.exif.exposure_time) {
+                    infoHtml += '<div class="lightbox-exif-item">';
+                    infoHtml += '<div class="lightbox-exif-label">Shutter</div>';
+                    infoHtml += escapeHtml(photo.exif.exposure_time);
+                    infoHtml += '</div>';
+                }
+
+                if (photo.exif.iso) {
+                    infoHtml += '<div class="lightbox-exif-item">';
+                    infoHtml += '<div class="lightbox-exif-label">ISO</div>';
+                    infoHtml += photo.exif.iso;
+                    infoHtml += '</div>';
+                }
+
+                if (photo.exif.focal_length) {
+                    infoHtml += '<div class="lightbox-exif-item">';
+                    infoHtml += '<div class="lightbox-exif-label">Focal Length</div>';
+                    infoHtml += escapeHtml(photo.exif.focal_length);
+                    infoHtml += '</div>';
+                }
+
+                infoHtml += '</div>';
+            }
+
+            info.innerHTML = infoHtml;
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            if (bytes < 1024 * 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+            return (bytes / 1024 / 1024 / 1024).toFixed(1) + ' GB';
+        }
+
+        // Keyboard navigation for lightbox
+        document.addEventListener('keydown', (e) => {
+            const lightbox = document.getElementById('lightbox');
+            if (lightbox.style.display === 'flex') {
+                if (e.key === 'Escape') closeLightbox();
+                if (e.key === 'ArrowLeft') navigateLightbox(-1);
+                if (e.key === 'ArrowRight') navigateLightbox(1);
+            }
+        });
+
         // Initialize
         updateConnectionStatus(false); // Start as disconnected
         connectWebSocket();
@@ -3475,6 +4005,19 @@ func handleCSRFToken(w http.ResponseWriter, r *http.Request) {
 
 	jsonResponse(w, map[string]string{
 		"csrf_token": getCSRFToken(),
+	})
+}
+
+// handleWSToken generates and returns a WebSocket authentication token
+func handleWSToken(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	token := createWSToken()
+	jsonResponse(w, map[string]string{
+		"ws_token": token,
 	})
 }
 
@@ -3759,16 +4302,7 @@ func handleWiFiStatus(w http.ResponseWriter, r *http.Request) {
 
 // handleWebSocket provides real-time status updates
 func handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	// Enforce authentication on WebSocket connections
-	username, password, ok := r.BasicAuth()
-	usernameMatch := subtle.ConstantTimeCompare([]byte(username), []byte("gokrazy")) == 1
-	passwordMatch := subtle.ConstantTimeCompare([]byte(password), []byte(authPassword)) == 1
-
-	if !ok || !usernameMatch || !passwordMatch {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
+	// Upgrade to WebSocket without auth - we'll validate token in first message
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("WebSocket upgrade error: %v", err)
@@ -3776,15 +4310,65 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	// Subscribe to state updates
+	// Set a deadline for receiving the auth token (5 seconds)
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+
+	// First message MUST be the auth token
+	var authMsg struct {
+		Type  string `json:"type"`
+		Token string `json:"token"`
+	}
+	if err := conn.ReadJSON(&authMsg); err != nil {
+		log.Printf("WebSocket auth failed: failed to read auth message from %s: %v", r.RemoteAddr, err)
+		conn.WriteJSON(map[string]interface{}{
+			"type":  "error",
+			"error": "Authentication required",
+		})
+		return
+	}
+
+	// Validate token type and value
+	if authMsg.Type != "auth" || !validateWSToken(authMsg.Token) {
+		log.Printf("WebSocket auth failed: invalid token from %s", r.RemoteAddr)
+		conn.WriteJSON(map[string]interface{}{
+			"type":  "error",
+			"error": "Invalid or expired token",
+		})
+		return
+	}
+
+	// Remove token after successful validation (one-time use)
+	wsTokenMutex.Lock()
+	delete(wsTokens, authMsg.Token)
+	wsTokenMutex.Unlock()
+
+	// Clear read deadline after successful auth
+	conn.SetReadDeadline(time.Time{})
+
+	log.Printf("WebSocket authenticated successfully from %s", r.RemoteAddr)
+
+	// Send auth success message
+	if err := conn.WriteJSON(map[string]interface{}{
+		"type": "auth_success",
+	}); err != nil {
+		return
+	}
+
+	// Subscribe to state updates and events
 	updates := stateMgr.Subscribe()
+	events := eventMgr.Subscribe()
 	// IMPORTANT: Unsubscribe when WebSocket closes to prevent memory leak
 	defer stateMgr.Unsubscribe(updates)
+	defer eventMgr.Unsubscribe(events)
 
 	// Send initial state (reload from disk first to get latest from pictures-sync service)
 	stateMgr.Reload()
 	status := stateMgr.GetState()
-	if err := conn.WriteJSON(status); err != nil {
+	initialMessage := map[string]interface{}{
+		"type": "state",
+		"data": status,
+	}
+	if err := conn.WriteJSON(initialMessage); err != nil {
 		return
 	}
 
@@ -3799,7 +4383,25 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				// Channel was closed by Unsubscribe
 				return
 			}
-			if err := conn.WriteJSON(state); err != nil {
+			// Send state update
+			message := map[string]interface{}{
+				"type": "state",
+				"data": state,
+			}
+			if err := conn.WriteJSON(message); err != nil {
+				return
+			}
+		case event, ok := <-events:
+			if !ok {
+				// Channel was closed by Unsubscribe
+				return
+			}
+			// Send event
+			message := map[string]interface{}{
+				"type": "event",
+				"data": event,
+			}
+			if err := conn.WriteJSON(message); err != nil {
 				return
 			}
 		case <-ticker.C:
@@ -3810,7 +4412,11 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 			// Send updated state
 			status := stateMgr.GetState()
-			if err := conn.WriteJSON(status); err != nil {
+			message := map[string]interface{}{
+				"type": "state",
+				"data": status,
+			}
+			if err := conn.WriteJSON(message); err != nil {
 				return
 			}
 		}

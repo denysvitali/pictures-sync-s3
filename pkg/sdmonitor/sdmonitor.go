@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -42,6 +43,8 @@ type Monitor struct {
 	stopChan     chan struct{}
 	mountPath    string
 	lastDevice   string
+	devMode      bool // Development mode for testing without hardware
+	mu           sync.RWMutex // Protects lastDevice
 
 	// Cache for /proc/mounts to reduce I/O
 	cachedMounts    string
@@ -51,10 +54,29 @@ type Monitor struct {
 
 // NewMonitor creates a new SD card monitor
 func NewMonitor(mountPath string) *Monitor {
+	// Check if we're in development mode (no hardware devices available)
+	// On Gokrazy (real hardware), /perm always exists. In local dev, it won't.
+	devMode := false
+	if _, err := os.Stat("/perm"); os.IsNotExist(err) {
+		// /perm doesn't exist, we're in local development
+		devMode = true
+		log.Println("SD Monitor: /perm not found, enabling development mode")
+	}
+
+	// Allow explicit override via environment variable
+	if os.Getenv("SDMONITOR_DEV_MODE") == "1" {
+		devMode = true
+		log.Println("SD Monitor: Development mode forced via SDMONITOR_DEV_MODE=1")
+	} else if os.Getenv("SDMONITOR_DEV_MODE") == "0" {
+		devMode = false
+		log.Println("SD Monitor: Hardware mode forced via SDMONITOR_DEV_MODE=0")
+	}
+
 	return &Monitor{
 		eventChan:      make(chan Event, 10),
 		stopChan:       make(chan struct{}),
 		mountPath:      mountPath,
+		devMode:        devMode,
 		mountsCacheTTL: 2 * time.Second, // Cache for same duration as polling interval
 	}
 }
@@ -66,10 +88,17 @@ func (m *Monitor) Start() error {
 		return fmt.Errorf("failed to create mount directory: %w", err)
 	}
 
-	// Check for already-inserted cards immediately on startup
-	m.checkDevices()
+	if m.devMode {
+		log.Println("SD Monitor: Running in development mode (no hardware detection)")
+		// In dev mode, create a mock DCIM structure for testing
+		go m.createDevModeCard()
+	} else {
+		log.Println("SD Monitor: Running in hardware mode")
+		// Check for already-inserted cards immediately on startup
+		m.checkDevices()
+		go m.pollDevices()
+	}
 
-	go m.pollDevices()
 	return nil
 }
 
@@ -85,6 +114,25 @@ func (m *Monitor) Stop() {
 // Events returns the event channel
 func (m *Monitor) Events() <-chan Event {
 	return m.eventChan
+}
+
+// IsCardMounted returns true if an SD card is currently mounted
+func (m *Monitor) IsCardMounted() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.lastDevice != ""
+}
+
+// GetMountPath returns the current mount path
+func (m *Monitor) GetMountPath() string {
+	return m.mountPath
+}
+
+// GetCurrentDevice returns the currently mounted device
+func (m *Monitor) GetCurrentDevice() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.lastDevice
 }
 
 // pollDevices polls for USB storage devices
@@ -122,14 +170,71 @@ func (m *Monitor) getCachedMounts() (string, error) {
 	return m.cachedMounts, nil
 }
 
+// createDevModeCard creates a mock SD card for development mode
+func (m *Monitor) createDevModeCard() {
+	// Wait a few seconds to simulate card insertion
+	time.Sleep(3 * time.Second)
+
+	log.Println("SD Monitor: Simulating SD card insertion in dev mode")
+
+	// Create DCIM structure with some mock photos
+	dcimPath := filepath.Join(m.mountPath, "DCIM", "100CANON")
+	if err := os.MkdirAll(dcimPath, 0755); err != nil {
+		log.Printf("Failed to create mock DCIM directory: %v", err)
+		return
+	}
+
+	// Create some mock photo files
+	mockPhotos := []string{"IMG_001.JPG", "IMG_002.JPG", "IMG_003.JPG"}
+	for _, photo := range mockPhotos {
+		photoPath := filepath.Join(dcimPath, photo)
+		// Create a small mock JPEG file (just placeholder content)
+		content := []byte("Mock JPEG file content for " + photo)
+		if err := os.WriteFile(photoPath, content, 0644); err != nil {
+			log.Printf("Failed to create mock photo %s: %v", photo, err)
+		}
+	}
+
+	// Mark as mounted
+	m.mu.Lock()
+	m.lastDevice = "mock-sdcard"
+	m.mu.Unlock()
+
+	// Send insertion event
+	event := Event{
+		Type:      EventInserted,
+		DevPath:   "mock-sdcard",
+		DevName:   "mock-sdcard",
+		MountPath: m.mountPath,
+	}
+	log.Printf("SD Monitor: Sending insertion event to channel: %+v", event)
+
+	select {
+	case m.eventChan <- event:
+		log.Println("SD Monitor: Event sent successfully")
+	default:
+		log.Println("SD Monitor: WARNING - Event channel is full, event dropped!")
+	}
+
+	log.Printf("SD Monitor: Mock SD card created with %d photos at %s", len(mockPhotos), m.mountPath)
+}
+
 // checkDevices checks for new or removed devices
 func (m *Monitor) checkDevices() {
+	if m.devMode {
+		return // Skip hardware checking in dev mode
+	}
+
 	// Look for USB storage devices
 	device := m.findUSBStorageDevice()
 
-	if device != "" && device != m.lastDevice {
+	m.mu.RLock()
+	currentDevice := m.lastDevice
+	m.mu.RUnlock()
+
+	if device != "" && device != currentDevice {
 		// New device detected
-		log.Printf("SD card detected: %s (lastDevice was: %s)", device, m.lastDevice)
+		log.Printf("SD card detected: %s (lastDevice was: %s)", device, currentDevice)
 
 		// Try to mount it
 		if err := m.mount(device); err != nil {
@@ -137,7 +242,9 @@ func (m *Monitor) checkDevices() {
 			return
 		}
 
+		m.mu.Lock()
 		m.lastDevice = device
+		m.mu.Unlock()
 		log.Printf("SD card inserted: %s, mounted at %s", filepath.Base(device), m.mountPath)
 		m.eventChan <- Event{
 			Type:      EventInserted,
@@ -145,13 +252,15 @@ func (m *Monitor) checkDevices() {
 			DevName:   filepath.Base(device),
 			MountPath: m.mountPath,
 		}
-	} else if device == "" && m.lastDevice != "" {
+	} else if device == "" && currentDevice != "" {
 		// Device removed
-		log.Printf("SD card removed: %s", m.lastDevice)
+		log.Printf("SD card removed: %s", currentDevice)
 
 		m.unmount()
+		m.mu.Lock()
 		oldDevice := m.lastDevice
 		m.lastDevice = ""
+		m.mu.Unlock()
 
 		m.eventChan <- Event{
 			Type:    EventRemoved,

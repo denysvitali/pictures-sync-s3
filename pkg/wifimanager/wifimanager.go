@@ -103,7 +103,7 @@ func (m *Manager) RemoveNetwork(ssid string) error {
 
 // ScanNetworks scans for available WiFi networks using the wifi library
 func (m *Manager) ScanNetworks() ([]ScanResult, error) {
-	log.Printf("Scanning for WiFi networks...")
+	log.Printf("Starting WiFi network scan...")
 
 	cl, err := wifi.New()
 	if err != nil {
@@ -118,69 +118,105 @@ func (m *Manager) ScanNetworks() ([]ScanResult, error) {
 		return nil, fmt.Errorf("no WiFi interfaces: %w", err)
 	}
 
+	log.Printf("Found %d WiFi interface(s)", len(interfaces))
+	for i, intf := range interfaces {
+		log.Printf("  Interface %d: %s (Type: %s)", i+1, intf.Name, intf.Type.String())
+	}
+
 	if len(interfaces) == 0 {
 		return nil, fmt.Errorf("no WiFi interfaces found")
 	}
 
 	// Collect all unique networks from all interfaces
 	networksMap := make(map[string]ScanResult)
+	totalAPsFound := 0
+	hiddenCount := 0
+	skippedCount := 0
 
-	for _, intf := range interfaces {
-		log.Printf("Triggering scan on interface %s", intf.Name)
+	for intfIndex, intf := range interfaces {
+		log.Printf("=== Processing interface %d/%d: %s ===", intfIndex+1, len(interfaces), intf.Name)
 
-		// Create context with timeout for scan
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		// Trigger scan first
-		err := cl.Scan(ctx, intf)
-		if err != nil {
-			log.Printf("Failed to trigger scan on interface %s: %v", intf.Name, err)
-			continue
-		}
-
-		// Wait a moment for scan to complete
-		time.Sleep(2 * time.Second)
-
-		// Now get the access points
+		// Try getting access points directly (like gokrazy-wifi does)
+		log.Printf("Getting access points from interface %s (no explicit scan)...", intf.Name)
 		accessPoints, err := cl.AccessPoints(intf)
 		if err != nil {
-			log.Printf("Failed to get access points on interface %s: %v", intf.Name, err)
-			continue
+			log.Printf("ERROR: Failed to get access points on interface %s: %v", intf.Name, err)
+
+			// If that fails, try with explicit scan
+			log.Printf("Retrying with explicit scan on interface %s...", intf.Name)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+
+			scanErr := cl.Scan(ctx, intf)
+			if scanErr != nil {
+				log.Printf("ERROR: Failed to trigger scan on interface %s: %v", intf.Name, scanErr)
+				cancel()
+				continue
+			}
+			log.Printf("Scan triggered, waiting for completion...")
+			time.Sleep(2 * time.Second)
+
+			accessPoints, err = cl.AccessPoints(intf)
+			cancel()
+
+			if err != nil {
+				log.Printf("ERROR: Still failed to get access points after explicit scan on interface %s: %v", intf.Name, err)
+				continue
+			}
 		}
 
-		log.Printf("Found %d access points on interface %s", len(accessPoints), intf.Name)
+		log.Printf("Raw scan results from %s: %d access point(s)", intf.Name, len(accessPoints))
+		totalAPsFound += len(accessPoints)
 
-		for _, ap := range accessPoints {
+		for apIndex, ap := range accessPoints {
+			log.Printf("  AP %d: BSSID=%s, SSID='%s', Freq=%dMHz",
+				apIndex+1, ap.BSSID.String(), ap.SSID, ap.Frequency)
+
 			// Skip hidden networks
 			if ap.SSID == "" {
+				log.Printf("    → Skipping hidden network (empty SSID)")
+				hiddenCount++
 				continue
 			}
 
 			// Check if network is encrypted
 			encrypted := len(ap.RSN.PairwiseCiphers) > 0
+			log.Printf("    → Encryption: %v (RSN ciphers: %d)", encrypted, len(ap.RSN.PairwiseCiphers))
 
 			result := ScanResult{
 				SSID:      ap.SSID,
-				Signal:    -50, // Placeholder - BSS doesn't contain signal strength
+				Signal:    0, // No signal data available in BSS scan results
 				Encrypted: encrypted,
 			}
 
-			// Only add if we don't already have this SSID
-			if _, exists := networksMap[ap.SSID]; !exists {
-				networksMap[ap.SSID] = result
-				log.Printf("Found network: %s (encrypted: %v)", ap.SSID, encrypted)
+			// Check for duplicate SSIDs
+			key := ap.SSID
+			if existing, exists := networksMap[key]; exists {
+				log.Printf("    → DUPLICATE SSID '%s' (keeping first, BSSID was %s)", ap.SSID, ap.BSSID.String())
+				_ = existing // Keep the first one found
+				skippedCount++
+			} else {
+				networksMap[key] = result
+				log.Printf("    → ADDED unique network: '%s' (encrypted: %v)", ap.SSID, encrypted)
 			}
 		}
+
+		log.Printf("=== Interface %s complete: %d APs processed ===", intf.Name, len(accessPoints))
 	}
 
 	// Convert map to slice
 	results := make([]ScanResult, 0, len(networksMap))
-	for _, result := range networksMap {
+	for ssid, result := range networksMap {
 		results = append(results, result)
+		log.Printf("Final result: SSID='%s', encrypted=%v", ssid, result.Encrypted)
 	}
 
-	log.Printf("Scan complete: found %d unique networks", len(results))
+	log.Printf("=== SCAN SUMMARY ===")
+	log.Printf("Total APs found: %d", totalAPsFound)
+	log.Printf("Hidden networks: %d", hiddenCount)
+	log.Printf("Duplicate SSIDs skipped: %d", skippedCount)
+	log.Printf("Unique networks returned: %d", len(results))
+	log.Printf("====================")
+
 	return results, nil
 }
 
