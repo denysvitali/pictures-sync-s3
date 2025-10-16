@@ -25,6 +25,7 @@ type Service struct {
 	monitor     *sdmonitor.Monitor
 	cardHandler *cardhandler.Handler
 	sigHandler  *signals.Handler
+	timeSynced  bool // Track if time is properly synced
 }
 
 // Config holds configuration for the daemon service
@@ -44,6 +45,9 @@ func New(cfg Config) (*Service, error) {
 	// Wait for gokrazy's NTP daemon to sync time
 	log.Println("Waiting for time synchronization (gokrazy NTP daemon)...")
 
+	// Track whether time sync succeeded
+	var timeSynced bool
+
 	// Wait until we have a reasonable time (not 1970 epoch)
 	startWait := time.Now()
 	for {
@@ -51,13 +55,16 @@ func New(cfg Config) (*Service, error) {
 		// Check if time is after year 2020 (definitely synced)
 		if now.Year() > 2020 {
 			log.Printf("Time synchronized successfully. Current time: %s", now)
+			timeSynced = true
 			break
 		}
 
 		// Check if we've been waiting too long (fallback after 2 minutes)
 		if time.Since(startWait) > 2*time.Minute {
-			log.Printf("Warning: Time sync timeout after 2 minutes. Current time: %s (may be incorrect)", now)
-			log.Println("Continuing anyway, but timestamps may be inaccurate")
+			log.Printf("ERROR: Time sync failed after 2 minutes. Current time: %s", now)
+			log.Println("CRITICAL: System time is not synchronized! Sync operations will be disabled.")
+			log.Println("Please check network connectivity and NTP configuration.")
+			timeSynced = false
 			break
 		}
 
@@ -152,6 +159,7 @@ func New(cfg Config) (*Service, error) {
 		monitor:     monitor,
 		cardHandler: cardHandler,
 		sigHandler:  sigHandler,
+		timeSynced:  timeSynced,
 	}, nil
 }
 
@@ -191,6 +199,16 @@ func (s *Service) Run() error {
 			switch event.Type {
 			case sdmonitor.EventInserted:
 				log.Printf("Processing card insertion event: %s at %s", event.DevName, event.MountPath)
+
+				// Check if time is synced before allowing sync operations
+				if !s.timeSynced {
+					log.Println("ERROR: Cannot sync - system time is not synchronized!")
+					log.Println("Card detected but sync disabled due to incorrect system time")
+					s.stateMgr.SetStatus(state.StatusError)
+					s.stateMgr.SetError("System time not synchronized - sync disabled")
+					break
+				}
+
 				s.cardHandler.HandleInserted(event)
 			case sdmonitor.EventRemoved:
 				log.Printf("Processing card removal event: %s", event.DevName)
