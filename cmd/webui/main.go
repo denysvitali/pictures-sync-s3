@@ -305,88 +305,186 @@ func getWebUIHTML() string {
         }
 
         :root {
-            --primary: #2563eb;
-            --primary-dark: #1e40af;
-            --primary-light: #dbeafe;
-            --success: #16a34a;
-            --success-light: #dcfce7;
-            --warning: #ea580c;
+            --primary: #6366f1;
+            --primary-dark: #4f46e5;
+            --primary-light: #e0e7ff;
+            --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --success: #10b981;
+            --success-light: #d1fae5;
+            --warning: #f59e0b;
             --warning-light: #fed7aa;
-            --error: #dc2626;
+            --error: #ef4444;
             --error-light: #fee2e2;
+            --info: #3b82f6;
+            --info-light: #dbeafe;
             --bg: #f8fafc;
             --bg-secondary: #f1f5f9;
+            --bg-tertiary: #e2e8f0;
             --card: #ffffff;
+            --card-hover: #fafafa;
+            --glass: rgba(255, 255, 255, 0.95);
             --text: #1e293b;
             --text-secondary: #64748b;
+            --text-tertiary: #94a3b8;
             --border: #e2e8f0;
-            --shadow: 0 1px 3px rgba(0,0,0,0.1);
-            --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1);
-            --shadow-lg: 0 10px 25px rgba(0,0,0,0.1);
+            --border-light: #f1f5f9;
+            --shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.06);
+            --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
+            --shadow-lg: 0 10px 25px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05);
+            --shadow-xl: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04);
             --radius: 0.5rem;
             --radius-lg: 0.75rem;
+            --radius-xl: 1rem;
+            --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
         [data-theme="dark"] {
-            --primary: #3b82f6;
-            --primary-dark: #2563eb;
-            --primary-light: #1e3a8a;
+            --primary: #818cf8;
+            --primary-dark: #6366f1;
+            --primary-light: #312e81;
+            --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             --success: #34d399;
             --success-light: #064e3b;
             --warning: #fbbf24;
             --warning-light: #78350f;
             --error: #f87171;
             --error-light: #7f1d1d;
+            --info: #60a5fa;
+            --info-light: #1e3a8a;
             --bg: #0f172a;
             --bg-secondary: #1e293b;
+            --bg-tertiary: #334155;
             --card: #1e293b;
+            --card-hover: #334155;
+            --glass: rgba(30, 41, 59, 0.95);
             --text: #f1f5f9;
             --text-secondary: #94a3b8;
+            --text-tertiary: #64748b;
             --border: #334155;
-            --shadow: 0 1px 3px rgba(0,0,0,0.3);
-            --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.3);
-            --shadow-lg: 0 10px 25px rgba(0,0,0,0.3);
+            --border-light: #475569;
+            --shadow: 0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
+            --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.3), 0 2px 4px -1px rgba(0,0,0,0.2);
+            --shadow-lg: 0 10px 25px -3px rgba(0,0,0,0.4), 0 4px 6px -2px rgba(0,0,0,0.2);
+            --shadow-xl: 0 20px 25px -5px rgba(0,0,0,0.5), 0 10px 10px -5px rgba(0,0,0,0.3);
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', sans-serif;
-            background: linear-gradient(135deg, var(--bg) 0%, var(--bg-secondary) 100%);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', sans-serif;
+            background: var(--bg);
             color: var(--text);
             line-height: 1.6;
             min-height: 100vh;
-            transition: all 0.3s ease;
+            transition: var(--transition);
+            position: relative;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(135deg, var(--primary-light) 0%, transparent 50%, var(--primary-light) 100%);
+            opacity: 0.05;
+            z-index: -1;
         }
 
         .header {
-            background: linear-gradient(135deg, var(--card), var(--bg-secondary));
+            background: var(--glass);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
             border-bottom: 1px solid var(--border);
-            padding: 1.5rem 2rem;
-            box-shadow: var(--shadow-md);
-            position: relative;
-            overflow: hidden;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: var(--shadow);
+        }
+
+        .header-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 1rem 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .logo {
+            width: 40px;
+            height: 40px;
+            background: var(--primary-gradient);
+            border-radius: var(--radius);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            color: white;
+            font-weight: bold;
         }
 
         .header h1 {
             font-size: 1.5rem;
             font-weight: 700;
-            color: var(--primary);
+            background: var(--primary-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
         }
 
-        .header-content {
+        .header-actions {
             display: flex;
-            justify-content: space-between;
             align-items: center;
-            position: relative;
-            z-index: 1;
+            gap: 0.75rem;
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            font-size: 0.875rem;
+        }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--error);
+            animation: pulse 2s infinite;
+        }
+
+        .status-indicator.connected {
+            background: var(--success);
+        }
+
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
         }
 
         .theme-toggle {
             background: var(--card);
             border: 1px solid var(--border);
             border-radius: var(--radius);
-            padding: 0.5rem 0.75rem;
+            padding: 0.5rem;
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: var(--transition);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
             box-shadow: var(--shadow);
             color: var(--text);
             font-size: 1.25rem;
@@ -413,31 +511,61 @@ func getWebUIHTML() string {
             display: flex;
             gap: 0.5rem;
             margin-bottom: 2rem;
-            border-bottom: 2px solid var(--border);
+            background: var(--card);
+            padding: 0.5rem;
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow);
             overflow-x: auto;
+            border: 1px solid var(--border);
         }
 
         .tab {
-            padding: 0.75rem 1.5rem;
-            background: none;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1.25rem;
+            background: transparent;
             border: none;
-            border-bottom: 3px solid transparent;
+            border-radius: var(--radius);
             cursor: pointer;
-            font-size: 1rem;
+            font-size: 0.9rem;
             font-weight: 500;
             color: var(--text-secondary);
-            transition: all 0.2s;
+            transition: var(--transition);
             white-space: nowrap;
+            position: relative;
+        }
+
+        .tab-icon {
+            font-size: 1.1rem;
+            display: inline-flex;
+        }
+
+        .tab-text {
+            display: inline-flex;
         }
 
         .tab:hover {
             color: var(--primary);
-            background: rgba(37, 99, 235, 0.05);
+            background: var(--primary-light);
+            transform: translateY(-1px);
         }
 
         .tab.active {
-            color: var(--primary);
-            border-bottom-color: var(--primary);
+            color: white;
+            background: var(--primary-gradient);
+            box-shadow: var(--shadow-md);
+        }
+
+        .tab.active .tab-icon {
+            animation: bounceIn 0.5s;
+        }
+
+        @keyframes bounceIn {
+            0% { transform: scale(0.3); }
+            50% { transform: scale(1.05); }
+            70% { transform: scale(0.9); }
+            100% { transform: scale(1); }
         }
 
         .tab-content {
@@ -592,6 +720,79 @@ func getWebUIHTML() string {
             100% { transform: translateX(100%); }
         }
 
+        .grid {
+            display: grid;
+            gap: 1.5rem;
+        }
+
+        .grid-cols-2 {
+            grid-template-columns: repeat(2, 1fr);
+        }
+
+        .grid-cols-3 {
+            grid-template-columns: repeat(3, 1fr);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1.5rem;
+            margin-top: 1rem;
+        }
+
+        .stat-item {
+            text-align: center;
+            padding: 1rem;
+            background: var(--bg-secondary);
+            border-radius: var(--radius);
+            transition: var(--transition);
+        }
+
+        .stat-item:hover {
+            background: var(--bg-tertiary);
+            transform: translateY(-2px);
+        }
+
+        .stat-value {
+            font-size: 1.75rem;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 0.25rem;
+        }
+
+        .stat-label {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .sync-stats {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 1.5rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid var(--border);
+        }
+
+        .sync-stat {
+            text-align: center;
+        }
+
+        .sync-stat .label {
+            display: block;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.25rem;
+        }
+
+        .sync-stat .value {
+            display: block;
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--text);
+        }
+
         .info-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -601,8 +802,13 @@ func getWebUIHTML() string {
 
         .info-item {
             padding: 1rem;
-            background: var(--bg);
-            border-radius: 0.375rem;
+            background: var(--bg-secondary);
+            border-radius: var(--radius);
+            transition: var(--transition);
+        }
+
+        .info-item:hover {
+            background: var(--bg-tertiary);
         }
 
         .info-item label {
@@ -612,6 +818,7 @@ func getWebUIHTML() string {
             text-transform: uppercase;
             color: var(--text-secondary);
             margin-bottom: 0.25rem;
+            letter-spacing: 0.5px;
         }
 
         .info-item value {
@@ -671,12 +878,26 @@ func getWebUIHTML() string {
             font-size: 0.875rem;
         }
 
+        .history-controls {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .history-controls .form-input {
+            flex: 1;
+        }
+
+        .history-controls .form-select {
+            width: 200px;
+        }
+
         .btn {
             padding: 0.75rem 1.5rem;
             border: none;
             border-radius: var(--radius);
-            font-size: 1rem;
-            font-weight: 500;
+            font-size: 0.9rem;
+            font-weight: 600;
             cursor: pointer;
             transition: all 0.2s ease;
             position: relative;
@@ -684,6 +905,8 @@ func getWebUIHTML() string {
             display: inline-flex;
             align-items: center;
             gap: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
 
         .btn::before {
@@ -837,6 +1060,110 @@ func getWebUIHTML() string {
         .signal-medium .signal-bar:nth-child(-n+3) { background: var(--warning); }
         .signal-weak .signal-bar:nth-child(-n+2) { background: var(--error); }
 
+        .btn-group {
+            display: flex;
+            gap: 0.75rem;
+            margin-top: 1rem;
+        }
+
+        .form-hint {
+            font-size: 0.875rem;
+            color: var(--text-tertiary);
+            margin-top: 0.25rem;
+        }
+
+        .password-input-wrapper {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .password-input-wrapper .form-input {
+            padding-right: 3rem;
+        }
+
+        .password-toggle {
+            position: absolute;
+            right: 0.75rem;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            padding: 0.5rem;
+            color: var(--text-secondary);
+            font-size: 1.25rem;
+        }
+
+        .card-actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .scan-status {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }
+
+        .networks-list {
+            margin-top: 1rem;
+        }
+
+        .network-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem;
+            background: var(--bg-secondary);
+            border-radius: var(--radius);
+            margin-bottom: 0.75rem;
+            transition: var(--transition);
+        }
+
+        .network-item:hover {
+            background: var(--bg-tertiary);
+            transform: translateX(4px);
+        }
+
+        .network-info {
+            flex: 1;
+        }
+
+        .network-name {
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+
+        .network-signal {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }
+
+        .signal-bars {
+            display: flex;
+            gap: 2px;
+            align-items: flex-end;
+        }
+
+        .signal-bar {
+            width: 3px;
+            background: var(--border);
+            border-radius: 1px;
+            transition: background 0.3s;
+        }
+
+        .signal-bar:nth-child(1) { height: 8px; }
+        .signal-bar:nth-child(2) { height: 12px; }
+        .signal-bar:nth-child(3) { height: 16px; }
+        .signal-bar:nth-child(4) { height: 20px; }
+
+        .signal-bar.active {
+            background: var(--success);
+        }
+
         .loading {
             text-align: center;
             padding: 3rem;
@@ -888,8 +1215,78 @@ func getWebUIHTML() string {
                 padding: 1rem;
             }
 
-            .header {
+            .header-content {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 1rem;
                 padding: 1rem;
+            }
+
+            .header-left {
+                justify-content: center;
+            }
+
+            .header-actions {
+                justify-content: space-between;
+            }
+
+            .tabs {
+                gap: 0.25rem;
+                padding: 0.25rem;
+            }
+
+            .tab {
+                padding: 0.5rem 0.75rem;
+                font-size: 0.8rem;
+            }
+
+            .tab-text {
+                display: none;
+            }
+
+            .tab-icon {
+                font-size: 1.2rem;
+            }
+
+            .grid-cols-2,
+            .grid-cols-3 {
+                grid-template-columns: 1fr;
+            }
+
+            .card {
+                padding: 1rem;
+            }
+
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .sync-stats {
+                flex-direction: column;
+                gap: 1rem;
+            }
+
+            .btn-group {
+                flex-direction: column;
+            }
+
+            .btn {
+                width: 100%;
+                justify-content: center;
+            }
+
+            .history-controls {
+                flex-direction: column;
+            }
+
+            .history-controls .form-select {
+                width: 100%;
+            }
+
+            .network-item {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 0.75rem;
             }
 
             .info-grid {
@@ -1124,110 +1521,113 @@ func getWebUIHTML() string {
 <body>
     <div class="header">
         <div class="header-content">
-            <div>
-                <h1>📸 Photo Backup Station</h1>
-                <p>Automated photo backup system for your Raspberry Pi</p>
+            <div class="header-left">
+                <div class="logo">📸</div>
+                <h1>Photo Backup Station</h1>
             </div>
-            <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode">
-                <span id="theme-icon">🌙</span>
-            </button>
+            <div class="header-actions">
+                <div class="connection-status">
+                    <div class="status-indicator" id="ws-indicator"></div>
+                    <span id="ws-status">Connecting...</span>
+                </div>
+                <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode">
+                    <span id="theme-icon">🌙</span>
+                </button>
+            </div>
         </div>
     </div>
 
     <div class="container">
         <div class="tabs">
-            <button class="tab active" onclick="switchTab('status')">📊 Status</button>
-            <button class="tab" onclick="switchTab('devices')">💾 Devices</button>
-            <button class="tab" onclick="switchTab('gallery')">🖼️ Gallery</button>
-            <button class="tab" onclick="switchTab('history')">📚 History</button>
-            <button class="tab" onclick="switchTab('files')">📁 Files</button>
-            <button class="tab" onclick="switchTab('wifi')">📡 WiFi</button>
-            <button class="tab" onclick="switchTab('network')">🔧 Network Debug</button>
-            <button class="tab" onclick="switchTab('config')">⚙️ Configuration</button>
+            <button class="tab active" onclick="switchTab('status')">
+                <span class="tab-icon">📊</span>
+                <span class="tab-text">Status</span>
+            </button>
+            <button class="tab" onclick="switchTab('history')">
+                <span class="tab-icon">📚</span>
+                <span class="tab-text">History</span>
+            </button>
+            <button class="tab" onclick="switchTab('wifi')">
+                <span class="tab-icon">📡</span>
+                <span class="tab-text">WiFi</span>
+            </button>
+            <button class="tab" onclick="switchTab('config')">
+                <span class="tab-icon">⚙️</span>
+                <span class="tab-text">Configuration</span>
+            </button>
         </div>
 
         <!-- Status Tab -->
         <div id="status-tab" class="tab-content active">
-            <div class="card">
-                <h2>Current Status</h2>
-                <div id="status-display">
-                    <div class="loading">
-                        <div class="spinner"></div>
-                        <p>Loading status...</p>
+            <div class="grid grid-cols-2">
+                <div class="card">
+                    <h2>System Status</h2>
+                    <div id="status-display">
+                        <div class="loading">
+                            <div class="spinner"></div>
+                            <p>Loading status...</p>
+                        </div>
                     </div>
                 </div>
-                <div id="sync-controls" style="margin-top: 1rem; display: none;">
-                    <button id="start-sync-btn" class="btn btn-primary" onclick="startSync()">▶️ Start Sync</button>
-                    <button id="cancel-sync-btn" class="btn btn-secondary" onclick="cancelSync()" style="display: none;">⏹️ Cancel Sync</button>
+
+                <div class="card">
+                    <h2>Quick Stats</h2>
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-value" id="total-syncs">0</div>
+                            <div class="stat-label">Total Syncs</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="total-files">0</div>
+                            <div class="stat-label">Files Backed Up</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="total-size">0 GB</div>
+                            <div class="stat-label">Data Transferred</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="last-sync">Never</div>
+                            <div class="stat-label">Last Sync</div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
             <div class="card" id="sync-details" style="display: none;">
                 <h2>Sync Progress</h2>
                 <div id="sync-progress"></div>
-            </div>
-        </div>
-
-        <!-- Devices Tab -->
-        <div id="devices-tab" class="tab-content">
-            <div class="card">
-                <h2>Available Storage Devices</h2>
-                <p style="color: var(--text-secondary); margin-bottom: 1rem;">
-                    These are all detected storage devices on the system. Select one to sync manually if needed.
-                </p>
-                <button class="btn btn-primary" onclick="refreshDevices()">🔄 Refresh Devices</button>
-                <div id="devices-list" style="margin-top: 1rem;">
-                    <div class="loading">
-                        <div class="spinner"></div>
-                        <p>Loading devices...</p>
+                <div class="sync-stats">
+                    <div class="sync-stat">
+                        <span class="label">Speed:</span>
+                        <span class="value" id="sync-speed">0 MB/s</span>
+                    </div>
+                    <div class="sync-stat">
+                        <span class="label">ETA:</span>
+                        <span class="value" id="sync-eta">Calculating...</span>
+                    </div>
+                    <div class="sync-stat">
+                        <span class="label">Elapsed:</span>
+                        <span class="value" id="sync-elapsed">00:00</span>
                     </div>
                 </div>
-            </div>
-        </div>
-
-        <!-- Gallery Tab -->
-        <div id="gallery-tab" class="tab-content">
-            <div class="card">
-                <h2>📸 SD Card Gallery</h2>
-                <p style="color: var(--text-secondary); margin-bottom: 1rem;">
-                    Browse and preview photos from your SD card with EXIF metadata.
-                </p>
-
-                <div class="gallery-path-nav" id="gallery-path-nav">
-                    <button class="btn btn-secondary" onclick="loadGallery('')">🏠 Root</button>
-                    <button class="btn btn-secondary" onclick="loadGallery('DCIM')">📁 DCIM</button>
-                    <button class="btn btn-secondary" onclick="refreshGallery()">🔄 Refresh</button>
-                    <span id="gallery-current-path" class="code" style="margin-left: auto;"></span>
-                </div>
-
-                <div id="gallery-alert" style="margin-bottom: 1rem;"></div>
-
-                <div id="gallery-display">
-                    <div class="loading">
-                        <div class="spinner"></div>
-                        <p>Loading gallery...</p>
-                    </div>
+                <div id="sync-controls" style="margin-top: 1rem;">
+                    <button id="cancel-sync-btn" class="btn btn-danger" onclick="cancelSync()">Cancel Sync</button>
                 </div>
             </div>
-        </div>
-
-        <!-- Lightbox -->
-        <div id="lightbox" class="lightbox">
-            <div class="lightbox-controls">
-                <button class="lightbox-btn" onclick="closeLightbox()" title="Close">✕</button>
-            </div>
-            <button class="lightbox-nav prev" onclick="navigateLightbox(-1)">‹</button>
-            <button class="lightbox-nav next" onclick="navigateLightbox(1)">›</button>
-            <div class="lightbox-content">
-                <img id="lightbox-img" class="lightbox-image" src="" alt="">
-            </div>
-            <div class="lightbox-info" id="lightbox-info"></div>
         </div>
 
         <!-- History Tab -->
         <div id="history-tab" class="tab-content">
             <div class="card">
                 <h2>Sync History</h2>
+                <div class="history-controls">
+                    <input type="text" class="form-input" id="history-search" placeholder="Search history..." onkeyup="filterHistory()">
+                    <select class="form-select" id="history-filter" onchange="filterHistory()">
+                        <option value="all">All Syncs</option>
+                        <option value="success">Successful</option>
+                        <option value="error">Failed</option>
+                    </select>
+                </div>
                 <div id="history-display">
                     <div class="loading">
                         <div class="spinner"></div>
@@ -1239,241 +1639,121 @@ func getWebUIHTML() string {
 
         <!-- WiFi Tab -->
         <div id="wifi-tab" class="tab-content">
-            <div class="card">
-                <h2>WiFi Status</h2>
-                <div id="wifi-status-display"></div>
+            <div class="grid grid-cols-2">
+                <div class="card">
+                    <h2>WiFi Status</h2>
+                    <div id="wifi-status-display">
+                        <div class="loading">
+                            <div class="spinner"></div>
+                            <p>Loading WiFi status...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>Quick Connect</h2>
+                    <form onsubmit="addNetworkManually(event)">
+                        <div class="form-group">
+                            <label for="manual-ssid">Network Name (SSID)</label>
+                            <input type="text" id="manual-ssid" class="form-input" placeholder="Enter network name" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="manual-password">Password</label>
+                            <div class="password-input-wrapper">
+                                <input type="password" id="manual-password" class="form-input" placeholder="Enter password">
+                                <button type="button" class="password-toggle" onclick="togglePasswordVisibility('manual-password')">
+                                    <span class="password-icon">👁️</span>
+                                </button>
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Connect</button>
+                    </form>
+                </div>
             </div>
 
             <div class="card">
                 <h2>Available Networks</h2>
-                <button class="btn btn-primary" onclick="scanWiFi()">🔍 Scan Networks</button>
-                <div id="wifi-networks" style="margin-top: 1rem;"></div>
-            </div>
-
-            <div class="card">
-                <h2>Add Network Manually</h2>
-                <form onsubmit="addNetworkManually(event)">
-                    <div class="form-group">
-                        <label for="manual-ssid">SSID (Network Name)</label>
-                        <input type="text" id="manual-ssid" class="form-input" placeholder="Enter network name" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="manual-password">Password</label>
-                        <input type="password" id="manual-password" class="form-input" placeholder="Enter password (leave empty for open networks)">
-                    </div>
-                    <button type="submit" class="btn btn-primary">➕ Add Network</button>
-                </form>
+                <div class="card-actions">
+                    <button class="btn btn-primary" onclick="scanWiFi()" id="scan-btn">
+                        <span class="btn-icon">🔍</span>
+                        <span>Scan for Networks</span>
+                    </button>
+                    <div class="scan-status" id="scan-status"></div>
+                </div>
+                <div id="wifi-networks" class="networks-list"></div>
             </div>
 
             <div class="card">
                 <h2>Saved Networks</h2>
-                <div id="saved-networks"></div>
-            </div>
-        </div>
-
-        <!-- Network Debug Tab -->
-        <div id="network-tab" class="tab-content">
-            <div class="card">
-                <h2>Network Configuration</h2>
-                <div id="network-config">
-                    <div class="loading">
-                        <div class="spinner"></div>
-                        <p>Loading network configuration...</p>
-                    </div>
-                </div>
-            </div>
-
-            <div class="card">
-                <h2>Network Interfaces</h2>
-                <button class="btn btn-primary" onclick="refreshNetworkInfo()">🔄 Refresh</button>
-                <div id="network-interfaces" style="margin-top: 1rem;">
-                    <div class="loading">
-                        <div class="spinner"></div>
-                        <p>Loading interfaces...</p>
-                    </div>
-                </div>
-            </div>
-
-            <div class="card">
-                <h2>DNS Resolution Test</h2>
-                <form onsubmit="testDNS(event)">
-                    <div class="form-group">
-                        <label for="dns-hostname">Hostname to resolve</label>
-                        <input type="text" id="dns-hostname" class="form-input" placeholder="example.com" value="google.com" required>
-                    </div>
-                    <button type="submit" class="btn btn-primary">🔍 Resolve DNS</button>
-                </form>
-                <div id="dns-result" style="margin-top: 1rem;"></div>
-            </div>
-
-            <div class="card">
-                <h2>Ping Test</h2>
-                <p style="color: var(--text-secondary); margin-bottom: 1rem; font-size: 0.875rem;">
-                    Sends ICMP echo requests to test network reachability and latency
-                </p>
-                <form onsubmit="testPing(event)">
-                    <div class="form-group">
-                        <label for="ping-hostname">Host to ping</label>
-                        <input type="text" id="ping-hostname" class="form-input" placeholder="8.8.8.8" value="8.8.8.8" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="ping-count">Number of pings</label>
-                        <input type="number" id="ping-count" class="form-input" value="4" min="1" max="10" required>
-                    </div>
-                    <button type="submit" class="btn btn-primary">📡 Ping</button>
-                </form>
-                <div id="ping-result" style="margin-top: 1rem;"></div>
-            </div>
-
-            <div class="card">
-                <h2>Connectivity Tests</h2>
-                <button class="btn btn-primary" onclick="runFullDiagnostics()">🔍 Run Full Diagnostics</button>
-                <div id="diagnostics-result" style="margin-top: 1rem;"></div>
+                <div id="saved-networks" class="networks-list"></div>
             </div>
         </div>
 
         <!-- Configuration Tab -->
         <div id="config-tab" class="tab-content">
-            <div class="card">
-                <h2>Rclone Configuration</h2>
-                <div id="config-alert"></div>
-                <form onsubmit="saveConfig(event)">
-                    <div class="form-group">
-                        <label for="rclone-config">Rclone Config (INI format)</label>
-                        <textarea id="rclone-config" class="form-textarea" placeholder="[remote-name]
+            <div class="grid grid-cols-2">
+                <div class="card">
+                    <h2>Cloud Storage</h2>
+                    <div id="config-alert"></div>
+                    <form onsubmit="saveConfig(event)">
+                        <div class="form-group">
+                            <label for="rclone-config">Rclone Configuration</label>
+                            <textarea id="rclone-config" class="form-textarea" rows="8" placeholder="[remote-name]
 type = b2
-account = ...
-key = ..."></textarea>
-                    </div>
-                    <button type="submit" class="btn btn-primary">💾 Save Configuration</button>
-                    <button type="button" class="btn btn-secondary" onclick="testConfig()">🔌 Test Connection</button>
-                </form>
+account = your-account-id
+key = your-application-key"></textarea>
+                            <p class="form-hint">Paste your rclone configuration in INI format</p>
+                        </div>
+                        <div class="btn-group">
+                            <button type="submit" class="btn btn-primary">Save Config</button>
+                            <button type="button" class="btn btn-secondary" onclick="testConfig()">Test Connection</button>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="card">
+                    <h2>Sync Settings</h2>
+                    <form onsubmit="saveSettings(event)">
+                        <div class="form-group">
+                            <label for="remote-name">Remote Name</label>
+                            <input type="text" id="remote-name" class="form-input" placeholder="e.g., b2backup">
+                            <p class="form-hint">Name of the rclone remote to use</p>
+                        </div>
+                        <div class="form-group">
+                            <label for="remote-path">Remote Path</label>
+                            <input type="text" id="remote-path" class="form-input" placeholder="e.g., /photos">
+                            <p class="form-hint">Base path on the remote storage</p>
+                        </div>
+                        <div class="form-group">
+                            <label for="reformat-threshold">Reformat Detection (%)</label>
+                            <input type="number" id="reformat-threshold" class="form-input" placeholder="30" min="1" max="100" step="1">
+                            <p class="form-hint">Generate new card ID if files drop below this percentage</p>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Save Settings</button>
+                    </form>
+                </div>
             </div>
 
             <div class="card">
-                <h2>Settings</h2>
+                <h2>Performance Tuning</h2>
                 <form onsubmit="saveSettings(event)">
-                    <div class="form-group">
-                        <label for="remote-name">Remote Name</label>
-                        <input type="text" id="remote-name" class="form-input" placeholder="e.g., b2backup">
+                    <div class="grid grid-cols-2">
+                        <div class="form-group">
+                            <label for="transfers">Parallel Transfers</label>
+                            <input type="number" id="transfers" class="form-input" placeholder="4" min="1" max="16" step="1">
+                            <p class="form-hint">Files uploaded simultaneously (default: 4)</p>
+                        </div>
+                        <div class="form-group">
+                            <label for="checkers">File Checkers</label>
+                            <input type="number" id="checkers" class="form-input" placeholder="8" min="1" max="32" step="1">
+                            <p class="form-hint">Parallel integrity checks (default: 8)</p>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label for="remote-path">Remote Path</label>
-                        <input type="text" id="remote-path" class="form-input" placeholder="e.g., /photos">
-                    </div>
-                    <div class="form-group">
-                        <label for="reformat-threshold">Reformat Detection Threshold (%)</label>
-                        <input type="number" id="reformat-threshold" class="form-input" placeholder="30" min="1" max="100" step="1">
-                    </div>
-                    <div class="form-group">
-                        <label for="transfers">Parallel Transfers</label>
-                        <input type="number" id="transfers" class="form-input" placeholder="4" min="1" max="16" step="1" title="Number of files to upload simultaneously (default: 4)">
-                        <p style="font-size: 0.875rem; color: var(--text-secondary); margin-top: 0.25rem;">Higher values = faster uploads but more bandwidth/memory usage</p>
-                    </div>
-                    <div class="form-group">
-                        <label for="checkers">Parallel File Checkers</label>
-                        <input type="number" id="checkers" class="form-input" placeholder="8" min="1" max="32" step="1" title="Number of file integrity checkers (default: 8)">
-                        <p style="font-size: 0.875rem; color: var(--text-secondary); margin-top: 0.25rem;">Determines how many files are compared in parallel</p>
-                    </div>
-                    <button type="submit" class="btn btn-primary">💾 Save Settings</button>
-                </form>
-            </div>
-
-            <div class="card">
-                <h2>Google Photos Upload (Optional)</h2>
-                <p style="color: var(--text-secondary); margin-bottom: 1rem;">
-                    Optionally upload JPG files to Google Photos after syncing to your primary remote.
-                    You must configure a Google Photos remote in rclone (using Google Drive backend) before enabling this feature.
-                </p>
-                <form onsubmit="saveSettings(event)">
-                    <div class="form-group">
-                        <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
-                            <input type="checkbox" id="google-photos-enabled" style="width: auto; cursor: pointer;">
-                            <span>Enable Google Photos Upload</span>
-                        </label>
-                        <p style="font-size: 0.875rem; color: var(--text-secondary); margin-top: 0.25rem;">When enabled, JPG files will be uploaded to Google Photos after the main sync completes</p>
-                    </div>
-                    <div class="form-group">
-                        <label for="google-photos-remote">Google Photos Remote Name</label>
-                        <input type="text" id="google-photos-remote" class="form-input" placeholder="e.g., googlephotos">
-                        <p style="font-size: 0.875rem; color: var(--text-secondary); margin-top: 0.25rem;">The name of your Google Photos rclone remote (configured via rclone config)</p>
-                    </div>
-                    <button type="submit" class="btn btn-primary">💾 Save Google Photos Settings</button>
+                    <button type="submit" class="btn btn-primary">Apply Performance Settings</button>
                 </form>
             </div>
         </div>
 
-        <!-- Files Tab -->
-        <div id="files-tab" class="tab-content">
-            <div class="card">
-                <h2>📁 Remote Files Browser</h2>
-                <div id="files-alert"></div>
-
-                <!-- View Selector -->
-                <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
-                    <button class="btn btn-secondary" id="view-cards-btn" onclick="switchFilesView('cards')">
-                        🗂️ Browse by Card
-                    </button>
-                    <button class="btn btn-secondary" id="view-folder-btn" onclick="switchFilesView('folder')">
-                        📂 Browse by Folder
-                    </button>
-                    <button class="btn btn-secondary" onclick="refreshFilesView()">🔄 Refresh</button>
-                </div>
-
-                <!-- Cards View -->
-                <div id="files-cards-view" style="display: none;">
-                    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
-                        Browse photos organized by SD card. Each card represents a unique SD card that has been synced.
-                    </p>
-                    <div id="cards-list">
-                        <div class="loading">
-                            <div class="spinner"></div>
-                            <p>Loading cards...</p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Folder View -->
-                <div id="files-folder-view" style="display: none;">
-                    <!-- Breadcrumb Navigation -->
-                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
-                        <span style="color: var(--text-secondary); font-size: 0.875rem;">📍 Path:</span>
-                        <div id="breadcrumb-nav" style="display: flex; align-items: center; gap: 0.25rem; flex-wrap: wrap;"></div>
-                    </div>
-
-                    <!-- Search Box -->
-                    <div style="margin-bottom: 1rem;">
-                        <input
-                            type="text"
-                            id="files-search"
-                            placeholder="🔍 Search files..."
-                            style="width: 100%; padding: 0.75rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text);"
-                            oninput="filterFiles()"
-                        />
-                    </div>
-
-                    <!-- Files Display -->
-                    <div id="files-display">
-                        <div class="loading">
-                            <div class="spinner"></div>
-                            <p>Loading files...</p>
-                        </div>
-                    </div>
-
-                    <!-- Pagination Controls -->
-                    <div id="pagination-controls" style="display: none; margin-top: 1rem; text-align: center;">
-                        <div style="display: inline-flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
-                            <button class="btn btn-secondary" id="prev-page-btn" onclick="loadPrevPage()">← Previous</button>
-                            <span id="page-info" style="padding: 0 1rem; color: var(--text-secondary);"></span>
-                            <button class="btn btn-secondary" id="next-page-btn" onclick="loadNextPage()">Next →</button>
-                        </div>
-                        <div style="margin-top: 0.5rem; color: var(--text-secondary); font-size: 0.875rem;">
-                            <span id="items-info"></span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
     </div>
 
     <script>
@@ -1536,6 +1816,7 @@ key = ..."></textarea>
             ws.onopen = () => {
                 console.log('WebSocket connected');
                 clearInterval(reconnectInterval);
+                updateConnectionStatus(true);
             };
 
             ws.onmessage = (event) => {
@@ -1545,37 +1826,187 @@ key = ..."></textarea>
 
             ws.onerror = (error) => {
                 console.error('WebSocket error:', error);
+                updateConnectionStatus(false);
             };
 
             ws.onclose = () => {
                 console.log('WebSocket disconnected, reconnecting...');
+                updateConnectionStatus(false);
                 reconnectInterval = setInterval(() => {
                     connectWebSocket();
                 }, 5000);
             };
         }
 
+        // Update connection status indicator
+        function updateConnectionStatus(connected) {
+            const indicator = document.getElementById('ws-indicator');
+            const status = document.getElementById('ws-status');
+
+            if (connected) {
+                indicator.classList.add('connected');
+                status.textContent = 'Connected';
+            } else {
+                indicator.classList.remove('connected');
+                status.textContent = 'Disconnected';
+            }
+        }
+
+        // Update quick stats from history
+        async function updateQuickStats(data) {
+            try {
+                const response = await fetch('/api/history');
+                const history = await response.json();
+
+                let totalFiles = 0;
+                let totalSize = 0;
+                let lastSyncTime = 'Never';
+                let successCount = 0;
+
+                if (history && history.length > 0) {
+                    // Calculate totals
+                    history.forEach(sync => {
+                        if (sync.status === 'success') {
+                            successCount++;
+                            totalFiles += sync.files_synced || 0;
+                            totalSize += sync.bytes_transferred || 0;
+                        }
+                    });
+
+                    // Get last successful sync
+                    const lastSuccess = history.find(s => s.status === 'success');
+                    if (lastSuccess && lastSuccess.ended_at) {
+                        const date = new Date(lastSuccess.ended_at);
+                        lastSyncTime = formatRelativeTime(date);
+                    }
+                }
+
+                // Update DOM
+                document.getElementById('total-syncs').textContent = successCount;
+                document.getElementById('total-files').textContent = formatNumber(totalFiles);
+                document.getElementById('total-size').textContent = formatBytes(totalSize);
+                document.getElementById('last-sync').textContent = lastSyncTime;
+
+            } catch (error) {
+                console.error('Failed to update quick stats:', error);
+            }
+        }
+
+        // Format relative time
+        function formatRelativeTime(date) {
+            const seconds = Math.floor((new Date() - date) / 1000);
+
+            if (seconds < 60) return 'Just now';
+            if (seconds < 3600) return Math.floor(seconds / 60) + ' min ago';
+            if (seconds < 86400) return Math.floor(seconds / 3600) + ' hours ago';
+            if (seconds < 604800) return Math.floor(seconds / 86400) + ' days ago';
+
+            return date.toLocaleDateString();
+        }
+
+        // Format large numbers
+        function formatNumber(num) {
+            if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+            if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+            return num.toString();
+        }
+
+        // Password visibility toggle
+        function togglePasswordVisibility(inputId) {
+            const input = document.getElementById(inputId);
+            const button = event.currentTarget;
+            const icon = button.querySelector('.password-icon');
+
+            if (input.type === 'password') {
+                input.type = 'text';
+                icon.textContent = '👁️‍🗨️';
+            } else {
+                input.type = 'password';
+                icon.textContent = '👁️';
+            }
+        }
+
+        // Format duration in seconds to human readable
+        function formatDuration(seconds) {
+            if (seconds === 0) return 'Calculating...';
+            if (seconds < 60) return seconds + 's';
+            if (seconds < 3600) return Math.floor(seconds / 60) + 'm ' + (seconds % 60) + 's';
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            return hours + 'h ' + minutes + 'm';
+        }
+
+        // Filter history based on search and status
+        let allHistory = [];
+        function filterHistory() {
+            const search = document.getElementById('history-search').value.toLowerCase();
+            const filter = document.getElementById('history-filter').value;
+
+            let filtered = allHistory;
+
+            // Filter by status
+            if (filter !== 'all') {
+                filtered = filtered.filter(s => s.status === filter);
+            }
+
+            // Filter by search text
+            if (search) {
+                filtered = filtered.filter(s => {
+                    const cardId = (s.card_id || '').toLowerCase();
+                    const path = (s.source_path || '').toLowerCase();
+                    const date = new Date(s.started_at).toLocaleString().toLowerCase();
+                    return cardId.includes(search) || path.includes(search) || date.includes(search);
+                });
+            }
+
+            displayHistory(filtered);
+        }
+
         // Update status display
         function updateStatus(data) {
             const statusDiv = document.getElementById('status-display');
             const syncDetails = document.getElementById('sync-details');
-            const syncControls = document.getElementById('sync-controls');
-            const startBtn = document.getElementById('start-sync-btn');
-            const cancelBtn = document.getElementById('cancel-sync-btn');
+
+            // Update quick stats
+            updateQuickStats(data);
 
             let badgeClass = 'badge-' + data.status;
-            let statusText = data.status.toUpperCase();
+            let statusText = data.status.charAt(0).toUpperCase() + data.status.slice(1);
+
+            // Status icons
+            const statusIcons = {
+                'idle': '💤',
+                'detected': '💾',
+                'syncing': '🔄',
+                'success': '✅',
+                'error': '❌'
+            };
 
             let html = '<div class="info-grid">';
-            html += '<div class="info-item"><label>Status</label><value><span class="status-badge ' + badgeClass + '">' + statusText + '</span></value></div>';
-            html += '<div class="info-item"><label>SD Card</label><value>' + (data.sdcard_mounted ? '✓ Mounted' : '✗ Not mounted') + '</value></div>';
+            html += '<div class="info-item">';
+            html += '<label>Current Status</label>';
+            html += '<value><span class="status-badge ' + badgeClass + '">';
+            html += statusIcons[data.status] || '' + ' ' + statusText;
+            html += '</span></value>';
+            html += '</div>';
+
+            html += '<div class="info-item">';
+            html += '<label>SD Card</label>';
+            html += '<value>' + (data.sdcard_mounted ? '✅ Mounted' : '❌ Not Mounted') + '</value>';
+            html += '</div>';
 
             if (data.sdcard_path) {
-                html += '<div class="info-item"><label>Mount Path</label><value class="code">' + escapeHtml(data.sdcard_path) + '</value></div>';
+                html += '<div class="info-item">';
+                html += '<label>Mount Path</label>';
+                html += '<value class="code">' + escapeHtml(data.sdcard_path) + '</value>';
+                html += '</div>';
             }
 
             if (data.card_id) {
-                html += '<div class="info-item"><label>Card ID</label><value class="code">' + escapeHtml(data.card_id) + '</value></div>';
+                html += '<div class="info-item">';
+                html += '<label>Card ID</label>';
+                html += '<value class="code">' + escapeHtml(data.card_id) + '</value>';
+                html += '</div>';
             }
 
             html += '</div>';
@@ -1649,25 +2080,40 @@ key = ..."></textarea>
             const percent = sync.files_total > 0 ? (sync.files_synced / sync.files_total * 100) : 0;
             const bytesPercent = sync.bytes_total > 0 ? (sync.bytes_synced / sync.bytes_total * 100) : 0;
 
+            // Calculate speed and ETA
+            const speed = sync.bytes_per_second || 0;
+            const remaining = (sync.bytes_total || 0) - (sync.bytes_synced || 0);
+            const eta = speed > 0 ? Math.round(remaining / speed) : 0;
+            const elapsed = sync.started_at ? Math.floor((Date.now() - new Date(sync.started_at)) / 1000) : 0;
+
+            // Update live stats
+            document.getElementById('sync-speed').textContent = formatBytes(speed) + '/s';
+            document.getElementById('sync-eta').textContent = formatDuration(eta);
+            document.getElementById('sync-elapsed').textContent = formatDuration(elapsed);
+
             // Main progress bar showing file count
-            let html = '<div style="margin-bottom: 0.5rem;">';
+            let html = '<div style="margin-bottom: 1rem;">';
             html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">';
-            html += '<label style="font-size: 0.875rem; font-weight: 600; color: var(--text-secondary);">File Progress</label>';
-            html += '<span style="font-size: 0.875rem; font-weight: 600; color: var(--text);">' + sync.files_synced + ' / ' + sync.files_total + ' files</span>';
+            html += '<label style="font-size: 0.875rem; font-weight: 600; color: var(--text-secondary);">📁 Files</label>';
+            html += '<span style="font-size: 0.875rem; font-weight: 600; color: var(--primary);">' + sync.files_synced + ' / ' + sync.files_total + '</span>';
             html += '</div>';
             html += '<div class="progress">';
-            html += '<div class="progress-bar" style="width: ' + percent.toFixed(1) + '%">' + percent.toFixed(1) + '%</div>';
+            html += '<div class="progress-bar" style="width: ' + percent.toFixed(1) + '%">';
+            html += percent > 10 ? percent.toFixed(0) + '%' : '';
+            html += '</div>';
             html += '</div>';
             html += '</div>';
 
             // Data transfer progress bar
-            html += '<div style="margin-bottom: 1.5rem;">';
+            html += '<div>';
             html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">';
-            html += '<label style="font-size: 0.875rem; font-weight: 600; color: var(--text-secondary);">Data Transfer</label>';
-            html += '<span style="font-size: 0.875rem; font-weight: 600; color: var(--text);">' + formatBytes(sync.bytes_synced) + ' / ' + formatBytes(sync.bytes_total) + '</span>';
+            html += '<label style="font-size: 0.875rem; font-weight: 600; color: var(--text-secondary);">💾 Data</label>';
+            html += '<span style="font-size: 0.875rem; font-weight: 600; color: var(--primary);">' + formatBytes(sync.bytes_synced) + ' / ' + formatBytes(sync.bytes_total) + '</span>';
             html += '</div>';
             html += '<div class="progress">';
-            html += '<div class="progress-bar" style="width: ' + bytesPercent.toFixed(1) + '%">' + bytesPercent.toFixed(1) + '%</div>';
+            html += '<div class="progress-bar" style="width: ' + bytesPercent.toFixed(1) + '%">';
+            html += bytesPercent > 10 ? bytesPercent.toFixed(0) + '%' : '';
+            html += '</div>';
             html += '</div>';
             html += '</div>';
 
