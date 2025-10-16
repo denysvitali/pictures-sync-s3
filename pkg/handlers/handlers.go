@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/settings"
+	"github.com/denysvitali/pictures-sync-s3/pkg/ssrf"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 	"github.com/denysvitali/pictures-sync-s3/pkg/syncmanager"
 	"github.com/denysvitali/pictures-sync-s3/pkg/wifimanager"
@@ -13,10 +14,11 @@ import (
 
 // Context holds dependencies for all handlers
 type Context struct {
-	StateMgr    *state.Manager
-	SyncMgr     *syncmanager.Manager
-	WiFiMgr     *wifimanager.Manager
-	AppSettings *settings.Settings
+	StateMgr       *state.Manager
+	SyncMgr        *syncmanager.Manager
+	WiFiMgr        *wifimanager.Manager
+	AppSettings    *settings.Settings
+	SSRFValidator  *ssrf.Validator
 }
 
 // JSONResponse writes a JSON response

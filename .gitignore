@@ -41,3 +41,23 @@ gokrazy/
 # Build artifacts
 dist/
 build/
+
+# Coverage reports
+coverage/
+coverage.out
+coverage.html
+coverage.txt
+
+# Security scan reports
+gosec-report.json
+govulncheck-report.txt
+nancy-report.txt
+trivy-report.json
+licenses-report.txt
+gitleaks-report.json
+
+# Benchmark results
+benchmark.txt
+
+# CI/CD artifacts
+*.sarif

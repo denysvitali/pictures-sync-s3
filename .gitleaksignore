@@ -1,0 +1,13 @@
+# Gitleaks ignore file
+# Use this to suppress false positives from gitleaks secret scanning
+
+# Test files with mock credentials (if any)
+# test-data/**/*
+
+# Example patterns (uncomment and modify as needed):
+# **/test_*.go:password
+# **/*_test.go:api_key
+
+# Documentation files with example credentials
+# docs/examples/**
+# QUICKSTART.md:example-api-key

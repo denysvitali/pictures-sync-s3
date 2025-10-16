@@ -1,20 +1,24 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/auth"
 	"github.com/denysvitali/pictures-sync-s3/pkg/events"
 	"github.com/denysvitali/pictures-sync-s3/pkg/handlers"
+	"github.com/denysvitali/pictures-sync-s3/pkg/ratelimit"
 	"github.com/denysvitali/pictures-sync-s3/pkg/settings"
+	"github.com/denysvitali/pictures-sync-s3/pkg/ssrf"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 	"github.com/denysvitali/pictures-sync-s3/pkg/syncmanager"
-	"github.com/denysvitali/pictures-sync-s3/pkg/webui"
 	"github.com/denysvitali/pictures-sync-s3/pkg/websocket"
+	"github.com/denysvitali/pictures-sync-s3/pkg/webui"
 	"github.com/denysvitali/pictures-sync-s3/pkg/wifimanager"
 )
 
@@ -81,8 +85,16 @@ func main() {
 		port = "8080"
 	}
 
-	// Start WebSocket token cleanup goroutine
-	go websocket.CleanupExpiredWSTokens()
+	// Create a background context for the WebSocket token cleanup goroutine
+	// In a production deployment, this could be enhanced with signal handling
+	// to gracefully shutdown on SIGTERM/SIGINT
+	bgCtx := context.Background()
+
+	// Start WebSocket token cleanup goroutine with context for proper shutdown
+	go websocket.CleanupExpiredWSTokens(bgCtx)
+
+	// Start WebSocket rate limiter cleanup goroutine
+	go websocket.StartRateLimiterCleanup(bgCtx)
 
 	// Initialize event manager
 	eventMgr := events.NewManager()
@@ -123,39 +135,57 @@ func main() {
 	// Initialize CSRF token
 	auth.InitCSRFToken()
 	log.Println("CSRF protection enabled")
+	log.Println("Security headers middleware enabled")
+
+	// Initialize rate limiter for authentication
+	authLimiter := ratelimit.NewLimiter(ratelimit.AuthConfig())
+	log.Println("Rate limiting enabled: 5 auth attempts per 15 minutes, 2 req/s for auth endpoints")
+
+	// Initialize rate limiter for expensive operations
+	expensiveOpLimiter := ratelimit.NewLimiter(ratelimit.ExpensiveOpConfig())
+	log.Println("Rate limiting enabled for expensive operations: 1 req/s for thumbnails/file listings")
+
+	// Initialize SSRF validator with rate limiting
+	// Allow 10 network diagnostic requests per minute per client IP
+	ssrfValidator := ssrf.NewValidator(10, time.Minute)
+	log.Println("SSRF protection enabled: 10 network diagnostic requests per minute per client")
 
 	// Create handler context
 	ctx := &handlers.Context{
-		StateMgr:    stateMgr,
-		SyncMgr:     syncMgr,
-		WiFiMgr:     wifiMgr,
-		AppSettings: appSettings,
+		StateMgr:      stateMgr,
+		SyncMgr:       syncMgr,
+		WiFiMgr:       wifiMgr,
+		AppSettings:   appSettings,
+		SSRFValidator: ssrfValidator,
 	}
+
+	// Expensive operation middleware wrapper
+	expensiveOp := auth.ExpensiveOperationMiddleware(expensiveOpLimiter)
 
 	// Setup HTTP handlers
 	http.HandleFunc("/api/csrf-token", handlers.HandleCSRFToken) // GET endpoint for CSRF token
 	http.HandleFunc("/api/ws-token", handlers.HandleWSToken)     // GET endpoint for WebSocket token
 	http.HandleFunc("/api/status", ctx.HandleStatus)
 	http.HandleFunc("/api/history", ctx.HandleHistory)
-	http.HandleFunc("/api/config", auth.CSRFProtection(ctx.HandleConfig))                  // CSRF protected
-	http.HandleFunc("/api/config/test", auth.CSRFProtection(ctx.HandleConfigTest))         // CSRF protected
-	http.HandleFunc("/api/settings", auth.CSRFProtection(ctx.HandleSettings))              // CSRF protected
+	http.HandleFunc("/api/config", auth.CSRFProtection(ctx.HandleConfig))          // CSRF protected
+	http.HandleFunc("/api/config/test", auth.CSRFProtection(ctx.HandleConfigTest)) // CSRF protected
+	http.HandleFunc("/api/settings", auth.CSRFProtection(ctx.HandleSettings))      // CSRF protected
 	http.HandleFunc("/api/devices", ctx.HandleDevices)
-	http.HandleFunc("/api/devices/select", auth.CSRFProtection(ctx.HandleDeviceSelect))    // CSRF protected
-	http.HandleFunc("/api/sync/start", auth.CSRFProtection(ctx.HandleSyncStart))           // CSRF protected
-	http.HandleFunc("/api/sync/cancel", auth.CSRFProtection(ctx.HandleSyncCancel))         // CSRF protected
+	http.HandleFunc("/api/devices/select", auth.CSRFProtection(ctx.HandleDeviceSelect)) // CSRF protected
+	http.HandleFunc("/api/sync/start", auth.CSRFProtection(ctx.HandleSyncStart))        // CSRF protected
+	http.HandleFunc("/api/sync/cancel", auth.CSRFProtection(ctx.HandleSyncCancel))      // CSRF protected
 	http.HandleFunc("/api/wifi/scan", ctx.HandleWiFiScan)
 	http.HandleFunc("/api/wifi/networks", ctx.HandleWiFiNetworks)
 	http.HandleFunc("/api/wifi/connect", auth.CSRFProtection(ctx.HandleWiFiConnect))       // CSRF protected
 	http.HandleFunc("/api/wifi/disconnect", auth.CSRFProtection(ctx.HandleWiFiDisconnect)) // CSRF protected
 	http.HandleFunc("/api/wifi/status", ctx.HandleWiFiStatus)
-	http.HandleFunc("/api/files/cards", ctx.HandleFileCards)
-	http.HandleFunc("/api/files", ctx.HandleFiles)
-	http.HandleFunc("/api/files/paginated", ctx.HandleFilesPaginated)
+	http.HandleFunc("/api/files/cards", expensiveOp(ctx.HandleFileCards))              // Rate limited - expensive
+	http.HandleFunc("/api/files", expensiveOp(ctx.HandleFiles))                        // Rate limited - expensive
+	http.HandleFunc("/api/files/paginated", expensiveOp(ctx.HandleFilesPaginated))     // Rate limited - expensive
 	http.HandleFunc("/api/files/view", ctx.HandleFileView)
-	http.HandleFunc("/api/thumbnail", ctx.HandleThumbnail)
-	http.HandleFunc("/api/sdcard/files", ctx.HandleSDCardFiles)
-	http.HandleFunc("/api/sdcard/preview", ctx.HandleSDCardPreview)
+	http.HandleFunc("/api/thumbnail", expensiveOp(ctx.HandleThumbnail))                // Rate limited - expensive
+	http.HandleFunc("/api/sdcard/files", expensiveOp(ctx.HandleSDCardFiles))           // Rate limited - expensive
+	http.HandleFunc("/api/sdcard/preview", expensiveOp(ctx.HandleSDCardPreview))       // Rate limited - expensive
 	http.HandleFunc("/api/network/dns", ctx.HandleNetworkDNS)
 	http.HandleFunc("/api/network/interfaces", ctx.HandleNetworkInterfaces)
 	http.HandleFunc("/api/network/dns-lookup", ctx.HandleDNSLookup)
@@ -164,8 +194,11 @@ func main() {
 	http.HandleFunc("/ws", websocket.HandleWebSocket(stateMgr, eventMgr))
 	http.HandleFunc("/", webui.HandleIndex)
 
-	// Wrap default mux with basic auth middleware
-	handler := auth.BasicAuthMiddleware(authPassword)(http.DefaultServeMux)
+	// Wrap default mux with middleware chain: security headers -> basic auth
+	// Security headers are applied first so they're present on all responses (including auth failures)
+	handler := auth.SecurityHeadersMiddleware(
+		auth.BasicAuthMiddleware(authPassword, authLimiter)(http.DefaultServeMux),
+	)
 
 	// Start HTTPS server
 	addr := ":" + port

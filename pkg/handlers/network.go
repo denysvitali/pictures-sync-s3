@@ -10,8 +10,34 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tatsushid/go-fastping"
+	probing "github.com/prometheus-community/pro-bing"
 )
+
+// getClientIP extracts the client IP address from the request
+func getClientIP(r *http.Request) string {
+	// Check X-Forwarded-For header first (in case behind proxy)
+	xff := r.Header.Get("X-Forwarded-For")
+	if xff != "" {
+		// Take the first IP in the list
+		ips := strings.Split(xff, ",")
+		if len(ips) > 0 {
+			return strings.TrimSpace(ips[0])
+		}
+	}
+
+	// Check X-Real-IP header
+	xri := r.Header.Get("X-Real-IP")
+	if xri != "" {
+		return xri
+	}
+
+	// Fall back to RemoteAddr
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return ip
+}
 
 // HandleNetworkDNS returns the DNS configuration
 func (ctx *Context) HandleNetworkDNS(w http.ResponseWriter, r *http.Request) {
@@ -105,7 +131,7 @@ func (ctx *Context) HandleNetworkInterfaces(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-// HandleDNSLookup performs DNS lookup
+// HandleDNSLookup performs DNS lookup with SSRF protection
 func (ctx *Context) HandleDNSLookup(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -126,11 +152,19 @@ func (ctx *Context) HandleDNSLookup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Perform DNS lookup using Go's net package
-	ips, err := net.LookupIP(req.Hostname)
+	// SSRF Protection: Validate hostname before resolving
+	clientIP := getClientIP(r)
+	if ctx.SSRFValidator == nil {
+		log.Printf("[SSRF] Warning: SSRFValidator not initialized, blocking request")
+		http.Error(w, "Service temporarily unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	ips, err := ctx.SSRFValidator.ValidateHostname(req.Hostname, clientIP)
 	if err != nil {
+		log.Printf("[SSRF] DNS lookup blocked for %s from %s: %v", req.Hostname, clientIP, err)
 		JSONResponse(w, map[string]interface{}{
-			"error": fmt.Sprintf("DNS lookup failed: %v", err),
+			"error": fmt.Sprintf("Request blocked: %v", err),
 		})
 		return
 	}
@@ -152,13 +186,15 @@ func (ctx *Context) HandleDNSLookup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	log.Printf("[SSRF] DNS lookup allowed for %s from %s, resolved %d addresses", req.Hostname, clientIP, len(addresses))
+
 	JSONResponse(w, map[string]interface{}{
 		"addresses":  addresses,
 		"raw_output": rawOutput.String(),
 	})
 }
 
-// HandlePing performs ICMP ping test
+// HandlePing performs ICMP ping test with SSRF protection
 func (ctx *Context) HandlePing(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -187,11 +223,19 @@ func (ctx *Context) HandlePing(w http.ResponseWriter, r *http.Request) {
 		req.Count = 10
 	}
 
-	// Resolve hostname to IP
-	ips, err := net.LookupIP(req.Hostname)
+	// SSRF Protection: Validate hostname and resolve safely
+	clientIP := getClientIP(r)
+	if ctx.SSRFValidator == nil {
+		log.Printf("[SSRF] Warning: SSRFValidator not initialized, blocking request")
+		http.Error(w, "Service temporarily unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	ips, err := ctx.SSRFValidator.ValidateHostname(req.Hostname, clientIP)
 	if err != nil {
+		log.Printf("[SSRF] Ping blocked for %s from %s: %v", req.Hostname, clientIP, err)
 		JSONResponse(w, map[string]interface{}{
-			"error": fmt.Sprintf("Failed to resolve hostname: %v", err),
+			"error": fmt.Sprintf("Request blocked: %v", err),
 		})
 		return
 	}
@@ -215,88 +259,65 @@ func (ctx *Context) HandlePing(w http.ResponseWriter, r *http.Request) {
 		targetIP = ips[0] // Fallback to first IP (might be IPv6)
 	}
 
+	log.Printf("[SSRF] Ping allowed for %s (%s) from %s", req.Hostname, targetIP.String(), clientIP)
+
 	// Perform ping
 	result := performICMPPing(req.Hostname, targetIP.String(), req.Count)
 	JSONResponse(w, result)
 }
 
-// performICMPPing executes ICMP ping using go-fastping
+// performICMPPing executes ICMP ping using pro-bing
 func performICMPPing(hostname, ipAddr string, count int) map[string]interface{} {
 	var output strings.Builder
-	var rtts []time.Duration
-	var successCount, failCount int
 
 	output.WriteString(fmt.Sprintf("PING %s (%s) 56 bytes of data\n\n", hostname, ipAddr))
 
-	p := fastping.NewPinger()
-	ra, err := net.ResolveIPAddr("ip4:icmp", ipAddr)
+	pinger, err := probing.NewPinger(ipAddr)
 	if err != nil {
 		return map[string]interface{}{
-			"error": fmt.Sprintf("Failed to resolve IP: %v", err),
+			"error": fmt.Sprintf("Failed to create pinger: %v", err),
 		}
 	}
 
-	p.AddIPAddr(ra)
-	p.MaxRTT = 3 * time.Second
+	// Set ping count and timeout
+	pinger.Count = count
+	pinger.Timeout = 3 * time.Second
+	pinger.Interval = 1 * time.Second
 
-	// Track responses
-	responseChan := make(chan time.Duration, count)
+	// Set to privileged mode (requires root/CAP_NET_RAW)
+	pinger.SetPrivileged(true)
 
-	p.OnRecv = func(addr *net.IPAddr, rtt time.Duration) {
-		responseChan <- rtt
+	// Track each response
+	var rtts []time.Duration
+	pinger.OnRecv = func(pkt *probing.Packet) {
+		rtts = append(rtts, pkt.Rtt)
+		output.WriteString(fmt.Sprintf("%d: Reply from %s: seq=%d time=%v\n",
+			len(rtts), pkt.IPAddr, pkt.Seq, pkt.Rtt))
 	}
 
-	// Run ping multiple times
-	for i := 0; i < count; i++ {
-		err := p.Run()
-		if err != nil {
-			failCount++
-			output.WriteString(fmt.Sprintf("%d: Request timeout\n", i+1))
-		} else {
-			// Check if we got a response
-			select {
-			case rtt := <-responseChan:
-				successCount++
-				rtts = append(rtts, rtt)
-				output.WriteString(fmt.Sprintf("%d: Reply from %s: time=%v\n", i+1, ipAddr, rtt))
-			case <-time.After(3 * time.Second):
-				failCount++
-				output.WriteString(fmt.Sprintf("%d: Request timeout\n", i+1))
-			}
-		}
-
-		// Sleep between pings (except for last one)
-		if i < count-1 {
-			time.Sleep(1 * time.Second)
+	// Run the pinger
+	err = pinger.Run()
+	if err != nil {
+		return map[string]interface{}{
+			"error": fmt.Sprintf("Ping failed: %v", err),
 		}
 	}
+
+	// Get statistics
+	stats := pinger.Statistics()
 
 	// Calculate statistics
 	output.WriteString(fmt.Sprintf("\n--- %s ping statistics ---\n", hostname))
 	output.WriteString(fmt.Sprintf("%d packets transmitted, %d received, %.1f%% packet loss\n",
-		count, successCount, float64(failCount)/float64(count)*100))
+		stats.PacketsSent, stats.PacketsRecv, stats.PacketLoss))
 
-	if successCount > 0 {
-		var minRTT, maxRTT, totalRTT time.Duration
-		minRTT = rtts[0]
-		maxRTT = rtts[0]
-
-		for _, rtt := range rtts {
-			totalRTT += rtt
-			if rtt < minRTT {
-				minRTT = rtt
-			}
-			if rtt > maxRTT {
-				maxRTT = rtt
-			}
-		}
-
-		avgRTT := totalRTT / time.Duration(successCount)
-		output.WriteString(fmt.Sprintf("rtt min/avg/max = %v/%v/%v\n", minRTT, avgRTT, maxRTT))
+	if stats.PacketsRecv > 0 {
+		output.WriteString(fmt.Sprintf("rtt min/avg/max/stddev = %v/%v/%v/%v\n",
+			stats.MinRtt, stats.AvgRtt, stats.MaxRtt, stats.StdDevRtt))
 	}
 
 	summary := fmt.Sprintf("%d packets transmitted, %d received, %.1f%% packet loss",
-		count, successCount, float64(failCount)/float64(count)*100)
+		stats.PacketsSent, stats.PacketsRecv, stats.PacketLoss)
 
 	return map[string]interface{}{
 		"output":  output.String(),
@@ -305,6 +326,7 @@ func performICMPPing(hostname, ipAddr string, count int) map[string]interface{} 
 }
 
 // HandleNetworkDiagnostics runs full network diagnostics
+// Note: This uses hardcoded safe IPs (8.8.8.8, 1.1.1.1) and known-safe domains
 func (ctx *Context) HandleNetworkDiagnostics(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -313,32 +335,48 @@ func (ctx *Context) HandleNetworkDiagnostics(w http.ResponseWriter, r *http.Requ
 
 	result := make(map[string]interface{})
 
-	// Test DNS servers (ICMP ping)
+	// Test DNS servers (ICMP ping) - these are hardcoded safe public IPs
 	result["dns_google"] = testICMPPing("8.8.8.8", 2*time.Second)
 	result["dns_cloudflare"] = testICMPPing("1.1.1.1", 2*time.Second)
 
 	// Test internet connectivity via DNS resolution and ping
-	ips, err := net.LookupIP("google.com")
-	if err == nil && len(ips) > 0 {
-		// Try to ping the resolved IP
-		result["internet_google"] = testICMPPing(ips[0].String(), 3*time.Second)
+	// Using SSRF protection for these lookups as well
+	clientIP := getClientIP(r)
+	if ctx.SSRFValidator != nil {
+		// Validate google.com
+		ips, err := ctx.SSRFValidator.ValidateHostname("google.com", clientIP)
+		if err == nil && len(ips) > 0 {
+			result["internet_google"] = testICMPPing(ips[0].String(), 3*time.Second)
+		} else {
+			result["internet_google"] = false
+			if err != nil {
+				log.Printf("[SSRF] Network diagnostics: google.com blocked: %v", err)
+			}
+		}
+
+		// Validate cloudflare.com
+		ips, err = ctx.SSRFValidator.ValidateHostname("cloudflare.com", clientIP)
+		if err == nil && len(ips) > 0 {
+			result["internet_cloudflare"] = testICMPPing(ips[0].String(), 3*time.Second)
+		} else {
+			result["internet_cloudflare"] = false
+			if err != nil {
+				log.Printf("[SSRF] Network diagnostics: cloudflare.com blocked: %v", err)
+			}
+		}
 	} else {
 		result["internet_google"] = false
-	}
-
-	ips, err = net.LookupIP("cloudflare.com")
-	if err == nil && len(ips) > 0 {
-		result["internet_cloudflare"] = testICMPPing(ips[0].String(), 3*time.Second)
-	} else {
 		result["internet_cloudflare"] = false
+		log.Printf("[SSRF] Warning: SSRFValidator not initialized for network diagnostics")
 	}
 
 	// Get default gateway from routes
 	gateway := getDefaultGatewayFromRoutes()
 	result["gateway"] = gateway
 
+	// Note: We allow pinging the gateway even if it's a private IP,
+	// since it's determined from the local routing table and is a legitimate use case
 	if gateway != "" {
-		// Test gateway reachability with ICMP ping
 		result["gateway_reachable"] = testICMPPing(gateway, 2*time.Second)
 	}
 
@@ -353,26 +391,22 @@ func (ctx *Context) HandleNetworkDiagnostics(w http.ResponseWriter, r *http.Requ
 
 // testICMPPing tests if a host responds to ICMP ping
 func testICMPPing(ipAddr string, timeout time.Duration) bool {
-	p := fastping.NewPinger()
-	ra, err := net.ResolveIPAddr("ip4:icmp", ipAddr)
+	pinger, err := probing.NewPinger(ipAddr)
 	if err != nil {
 		return false
 	}
 
-	p.AddIPAddr(ra)
-	p.MaxRTT = timeout
+	pinger.Count = 1
+	pinger.Timeout = timeout
+	pinger.SetPrivileged(true)
 
-	responded := false
-	p.OnRecv = func(addr *net.IPAddr, rtt time.Duration) {
-		responded = true
-	}
-
-	err = p.Run()
+	err = pinger.Run()
 	if err != nil {
 		return false
 	}
 
-	return responded
+	stats := pinger.Statistics()
+	return stats.PacketsRecv > 0
 }
 
 // getDefaultGatewayFromRoutes reads the default gateway from /proc/net/route

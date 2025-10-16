@@ -1,9 +1,11 @@
 package websocket
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -13,46 +15,216 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/events"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 	"github.com/gorilla/websocket"
+	"golang.org/x/time/rate"
 )
+
+// ConnectionRateLimiter tracks rate limits per IP address
+type ConnectionRateLimiter struct {
+	limiters map[string]*rate.Limiter
+	mu       sync.RWMutex
+}
+
+// NewConnectionRateLimiter creates a new rate limiter for WebSocket connections
+func NewConnectionRateLimiter() *ConnectionRateLimiter {
+	return &ConnectionRateLimiter{
+		limiters: make(map[string]*rate.Limiter),
+	}
+}
+
+// GetLimiter returns or creates a rate limiter for the given IP
+// Allows 5 connections per minute with burst of 2
+func (c *ConnectionRateLimiter) GetLimiter(ip string) *rate.Limiter {
+	c.mu.RLock()
+	limiter, exists := c.limiters[ip]
+	c.mu.RUnlock()
+
+	if !exists {
+		c.mu.Lock()
+		// Double-check after acquiring write lock
+		limiter, exists = c.limiters[ip]
+		if !exists {
+			limiter = rate.NewLimiter(rate.Every(12*time.Second), 2) // 5 per minute, burst 2
+			c.limiters[ip] = limiter
+		}
+		c.mu.Unlock()
+	}
+
+	return limiter
+}
+
+// CleanupOldLimiters removes rate limiters for IPs that haven't connected recently
+func (c *ConnectionRateLimiter) CleanupOldLimiters(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			c.mu.Lock()
+			// Remove all limiters (they'll be recreated on next connection)
+			// This prevents memory leaks from storing limiters for IPs that no longer connect
+			c.limiters = make(map[string]*rate.Limiter)
+			c.mu.Unlock()
+		}
+	}
+}
+
+// StartRateLimiterCleanup starts the rate limiter cleanup goroutine
+func StartRateLimiterCleanup(ctx context.Context) {
+	connRateLimiter.CleanupOldLimiters(ctx)
+}
 
 var (
-	wsTokens     = make(map[string]time.Time) // WebSocket auth tokens with expiry
-	wsTokenMutex sync.RWMutex
-	upgrader     = websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool {
-			// Allow same-origin requests and local network addresses
-			origin := r.Header.Get("Origin")
-			if origin == "" {
-				return true // Allow requests without Origin header (same-origin)
-			}
-
-			// Parse the origin URL
-			u, err := url.Parse(origin)
-			if err != nil {
-				return false
-			}
-
-			// Allow same host
-			if u.Host == r.Host {
-				return true
-			}
-
-			// Allow local network addresses (for Gokrazy appliance access)
-			// This includes private IP ranges and .local domains
-			host := strings.ToLower(u.Hostname())
-			if strings.HasSuffix(host, ".local") ||
-				strings.HasPrefix(host, "192.168.") ||
-				strings.HasPrefix(host, "10.") ||
-				strings.HasPrefix(host, "172.") ||
-				host == "localhost" ||
-				host == "127.0.0.1" {
-				return true
-			}
-
-			return false
-		},
+	wsTokens           = make(map[string]time.Time) // WebSocket auth tokens with expiry
+	wsTokenMutex       sync.RWMutex
+	connRateLimiter    = NewConnectionRateLimiter()
+	allowedOrigins     = []string{} // Configurable whitelist (empty = use private IP validation)
+	allowedOriginsMutex sync.RWMutex
+	upgrader           = websocket.Upgrader{
+		CheckOrigin: checkOriginStrict,
 	}
 )
+
+// isPrivateIP checks if an IP address is in a private RFC 1918 range
+func isPrivateIP(ip string) bool {
+	// Parse IP address
+	parsedIP := net.ParseIP(ip)
+	if parsedIP == nil {
+		return false
+	}
+
+	// Check loopback
+	if parsedIP.IsLoopback() {
+		return true
+	}
+
+	// Check private IP ranges (RFC 1918)
+	privateRanges := []string{
+		"10.0.0.0/8",       // 10.0.0.0 - 10.255.255.255
+		"172.16.0.0/12",    // 172.16.0.0 - 172.31.255.255 (FIXED: was accepting all 172.x)
+		"192.168.0.0/16",   // 192.168.0.0 - 192.168.255.255
+		"169.254.0.0/16",   // Link-local
+		"fc00::/7",         // IPv6 Unique Local Addresses
+		"fe80::/10",        // IPv6 Link-local
+	}
+
+	for _, cidr := range privateRanges {
+		_, subnet, _ := net.ParseCIDR(cidr)
+		if subnet != nil && subnet.Contains(parsedIP) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// checkOriginStrict performs strict origin validation
+func checkOriginStrict(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+
+	// SECURITY: Reject empty Origin headers
+	// Empty origins could be from non-browser clients attempting to bypass CORS
+	if origin == "" {
+		log.Printf("WebSocket: Rejected connection with empty Origin from %s", r.RemoteAddr)
+		return false
+	}
+
+	// Parse the origin URL
+	u, err := url.Parse(origin)
+	if err != nil {
+		log.Printf("WebSocket: Rejected connection with invalid Origin '%s' from %s: %v", origin, r.RemoteAddr, err)
+		return false
+	}
+
+	// Check configurable whitelist first
+	allowedOriginsMutex.RLock()
+	if len(allowedOrigins) > 0 {
+		allowed := false
+		for _, allowedOrigin := range allowedOrigins {
+			if strings.EqualFold(u.Host, allowedOrigin) {
+				allowed = true
+				break
+			}
+		}
+		allowedOriginsMutex.RUnlock()
+
+		if !allowed {
+			log.Printf("WebSocket: Rejected connection from non-whitelisted origin '%s' (from %s)", origin, r.RemoteAddr)
+		}
+		return allowed
+	}
+	allowedOriginsMutex.RUnlock()
+
+	// Allow same host (exact match)
+	if u.Host == r.Host {
+		return true
+	}
+
+	// Extract hostname and port from origin
+	hostname := u.Hostname()
+	port := u.Port()
+
+	// For local network access, validate against private IP ranges
+	hostnameLower := strings.ToLower(hostname)
+
+	// Allow .local mDNS domains (common in local networks)
+	if strings.HasSuffix(hostnameLower, ".local") {
+		return true
+	}
+
+	// Allow localhost variants
+	if hostnameLower == "localhost" {
+		return true
+	}
+
+	// Validate IP addresses against RFC 1918 private ranges
+	if isPrivateIP(hostname) {
+		// Additional check: if origin has explicit port, ensure it matches request port
+		if port != "" {
+			requestPort := "80"
+			if r.TLS != nil {
+				requestPort = "443"
+			}
+			// Extract port from r.Host if present
+			if h, p, err := net.SplitHostPort(r.Host); err == nil {
+				requestPort = p
+				_ = h // Use h to avoid unused variable
+			}
+
+			if port != requestPort {
+				log.Printf("WebSocket: Rejected private IP origin with mismatched port: %s (expected %s) from %s",
+					origin, requestPort, r.RemoteAddr)
+				return false
+			}
+		}
+		return true
+	}
+
+	// All other origins are rejected
+	log.Printf("WebSocket: Rejected non-private origin '%s' from %s", origin, r.RemoteAddr)
+	return false
+}
+
+// SetAllowedOrigins configures the whitelist of allowed origin hosts
+// If empty, falls back to private IP validation
+func SetAllowedOrigins(origins []string) {
+	allowedOriginsMutex.Lock()
+	defer allowedOriginsMutex.Unlock()
+	allowedOrigins = make([]string, len(origins))
+	copy(allowedOrigins, origins)
+	log.Printf("WebSocket: Updated allowed origins whitelist: %v", allowedOrigins)
+}
+
+// GetAllowedOrigins returns the current whitelist
+func GetAllowedOrigins() []string {
+	allowedOriginsMutex.RLock()
+	defer allowedOriginsMutex.RUnlock()
+	result := make([]string, len(allowedOrigins))
+	copy(result, allowedOrigins)
+	return result
+}
 
 // GenerateWSToken creates a new WebSocket auth token
 func GenerateWSToken() string {
@@ -104,29 +276,52 @@ func DeleteWSToken(token string) {
 }
 
 // CleanupExpiredWSTokens removes expired tokens periodically
-func CleanupExpiredWSTokens() {
+// It runs until the provided context is cancelled, ensuring proper cleanup
+func CleanupExpiredWSTokens(ctx context.Context) {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		now := time.Now()
-		wsTokenMutex.Lock()
-		for token, expiry := range wsTokens {
-			if now.After(expiry) {
-				delete(wsTokens, token)
+	for {
+		select {
+		case <-ctx.Done():
+			// Context cancelled, exit goroutine
+			log.Println("WebSocket token cleanup goroutine shutting down")
+			return
+		case <-ticker.C:
+			// Cleanup expired tokens
+			now := time.Now()
+			wsTokenMutex.Lock()
+			for token, expiry := range wsTokens {
+				if now.After(expiry) {
+					delete(wsTokens, token)
+				}
 			}
+			wsTokenMutex.Unlock()
 		}
-		wsTokenMutex.Unlock()
 	}
 }
 
 // HandleWebSocket provides real-time status updates
 func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Extract client IP for rate limiting
+		clientIP := r.RemoteAddr
+		if host, _, err := net.SplitHostPort(clientIP); err == nil {
+			clientIP = host
+		}
+
+		// Apply rate limiting per IP
+		limiter := connRateLimiter.GetLimiter(clientIP)
+		if !limiter.Allow() {
+			log.Printf("WebSocket: Rate limit exceeded for IP %s", clientIP)
+			http.Error(w, "Too many connection attempts. Please try again later.", http.StatusTooManyRequests)
+			return
+		}
+
 		// Upgrade to WebSocket without auth - we'll validate token in first message
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
-			log.Printf("WebSocket upgrade error: %v", err)
+			log.Printf("WebSocket upgrade error from %s: %v", clientIP, err)
 			return
 		}
 		defer conn.Close()

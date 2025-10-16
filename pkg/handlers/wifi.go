@@ -41,7 +41,16 @@ func (ctx *Context) HandleWiFiScan(w http.ResponseWriter, r *http.Request) {
 	JSONResponse(w, networks)
 }
 
-// HandleWiFiNetworks returns saved networks
+// SafeNetworkInfo represents network information without sensitive credentials.
+// SECURITY: This struct is used to prevent password exposure via API responses.
+// Even with authentication, credentials should never be returned in API calls.
+type SafeNetworkInfo struct {
+	SSID        string `json:"ssid"`
+	HasPassword bool   `json:"has_password"`
+}
+
+// HandleWiFiNetworks returns saved networks without exposing passwords
+// SECURITY FIX: Filters out PSK field to prevent credential exposure
 func (ctx *Context) HandleWiFiNetworks(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -54,7 +63,17 @@ func (ctx *Context) HandleWiFiNetworks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	networks := ctx.WiFiMgr.GetNetworks()
-	JSONResponse(w, networks)
+
+	// Convert to safe response that excludes passwords
+	safeNetworks := make([]SafeNetworkInfo, len(networks))
+	for i, network := range networks {
+		safeNetworks[i] = SafeNetworkInfo{
+			SSID:        network.SSID,
+			HasPassword: network.PSK != "",
+		}
+	}
+
+	JSONResponse(w, safeNetworks)
 }
 
 // HandleWiFiConnect connects to a network

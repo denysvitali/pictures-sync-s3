@@ -18,6 +18,7 @@ type Monitor struct {
 	devMode      bool // Development mode for testing without hardware
 	stopped      bool // Tracks if monitor has been stopped
 	mu           sync.RWMutex // Protects lastDevice and stopped
+	mountMu      sync.Mutex   // Protects mount/unmount operations (prevents concurrent mounts)
 
 	// Cache for /proc/mounts to reduce I/O
 	cachedMounts    string
@@ -78,18 +79,26 @@ func (m *Monitor) Start() error {
 // Stop stops the monitor
 func (m *Monitor) Stop() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	if m.stopped {
+		m.mu.Unlock()
 		return // Already stopped
 	}
-
 	m.stopped = true
+	m.mu.Unlock()
+
 	close(m.stopChan)
 
-	// Unmount if mounted
-	if m.lastDevice != "" {
-		m.unmount()
+	// Unmount if mounted (use separate mutex for mount operations)
+	m.mu.RLock()
+	hasDevice := m.lastDevice != ""
+	m.mu.RUnlock()
+
+	if hasDevice {
+		m.mountMu.Lock()
+		if err := m.unmount(); err != nil {
+			log.Printf("Stop: Warning: Failed to unmount during shutdown: %v", err)
+		}
+		m.mountMu.Unlock()
 	}
 }
 
@@ -151,15 +160,24 @@ func (m *Monitor) checkDevices() {
 		// New device detected
 		log.Printf("SD card detected: %s (lastDevice was: %s)", device, currentDevice)
 
+		// Acquire mount mutex to prevent concurrent mount operations
+		m.mountMu.Lock()
+		defer m.mountMu.Unlock()
+
 		// Try to mount it
 		if err := m.mount(device); err != nil {
-			log.Printf("Failed to mount device %s: %v", device, err)
+			log.Printf("Mount ERROR: Failed to mount device %s: %v", device, err)
+			// DO NOT update lastDevice on mount failure - this is the critical bug fix
+			// The device is NOT mounted, so we must not mark it as such
+			log.Printf("Mount ERROR: Device %s will NOT be marked as mounted due to mount failure", device)
 			return
 		}
 
+		// Mount succeeded - now it's safe to update state
 		m.mu.Lock()
 		m.lastDevice = device
 		m.mu.Unlock()
+
 		log.Printf("SD card inserted: %s, mounted at %s", filepath.Base(device), m.mountPath)
 		m.eventChan <- Event{
 			Type:      EventInserted,
@@ -171,7 +189,16 @@ func (m *Monitor) checkDevices() {
 		// Device removed
 		log.Printf("SD card removed: %s", currentDevice)
 
-		m.unmount()
+		// Acquire mount mutex to prevent concurrent unmount operations
+		m.mountMu.Lock()
+		unmountErr := m.unmount()
+		m.mountMu.Unlock()
+
+		if unmountErr != nil {
+			log.Printf("Unmount ERROR: Failed to unmount %s: %v (device will still be marked as removed)", currentDevice, unmountErr)
+			// Continue anyway - the physical device is gone, so we should clear our state
+		}
+
 		m.mu.Lock()
 		oldDevice := m.lastDevice
 		m.lastDevice = ""

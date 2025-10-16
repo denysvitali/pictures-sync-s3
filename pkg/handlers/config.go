@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
+	"github.com/denysvitali/pictures-sync-s3/pkg/validation"
 )
 
 // HandleConfig handles rclone configuration
@@ -31,21 +32,69 @@ func (ctx *Context) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		})
 
 	case http.MethodPost:
-		// Update rclone config
-		body, err := io.ReadAll(r.Body)
+		// Update rclone config with comprehensive validation
+		body, err := io.ReadAll(io.LimitReader(r.Body, validation.MaxConfigSize+1))
 		if err != nil {
+			logConfigChange(r, "read_error", err.Error())
 			http.Error(w, "Failed to read body", http.StatusBadRequest)
 			return
 		}
 
-		// Write config file
+		// Validate config format and content
+		result, err := validation.ValidateRcloneConfig(body)
+		if err != nil || !result.Valid {
+			errMsg := "Invalid configuration"
+			if err != nil {
+				errMsg = err.Error()
+			} else if len(result.Errors) > 0 {
+				errMsg = result.Errors[0].Error()
+			}
+
+			logConfigChange(r, "validation_failed", errMsg)
+
+			// Return detailed validation errors to help legitimate users
+			response := map[string]interface{}{
+				"status": "error",
+				"error":  errMsg,
+			}
+			if len(result.Errors) > 1 {
+				response["errors"] = formatErrors(result.Errors)
+			}
+			if len(result.Warnings) > 0 {
+				response["warnings"] = result.Warnings
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		// Sanitize config content
+		body = validation.SanitizeConfig(body)
+
+		// Write config file atomically with restricted permissions
 		if err := os.WriteFile(state.GetRcloneConfigPath(), body, 0600); err != nil {
+			logConfigChange(r, "write_error", err.Error())
 			http.Error(w, fmt.Sprintf("Failed to write config: %v", err), http.StatusInternalServerError)
 			return
 		}
 
-		log.Println("Rclone configuration updated")
-		JSONResponse(w, map[string]string{"status": "ok"})
+		// Log successful update with details
+		logConfigChange(r, "success", fmt.Sprintf("Updated config with %d remote(s): %v",
+			len(result.Remotes), result.Remotes))
+
+		// Include warnings in response if any
+		response := map[string]interface{}{
+			"status":  "ok",
+			"remotes": result.Remotes,
+		}
+		if len(result.Warnings) > 0 {
+			response["warnings"] = result.Warnings
+			log.Printf("Config uploaded with warnings: %v", result.Warnings)
+		}
+
+		JSONResponse(w, response)
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -68,6 +117,30 @@ func (ctx *Context) HandleConfigTest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	JSONResponse(w, map[string]bool{"success": true})
+}
+
+// logConfigChange logs rclone configuration changes with client information
+func logConfigChange(r *http.Request, status, details string) {
+	// Extract client IP, handling proxy headers
+	clientIP := r.RemoteAddr
+	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+		clientIP = forwarded
+	} else if realIP := r.Header.Get("X-Real-IP"); realIP != "" {
+		clientIP = realIP
+	}
+
+	// Log with timestamp, IP, and details
+	log.Printf("[SECURITY] Rclone config change: status=%s, client=%s, user_agent=%s, details=%s",
+		status, clientIP, r.UserAgent(), details)
+}
+
+// formatErrors converts error slice to string slice for JSON response
+func formatErrors(errors []error) []string {
+	result := make([]string, len(errors))
+	for i, err := range errors {
+		result[i] = err.Error()
+	}
+	return result
 }
 
 // HandleSettings manages application settings
