@@ -264,11 +264,9 @@ func TestNotifyListenersChannelDeadlock(t *testing.T) {
 
 	for i := 0; i < numSubs; i++ {
 		// Use buffer size 1 to make it easier to fill
-		mgr.mu.Lock()
 		ch := make(chan CurrentState, 1)
-		mgr.listeners = append(mgr.listeners, ch)
+		mgr.notifier.addListener(ch)
 		subscribers[i] = ch
-		mgr.mu.Unlock()
 	}
 
 	// Start slow consumers that don't read fast enough
@@ -487,13 +485,10 @@ func TestSubscribeDuringNotification(t *testing.T) {
 			case <-stopSignal:
 				return
 			default:
-				mgr.mu.Lock()
-				if len(mgr.listeners) > 0 {
-					ch := mgr.listeners[0]
-					mgr.mu.Unlock()
+				listeners := mgr.notifier.getListeners()
+				if len(listeners) > 0 {
+					ch := listeners[0]
 					mgr.Unsubscribe(ch)
-				} else {
-					mgr.mu.Unlock()
 				}
 			}
 		}

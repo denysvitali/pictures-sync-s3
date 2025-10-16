@@ -375,13 +375,14 @@ func TestInputValidation_SettingsInjection(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tmpDir := t.TempDir()
-			originalSettingsFile := SettingsFile
-			defer func() { SettingsFile = originalSettingsFile }()
-
-			// Use temporary file
-			SettingsFile = filepath.Join(tmpDir, "settings.json")
+			testSettingsFile := filepath.Join(tmpDir, "settings.json")
 
 			s := DefaultSettings()
+			// Use SaveTo to save to test file
+			if err := s.SaveTo(testSettingsFile); err != nil {
+				t.Fatalf("Failed to save initial settings: %v", err)
+			}
+
 			err := s.SetRemote(tt.remoteName, tt.remotePath)
 
 			if err != nil {
@@ -389,9 +390,15 @@ func TestInputValidation_SettingsInjection(t *testing.T) {
 				return
 			}
 
+			// Save again with the new values
+			if err := s.SaveTo(testSettingsFile); err != nil {
+				t.Logf("Could not save updated settings: %v", err)
+				return
+			}
+
 			if tt.checkSavedFile {
 				// Read the saved file and check for injection
-				data, err := os.ReadFile(SettingsFile)
+				data, err := os.ReadFile(testSettingsFile)
 				if err != nil {
 					t.Logf("Could not read saved file: %v", err)
 					return
@@ -418,13 +425,10 @@ func TestInputValidation_SettingsInjection(t *testing.T) {
 // TestInputValidation_ConcurrentWrites tests race conditions in concurrent writes
 func TestInputValidation_ConcurrentWrites(t *testing.T) {
 	tmpDir := t.TempDir()
-	originalSettingsFile := SettingsFile
-	defer func() { SettingsFile = originalSettingsFile }()
-
-	SettingsFile = filepath.Join(tmpDir, "settings.json")
+	testSettingsFile := filepath.Join(tmpDir, "settings.json")
 
 	s := DefaultSettings()
-	if err := s.Save(); err != nil {
+	if err := s.SaveTo(testSettingsFile); err != nil {
 		t.Fatalf("Failed to save initial settings: %v", err)
 	}
 
@@ -454,7 +458,7 @@ func TestInputValidation_ConcurrentWrites(t *testing.T) {
 	}
 
 	// Try to read the file and ensure it's still valid JSON
-	data, err := os.ReadFile(SettingsFile)
+	data, err := os.ReadFile(testSettingsFile)
 	if err != nil {
 		t.Errorf("Could not read settings file after concurrent writes: %v", err)
 		return

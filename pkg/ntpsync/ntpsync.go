@@ -1,3 +1,6 @@
+// Package ntpsync provides NTP time synchronization functionality.
+// It queries multiple NTP servers with retry logic and exponential backoff to ensure
+// accurate system time before photo sync operations begin.
 package ntpsync
 
 import (

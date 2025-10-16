@@ -1,3 +1,6 @@
+// Package photoviewer provides functionality for browsing and accessing photos on mounted SD cards.
+// It scans DCIM directories, identifies media files (images and videos), and provides secure
+// path validation to prevent directory traversal attacks. Supports filtering by size, date, and media type.
 package photoviewer
 
 import (

@@ -1,3 +1,6 @@
+// Package cloudphotos provides functionality for browsing and downloading photos from cloud storage.
+// It integrates with rclone to list photos organized by card ID, supports local caching for
+// performance, and handles photo retrieval from remote storage backends.
 package cloudphotos
 
 import (

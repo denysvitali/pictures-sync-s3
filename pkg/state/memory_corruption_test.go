@@ -148,9 +148,7 @@ func TestMemoryLeakInListeners(t *testing.T) {
 			_ = mgr.Subscribe()
 		}
 
-		mgr.mu.RLock()
-		listenerCount := len(mgr.listeners)
-		mgr.mu.RUnlock()
+		listenerCount := mgr.notifier.getListenerCount()
 
 		if listenerCount != 1000 {
 			t.Errorf("Expected 1000 listeners, got %d", listenerCount)

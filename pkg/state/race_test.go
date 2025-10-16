@@ -15,7 +15,7 @@ import (
 // setupRaceTestManager creates a test manager without file persistence to avoid const issues
 func setupRaceTestManager(t *testing.T) *Manager {
 	mgr := &Manager{
-		listeners:         make([]chan CurrentState, 0),
+		notifier:          newNotifier(),
 		progressSaveDelay: 100 * time.Millisecond, // Shorter for tests
 	}
 
@@ -830,9 +830,7 @@ func TestSubscribeUnsubscribeRace(t *testing.T) {
 	wg.Wait()
 
 	// Verify no goroutine leaks by checking listener count
-	mgr.mu.RLock()
-	listenerCount := len(mgr.listeners)
-	mgr.mu.RUnlock()
+	listenerCount := mgr.notifier.getListenerCount()
 
 	if listenerCount > 0 {
 		t.Errorf("Memory leak: %d listeners still registered after unsubscribe", listenerCount)

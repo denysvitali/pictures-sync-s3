@@ -3,7 +3,6 @@ package state
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -91,9 +90,7 @@ func TestChannelLeaksFromSubscriptions(t *testing.T) {
 	}
 
 	// Check listener count
-	m.mu.Lock()
-	listenerCount := len(m.listeners)
-	m.mu.Unlock()
+	listenerCount := m.notifier.getListenerCount()
 
 	if listenerCount != 100 {
 		t.Errorf("Expected 100 listeners, got %d", listenerCount)
@@ -341,8 +338,8 @@ func TestFindLastSyncPerformance(t *testing.T) {
 // TestErrorWrappingPreservesContext tests that error wrapping maintains context
 func TestErrorWrappingPreservesContext(t *testing.T) {
 	// Conceptual test - would need to trigger specific errors
-	t.Log("Error messages should wrap original errors with %w")
-	t.Log("Check that all error returns use fmt.Errorf with %w, not %v")
+	t.Logf("Error messages should wrap original errors with %%w")
+	t.Logf("Check that all error returns use fmt.Errorf with %%w, not %%v")
 }
 
 // TestStateSaveFailurePropagation tests state inconsistency on save failure
