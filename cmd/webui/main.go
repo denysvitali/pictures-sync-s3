@@ -2245,16 +2245,48 @@ key = your-application-key"></textarea>
                 .then(data => {
                     const statusDiv = document.getElementById('wifi-status-display');
                     if (data.connected) {
-                        statusDiv.innerHTML = '<p class="alert alert-success">✓ Connected to: <strong>' + data.ssid + '</strong></p>';
+                        const signalStrength = getSignalStrength(data.signal);
+                        const signalBars = getSignalBars(data.signal);
+
+                        let html = '<div class="info-grid">';
+                        html += '<div class="info-item">';
+                        html += '<label>Network</label>';
+                        html += '<value><strong>' + escapeHtml(data.ssid) + '</strong></value>';
+                        html += '</div>';
+                        html += '<div class="info-item">';
+                        html += '<label>Signal Strength</label>';
+                        html += '<value>';
+                        html += '<div style="display: flex; align-items: center; gap: 0.5rem;">';
+                        html += '<div class="signal-bars">';
+                        for (let i = 0; i < 4; i++) {
+                            html += '<div class="signal-bar' + (i < signalBars ? ' active' : '') + '"></div>';
+                        }
+                        html += '</div>';
+                        html += '<span style="font-size: 0.875rem; color: var(--text-secondary);">' + data.signal + ' dBm</span>';
+                        html += '</div>';
+                        html += '</value>';
+                        html += '</div>';
+                        html += '</div>';
+
+                        statusDiv.innerHTML = html;
                     } else {
-                        statusDiv.innerHTML = '<p class="alert alert-info">Not connected to any network</p>';
+                        statusDiv.innerHTML = '<p class="alert alert-info">❌ Not connected to any network</p>';
                     }
                 })
                 .catch(err => {
-                    document.getElementById('wifi-status-display').innerHTML = '<p class="alert alert-error">Failed to get WiFi status</p>';
+                    document.getElementById('wifi-status-display').innerHTML = '<p class="alert alert-error">Failed to get WiFi status: ' + err.message + '</p>';
                 });
 
             loadSavedNetworks();
+        }
+
+        // Convert signal dBm to number of bars (0-4)
+        function getSignalBars(signal) {
+            if (signal >= -50) return 4;
+            if (signal >= -60) return 3;
+            if (signal >= -70) return 2;
+            if (signal >= -80) return 1;
+            return 0;
         }
 
         function scanWiFi() {
@@ -2272,23 +2304,30 @@ key = your-application-key"></textarea>
                 })
                 .then(networks => {
                     if (!networks || networks.length === 0) {
-                        networksDiv.innerHTML = '<p class="loading">No networks found</p>';
+                        networksDiv.innerHTML = '<p style="text-align: center; padding: 2rem; color: var(--text-secondary);">No networks found</p>';
                         return;
                     }
 
                     let html = '';
                     networks.forEach(network => {
-                        const signalStrength = getSignalStrength(network.signal);
-                        html += '<div class="wifi-network">';
-                        html += '<div><strong>' + escapeHtml(network.ssid) + '</strong>';
+                        const signalBars = getSignalBars(network.signal);
+
+                        html += '<div class="network-item">';
+                        html += '<div class="network-info">';
+                        html += '<div class="network-name">' + escapeHtml(network.ssid);
                         if (network.encrypted) html += ' 🔒';
                         html += '</div>';
-                        html += '<div style="display: flex; gap: 1rem; align-items: center;">';
-                        html += '<div class="signal-strength signal-' + signalStrength + '">';
-                        html += '<div class="signal-bar"></div><div class="signal-bar"></div><div class="signal-bar"></div><div class="signal-bar"></div>';
+                        html += '<div class="network-signal">';
+                        html += '<div class="signal-bars">';
+                        for (let i = 0; i < 4; i++) {
+                            html += '<div class="signal-bar' + (i < signalBars ? ' active' : '') + '"></div>';
+                        }
                         html += '</div>';
-                        html += '<button class="btn btn-primary" onclick="connectWiFi(\'' + escapeHtml(network.ssid) + '\', ' + network.encrypted + ')">Connect</button>';
-                        html += '</div></div>';
+                        html += '<span>' + network.signal + ' dBm</span>';
+                        html += '</div>';
+                        html += '</div>';
+                        html += '<button class="btn btn-primary" onclick="connectWiFi(\'' + escapeHtml(network.ssid).replace(/'/g, "\\'") + '\', ' + network.encrypted + ')">Connect</button>';
+                        html += '</div>';
                     });
 
                     networksDiv.innerHTML = html;
@@ -3671,7 +3710,7 @@ func handleWiFiDisconnect(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, map[string]string{"status": "ok"})
 }
 
-// handleWiFiStatus returns current WiFi status
+// handleWiFiStatus returns current WiFi status with signal strength
 func handleWiFiStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -3683,7 +3722,7 @@ func handleWiFiStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ssid, err := wifiMgr.GetCurrentSSID()
+	conn, err := wifiMgr.GetCurrentConnection()
 	if err != nil {
 		jsonResponse(w, map[string]interface{}{
 			"connected": false,
@@ -3694,7 +3733,8 @@ func handleWiFiStatus(w http.ResponseWriter, r *http.Request) {
 
 	jsonResponse(w, map[string]interface{}{
 		"connected": true,
-		"ssid":      ssid,
+		"ssid":      conn.SSID,
+		"signal":    conn.Signal,
 	})
 }
 
