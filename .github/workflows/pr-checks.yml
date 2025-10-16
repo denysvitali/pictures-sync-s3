@@ -1,0 +1,277 @@
+# Pull Request Checks
+# Quick feedback for pull requests
+
+name: PR Checks
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+env:
+  GO_VERSION: '1.25'
+
+jobs:
+  # Quick validation before running full CI
+  quick-checks:
+    name: Quick Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Verify go.mod is tidy
+        run: |
+          go mod tidy
+          if ! git diff --exit-code go.mod go.sum; then
+            echo "Error: go.mod or go.sum is not tidy"
+            echo "Please run 'go mod tidy' and commit the changes"
+            exit 1
+          fi
+
+      - name: Check formatting
+        run: |
+          if [ "$(gofmt -l . | wc -l)" -gt 0 ]; then
+            echo "The following files are not formatted:"
+            gofmt -l .
+            echo ""
+            echo "Please run 'gofmt -w .' to format your code"
+            exit 1
+          fi
+
+      - name: Quick compile check
+        run: |
+          go build ./cmd/pictures-sync
+          go build ./cmd/webui
+
+      - name: Quick test (no race detector)
+        run: go test -short ./...
+        timeout-minutes: 5
+
+  # Conventional commit message validation
+  commit-lint:
+    name: Commit Message Lint
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate commit messages
+        run: |
+          # Get commits in this PR
+          BASE_SHA=${{ github.event.pull_request.base.sha }}
+          HEAD_SHA=${{ github.event.pull_request.head.sha }}
+
+          # Conventional commit pattern
+          PATTERN="^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?: .+"
+
+          echo "Checking commits from $BASE_SHA to $HEAD_SHA"
+
+          INVALID_COMMITS=0
+          while read commit; do
+            if ! echo "$commit" | grep -qE "$PATTERN"; then
+              echo "❌ Invalid commit message: $commit"
+              INVALID_COMMITS=$((INVALID_COMMITS + 1))
+            else
+              echo "✓ Valid commit message: $commit"
+            fi
+          done < <(git log --format=%s $BASE_SHA..$HEAD_SHA)
+
+          if [ $INVALID_COMMITS -gt 0 ]; then
+            echo ""
+            echo "Found $INVALID_COMMITS invalid commit message(s)"
+            echo ""
+            echo "Commit messages should follow conventional commits format:"
+            echo "  <type>(<scope>): <subject>"
+            echo ""
+            echo "Types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert"
+            echo ""
+            echo "Examples:"
+            echo "  feat(sync): add support for Google Photos"
+            echo "  fix(webui): resolve authentication timeout"
+            echo "  docs: update CI/CD documentation"
+            exit 1
+          fi
+
+          echo ""
+          echo "All commit messages are valid!"
+        continue-on-error: true  # Don't block on this
+
+  # PR size check
+  pr-size:
+    name: PR Size Check
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check PR size
+        run: |
+          BASE_SHA=${{ github.event.pull_request.base.sha }}
+          HEAD_SHA=${{ github.event.pull_request.head.sha }}
+
+          # Count changes
+          ADDITIONS=$(git diff $BASE_SHA..$HEAD_SHA --shortstat | grep -oE '[0-9]+ insertion' | grep -oE '[0-9]+' || echo 0)
+          DELETIONS=$(git diff $BASE_SHA..$HEAD_SHA --shortstat | grep -oE '[0-9]+ deletion' | grep -oE '[0-9]+' || echo 0)
+          TOTAL=$((ADDITIONS + DELETIONS))
+
+          echo "Changes: +$ADDITIONS -$DELETIONS (total: $TOTAL)"
+
+          if [ $TOTAL -gt 1000 ]; then
+            echo "⚠️  Warning: This PR is quite large ($TOTAL lines changed)"
+            echo "Consider splitting into smaller PRs for easier review"
+          elif [ $TOTAL -gt 500 ]; then
+            echo "ℹ️  This PR is moderately sized ($TOTAL lines changed)"
+          else
+            echo "✓ PR size is good ($TOTAL lines changed)"
+          fi
+        continue-on-error: true
+
+  # Check for common issues
+  common-issues:
+    name: Check Common Issues
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for debugging code
+        run: |
+          if grep -r "fmt.Println\|log.Println\|panic(" --include="*.go" cmd/ pkg/ | grep -v "_test.go"; then
+            echo "Warning: Found debugging code in production files"
+            echo "Please remove fmt.Println, log.Println, or panic calls"
+            exit 1
+          fi
+          echo "No debugging code found"
+        continue-on-error: true
+
+      - name: Check for TODO comments
+        run: |
+          TODOS=$(grep -r "TODO\|FIXME\|XXX\|HACK" --include="*.go" . | wc -l)
+          if [ $TODOS -gt 0 ]; then
+            echo "ℹ️  Found $TODOS TODO/FIXME/XXX/HACK comment(s)"
+            grep -rn "TODO\|FIXME\|XXX\|HACK" --include="*.go" . || true
+          fi
+        continue-on-error: true
+
+      - name: Check for large files
+        run: |
+          LARGE_FILES=$(find . -type f -size +1M ! -path "./.git/*" ! -path "./vendor/*")
+          if [ -n "$LARGE_FILES" ]; then
+            echo "⚠️  Warning: Found files larger than 1MB:"
+            echo "$LARGE_FILES"
+            echo "Consider using Git LFS for large files"
+          fi
+        continue-on-error: true
+
+  # Dependency diff
+  dependency-diff:
+    name: Dependency Changes
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout base
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
+
+      - name: Compare dependencies
+        run: |
+          echo "Dependency changes in this PR:"
+          echo ""
+
+          if ! diff base/go.mod pr/go.mod > /dev/null 2>&1; then
+            echo "go.mod has changed:"
+            diff base/go.mod pr/go.mod || true
+            echo ""
+          else
+            echo "No dependency changes"
+          fi
+        continue-on-error: true
+
+  # Label PR based on files changed
+  auto-label:
+    name: Auto Label PR
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Label based on files
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo, number } = context.issue;
+
+            // Get files changed in PR
+            const files = await github.rest.pulls.listFiles({
+              owner,
+              repo,
+              pull_number: number,
+            });
+
+            const labels = [];
+            const filePaths = files.data.map(f => f.filename);
+
+            // Check file types
+            if (filePaths.some(f => f.includes('.github/workflows/'))) {
+              labels.push('ci');
+            }
+            if (filePaths.some(f => f.includes('_test.go'))) {
+              labels.push('tests');
+            }
+            if (filePaths.some(f => f.includes('.md'))) {
+              labels.push('documentation');
+            }
+            if (filePaths.some(f => f.includes('pkg/security/') || f.includes('auth'))) {
+              labels.push('security');
+            }
+            if (filePaths.some(f => f.includes('cmd/webui/'))) {
+              labels.push('webui');
+            }
+            if (filePaths.some(f => f.includes('pkg/syncmanager/'))) {
+              labels.push('sync');
+            }
+            if (filePaths.some(f => f.includes('go.mod') || f.includes('go.sum'))) {
+              labels.push('dependencies');
+            }
+
+            // Add labels if any were identified
+            if (labels.length > 0) {
+              await github.rest.issues.addLabels({
+                owner,
+                repo,
+                issue_number: number,
+                labels: labels
+              });
+
+              console.log('Added labels:', labels.join(', '));
+            }

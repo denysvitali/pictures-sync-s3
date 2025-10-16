@@ -1,0 +1,363 @@
+# golangci-lint configuration for pictures-sync-s3
+# This configuration enforces security best practices and code quality
+
+run:
+  timeout: 10m
+  tests: true
+  build-tags:
+    - integration
+  skip-dirs:
+    - vendor
+    - test-data
+    - .github
+  skip-files:
+    - ".*_test\\.go$"  # Some rules don't apply to tests
+  modules-download-mode: readonly
+  allow-parallel-runners: true
+
+output:
+  format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+  uniq-by-line: true
+  sort-results: true
+
+linters:
+  enable:
+    # Default linters
+    - errcheck      # Check for unchecked errors
+    - gosimple      # Simplify code
+    - govet         # Standard Go vet
+    - ineffassign   # Detect ineffectual assignments
+    - staticcheck   # Advanced static analysis
+    - unused        # Find unused code
+
+    # Security linters
+    - gosec         # Security-focused linting
+    - gocritic      # Comprehensive checks including security
+
+    # Code quality linters
+    - gocyclo       # Cyclomatic complexity
+    - gofmt         # Format checking
+    - goimports     # Import organization
+    - revive        # Replacement for golint
+    - misspell      # Spelling mistakes
+    - unconvert     # Unnecessary type conversions
+    - unparam       # Unused function parameters
+    - whitespace    # Whitespace issues
+
+    # Style and best practices
+    - stylecheck    # Style guide enforcement
+    - typecheck     # Type checking
+    - goconst       # Repeated strings that should be constants
+    - gocognit      # Cognitive complexity
+    - nestif        # Deeply nested if statements
+    - prealloc      # Slice preallocation
+
+    # Error handling
+    - errorlint     # Error wrapping issues
+    - wrapcheck     # Error wrapping
+
+    # Performance
+    - bodyclose     # HTTP response body close
+    - noctx         # HTTP requests without context
+
+    # Maintainability
+    - maintidx      # Maintainability index
+    - funlen        # Function length
+    - lll           # Line length
+
+    # Additional security
+    - exportloopref # Exporting loop variables
+    - nilerr        # Nil error returns
+
+  disable:
+    - exhaustive    # Too strict for switch statements
+    - exhaustruct   # Too verbose for struct initialization
+    - gochecknoglobals  # Globals are sometimes necessary
+    - gochecknoinits    # Init functions are sometimes needed
+    - godox         # Allow TODO comments
+    - gomnd         # Magic number detection (too noisy)
+    - nlreturn      # Too strict on newlines
+    - wsl           # Too opinionated on whitespace
+    - varnamelen    # Variable name length (too strict)
+    - testpackage   # Doesn't work well with our test structure
+    - paralleltest  # Not all tests can be parallel
+
+linters-settings:
+  # Security settings
+  gosec:
+    severity: medium
+    confidence: medium
+    excludes:
+      - G104  # Audit errors (handled by errcheck)
+    includes:
+      - G101  # Hardcoded credentials
+      - G102  # Bind to all interfaces
+      - G103  # Audit unsafe operations
+      - G104  # Audit errors
+      - G106  # Use of ssh.InsecureIgnoreHostKey
+      - G107  # URL from taint source
+      - G201  # SQL injection
+      - G202  # SQL string building
+      - G203  # SQL string formatting
+      - G204  # Command injection
+      - G301  # File permissions
+      - G302  # File permissions
+      - G303  # Creating tempfile with os.Create
+      - G304  # File path from taint source
+      - G305  # File path traversal
+      - G306  # Poor file permissions
+      - G307  # Deferred error checking
+      - G401  # Weak crypto (MD5, DES)
+      - G402  # TLS InsecureSkipVerify
+      - G403  # Weak crypto (RC4)
+      - G404  # Weak random source
+      - G501  # Blocklisted import MD5
+      - G502  # Blocklisted import DES
+      - G503  # Blocklisted import RC4
+      - G504  # Blocklisted import CGI
+      - G505  # Blocklisted import SHA1
+      - G601  # Memory aliasing
+
+  # Error checking
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+    exclude-functions:
+      - (*os.File).Close
+      - (io.Closer).Close
+
+  # Code complexity
+  gocyclo:
+    min-complexity: 15
+
+  gocognit:
+    min-complexity: 20
+
+  # Function length
+  funlen:
+    lines: 100
+    statements: 50
+
+  # Line length
+  lll:
+    line-length: 120
+    tab-width: 4
+
+  # Govet settings
+  govet:
+    check-shadowing: true
+    enable-all: true
+    disable:
+      - fieldalignment  # Too strict on struct field ordering
+
+  # Revive settings (replaces golint)
+  revive:
+    severity: warning
+    confidence: 0.8
+    rules:
+      - name: blank-imports
+      - name: context-as-argument
+      - name: context-keys-type
+      - name: dot-imports
+      - name: error-return
+      - name: error-strings
+      - name: error-naming
+      - name: exported
+      - name: if-return
+      - name: increment-decrement
+      - name: var-naming
+      - name: var-declaration
+      - name: package-comments
+      - name: range
+      - name: receiver-naming
+      - name: time-naming
+      - name: unexported-return
+      - name: indent-error-flow
+      - name: errorf
+      - name: empty-block
+      - name: superfluous-else
+      - name: unused-parameter
+      - name: unreachable-code
+      - name: redefines-builtin-id
+
+  # Staticcheck
+  staticcheck:
+    checks: ["all"]
+
+  # Style
+  stylecheck:
+    checks: ["all", "-ST1000", "-ST1003"]  # Allow package comments flexibility
+    dot-import-whitelist:
+      - fmt
+    initialisms: ["ACL", "API", "ASCII", "CPU", "CSS", "DNS", "EOF", "GUID", "HTML", "HTTP", "HTTPS", "ID", "IP", "JSON", "QPS", "RAM", "RPC", "SLA", "SMTP", "SQL", "SSH", "TCP", "TLS", "TTL", "UDP", "UI", "GID", "UID", "UUID", "URI", "URL", "UTF8", "VM", "XML", "XMPP", "XSRF", "XSS", "ACT", "LED", "SD", "DCIM", "NTP", "SSID", "WPA"]
+
+  # Import organization
+  goimports:
+    local-prefixes: github.com/denysvitali/pictures-sync-s3
+
+  # Gocritic
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - experimental
+      - opinionated
+      - performance
+      - style
+    disabled-checks:
+      - hugeParam      # Too strict on struct sizes
+      - rangeValCopy   # Sometimes necessary
+      - unnamedResult  # Named returns aren't always better
+
+  # Constants
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+    ignore-tests: true
+
+  # Nesting
+  nestif:
+    min-complexity: 5
+
+  # Unused parameters
+  unparam:
+    check-exported: false
+
+  # Misspell
+  misspell:
+    locale: US
+    ignore-words:
+      - gokrazy
+      - rclone
+
+  # Whitespace
+  whitespace:
+    multi-if: false
+    multi-func: false
+
+  # Preallocation
+  prealloc:
+    simple: true
+    range-loops: true
+    for-loops: false
+
+  # Error wrapping
+  wrapcheck:
+    ignorePackageGlobs:
+      - github.com/denysvitali/pictures-sync-s3/*
+      - github.com/rclone/*
+
+  # Maintainability index
+  maintidx:
+    under: 20
+
+issues:
+  # Maximum issues count per linter
+  max-issues-per-linter: 50
+  max-same-issues: 3
+
+  # Exclude common false positives
+  exclude-rules:
+    # Exclude some linters from running on tests files
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - errcheck
+        - dupl
+        - gosec
+        - funlen
+        - gocognit
+        - maintidx
+
+    # Exclude some staticcheck messages
+    - linters:
+        - staticcheck
+      text: "SA9003:"
+
+    # Exclude lll issues for long lines with go:generate
+    - linters:
+        - lll
+      source: "^//go:generate "
+
+    # Exclude shadow checking on err variable
+    - linters:
+        - govet
+      text: 'shadow: declaration of "err"'
+
+    # Allow globals in main package
+    - path: cmd/
+      linters:
+        - gochecknoglobals
+
+    # Allow init functions in main packages
+    - path: cmd/
+      linters:
+        - gochecknoinits
+
+    # Embedded web UI can have long lines
+    - path: cmd/webui/
+      linters:
+        - lll
+
+    # LED patterns file can be complex
+    - path: pkg/ledcontroller/patterns\.go
+      linters:
+        - gocyclo
+        - gocognit
+
+    # Config files can have many parameters
+    - path: pkg/settings/
+      linters:
+        - unparam
+
+    # System calls need specific error handling
+    - path: pkg/sdmonitor/
+      linters:
+        - wrapcheck
+
+  # Show only new issues created since base branch
+  new: false
+
+  # Fix found issues (if supported by the linter)
+  fix: false
+
+  # Exclude entire linters from running on specific paths
+  exclude-dirs:
+    - vendor
+    - test-data
+    - .github
+
+  # Show all issues from a linter
+  exclude-use-default: false
+
+  # Include all issues by default
+  include:
+    - EXC0001  # errcheck: Almost all programs ignore errors
+    - EXC0002  # golint: Annoying issue about not having comment
+    - EXC0003  # golint: Func name will be used as test.Test* by other packages
+    - EXC0004  # govet: Composite literal uses unkeyed fields
+    - EXC0005  # staticcheck: Ineffective break statement
+    - EXC0006  # gosec: Use of unsafe calls should be audited
+    - EXC0007  # gosec: Errors unhandled
+    - EXC0008  # gosec: Subprocess launched with function call
+    - EXC0009  # gosec: Subprocess launched with variable
+    - EXC0010  # gosec: G204 CWE-78
+    - EXC0011  # stylecheck: Comment should be of the form
+    - EXC0012  # revive: Exported function should have comment
+    - EXC0013  # revive: Package comment should be of the form
+    - EXC0014  # revive: Comment on exported type should be of the form
+
+severity:
+  default-severity: warning
+  case-sensitive: false
+  rules:
+    - linters:
+        - gosec
+      severity: error
+    - linters:
+        - errcheck
+      severity: error
+    - linters:
+        - staticcheck
+      severity: error

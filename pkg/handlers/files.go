@@ -2,9 +2,6 @@ package handlers
 
 import (
 	"fmt"
-	"image"
-	"image/jpeg"
-	_ "image/png"
 	"log"
 	"net/http"
 	"os"
@@ -14,8 +11,9 @@ import (
 	"time"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
-	"github.com/nfnt/resize"
-	"github.com/rwcarlsen/goexif/exif"
+	"github.com/disintegration/imaging"
+	exif "github.com/dsoprea/go-exif/v3"
+	exifcommon "github.com/dsoprea/go-exif/v3/common"
 )
 
 // HandleFileCards returns list of card IDs
@@ -192,20 +190,20 @@ func (ctx *Context) HandleThumbnail(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	img, _, err := image.Decode(file)
+	img, err := imaging.Open(filePath)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to decode image: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	// Resize to thumbnail (max 200px width, preserve aspect ratio)
-	thumbnail := resize.Thumbnail(200, 200, img, resize.Lanczos3)
+	// Resize to thumbnail (max 200px, preserve aspect ratio)
+	thumbnail := imaging.Fit(img, 200, 200, imaging.Lanczos)
 
 	// Encode as JPEG and send
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Header().Set("Cache-Control", "public, max-age=3600")
 
-	if err := jpeg.Encode(w, thumbnail, &jpeg.Options{Quality: 80}); err != nil {
+	if err := imaging.Encode(w, thumbnail, imaging.JPEG, imaging.JPEGQuality(80)); err != nil {
 		log.Printf("Failed to encode thumbnail: %v", err)
 	}
 }
@@ -312,52 +310,60 @@ func (ctx *Context) HandleSDCardFiles(w http.ResponseWriter, r *http.Request) {
 
 // extractEXIF extracts EXIF metadata from an image file
 func extractEXIF(filePath string) map[string]interface{} {
-	file, err := os.Open(filePath)
+	fileData, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil
 	}
-	defer file.Close()
 
-	x, err := exif.Decode(file)
+	rawExif, err := exif.SearchAndExtractExif(fileData)
+	if err != nil {
+		return nil
+	}
+
+	entries, _, err := exif.GetFlatExifData(rawExif, nil)
 	if err != nil {
 		return nil
 	}
 
 	data := make(map[string]interface{})
 
+	// Helper function to find tag value
+	findTag := func(tagName string) *exif.ExifTag {
+		for i := range entries {
+			if entries[i].TagName == tagName {
+				return &entries[i]
+			}
+		}
+		return nil
+	}
+
 	// Extract common EXIF fields
-	if cameraMake, err := x.Get(exif.Make); err == nil {
-		if val, err := cameraMake.StringVal(); err == nil {
-			data["camera_make"] = strings.TrimSpace(val)
+	if tag := findTag("Make"); tag != nil {
+		data["camera_make"] = strings.TrimSpace(tag.FormattedFirst)
+	}
+
+	if tag := findTag("Model"); tag != nil {
+		data["camera_model"] = strings.TrimSpace(tag.FormattedFirst)
+	}
+
+	if tag := findTag("DateTimeOriginal"); tag != nil {
+		data["date_time"] = tag.FormattedFirst
+	}
+
+	if tag := findTag("ISOSpeedRatings"); tag != nil {
+		data["iso"] = tag.FormattedFirst
+	}
+
+	if tag := findTag("FNumber"); tag != nil {
+		if val, ok := tag.Value.([]exifcommon.Rational); ok && len(val) > 0 {
+			data["f_number"] = fmt.Sprintf("f/%.1f", float64(val[0].Numerator)/float64(val[0].Denominator))
 		}
 	}
 
-	if cameraModel, err := x.Get(exif.Model); err == nil {
-		if val, err := cameraModel.StringVal(); err == nil {
-			data["camera_model"] = strings.TrimSpace(val)
-		}
-	}
-
-	if dateTime, err := x.Get(exif.DateTimeOriginal); err == nil {
-		if val, err := dateTime.StringVal(); err == nil {
-			data["date_time"] = val
-		}
-	}
-
-	if iso, err := x.Get(exif.ISOSpeedRatings); err == nil {
-		if val, err := iso.Int(0); err == nil {
-			data["iso"] = val
-		}
-	}
-
-	if fNumber, err := x.Get(exif.FNumber); err == nil {
-		if num, denom, err := fNumber.Rat2(0); err == nil {
-			data["f_number"] = fmt.Sprintf("f/%.1f", float64(num)/float64(denom))
-		}
-	}
-
-	if exposure, err := x.Get(exif.ExposureTime); err == nil {
-		if num, denom, err := exposure.Rat2(0); err == nil {
+	if tag := findTag("ExposureTime"); tag != nil {
+		if val, ok := tag.Value.([]exifcommon.Rational); ok && len(val) > 0 {
+			num := val[0].Numerator
+			denom := val[0].Denominator
 			if num == 1 {
 				data["exposure_time"] = fmt.Sprintf("1/%d", denom)
 			} else {
@@ -366,20 +372,55 @@ func extractEXIF(filePath string) map[string]interface{} {
 		}
 	}
 
-	if focalLength, err := x.Get(exif.FocalLength); err == nil {
-		if num, denom, err := focalLength.Rat2(0); err == nil {
-			data["focal_length"] = fmt.Sprintf("%.1fmm", float64(num)/float64(denom))
+	if tag := findTag("FocalLength"); tag != nil {
+		if val, ok := tag.Value.([]exifcommon.Rational); ok && len(val) > 0 {
+			data["focal_length"] = fmt.Sprintf("%.1fmm", float64(val[0].Numerator)/float64(val[0].Denominator))
 		}
 	}
 
 	// GPS coordinates
-	lat, lon, err := x.LatLong()
-	if err == nil {
-		data["gps_latitude"] = lat
-		data["gps_longitude"] = lon
+	if latTag := findTag("GPSLatitude"); latTag != nil {
+		if lonTag := findTag("GPSLongitude"); lonTag != nil {
+			if latRefTag := findTag("GPSLatitudeRef"); latRefTag != nil {
+				if lonRefTag := findTag("GPSLongitudeRef"); lonRefTag != nil {
+					lat := parseGPSCoordinate(latTag, latRefTag)
+					lon := parseGPSCoordinate(lonTag, lonRefTag)
+					if lat != 0 || lon != 0 {
+						data["gps_latitude"] = lat
+						data["gps_longitude"] = lon
+					}
+				}
+			}
+		}
 	}
 
 	return data
+}
+
+// parseGPSCoordinate converts GPS EXIF data to decimal degrees
+func parseGPSCoordinate(coordTag *exif.ExifTag, refTag *exif.ExifTag) float64 {
+	coords, ok := coordTag.Value.([]exifcommon.Rational)
+	if !ok || len(coords) < 3 {
+		return 0
+	}
+
+	ref := refTag.FormattedFirst
+	if ref == "" {
+		return 0
+	}
+
+	degrees := float64(coords[0].Numerator) / float64(coords[0].Denominator)
+	minutes := float64(coords[1].Numerator) / float64(coords[1].Denominator)
+	seconds := float64(coords[2].Numerator) / float64(coords[2].Denominator)
+
+	decimal := degrees + (minutes / 60.0) + (seconds / 3600.0)
+
+	// Apply hemisphere (S and W are negative)
+	if ref == "S" || ref == "W" {
+		decimal = -decimal
+	}
+
+	return decimal
 }
 
 // HandleSDCardPreview serves full-resolution images from SD card
