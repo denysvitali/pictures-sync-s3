@@ -2291,7 +2291,16 @@ key = your-application-key"></textarea>
 
         function scanWiFi() {
             const networksDiv = document.getElementById('wifi-networks');
-            networksDiv.innerHTML = '<div class="loading"><div class="spinner"></div><p>Scanning...</p></div>';
+            const scanBtn = document.getElementById('scan-btn');
+            const scanStatus = document.getElementById('scan-status');
+
+            // Update button state
+            scanBtn.disabled = true;
+            scanBtn.innerHTML = '<span class="btn-icon">⏳</span><span>Scanning...</span>';
+            scanStatus.textContent = 'Scanning for networks...';
+
+            // Show loading in networks area
+            networksDiv.innerHTML = '<div class="loading"><div class="spinner"></div><p>Triggering network scan and waiting for results...</p></div>';
 
             fetch('/api/wifi/scan', { method: 'POST' })
                 .then(r => {
@@ -2331,9 +2340,19 @@ key = your-application-key"></textarea>
                     });
 
                     networksDiv.innerHTML = html;
+
+                    // Reset button state
+                    scanBtn.disabled = false;
+                    scanBtn.innerHTML = '<span class="btn-icon">🔍</span><span>Scan for Networks</span>';
+                    scanStatus.textContent = 'Scan complete - found ' + networks.length + ' networks';
                 })
                 .catch(err => {
                     networksDiv.innerHTML = '<p class="alert alert-error">Scan failed: ' + err.message + '</p>';
+
+                    // Reset button state
+                    scanBtn.disabled = false;
+                    scanBtn.innerHTML = '<span class="btn-icon">🔍</span><span>Scan for Networks</span>';
+                    scanStatus.textContent = 'Scan failed';
                 });
         }
 

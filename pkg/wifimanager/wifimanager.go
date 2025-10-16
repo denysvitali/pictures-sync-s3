@@ -2,6 +2,7 @@ package wifimanager
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/mdlayher/wifi"
 )
@@ -124,9 +126,26 @@ func (m *Manager) ScanNetworks() ([]ScanResult, error) {
 	networksMap := make(map[string]ScanResult)
 
 	for _, intf := range interfaces {
+		log.Printf("Triggering scan on interface %s", intf.Name)
+
+		// Create context with timeout for scan
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		// Trigger scan first
+		err := cl.Scan(ctx, intf)
+		if err != nil {
+			log.Printf("Failed to trigger scan on interface %s: %v", intf.Name, err)
+			continue
+		}
+
+		// Wait a moment for scan to complete
+		time.Sleep(2 * time.Second)
+
+		// Now get the access points
 		accessPoints, err := cl.AccessPoints(intf)
 		if err != nil {
-			log.Printf("Failed to scan on interface %s: %v", intf.Name, err)
+			log.Printf("Failed to get access points on interface %s: %v", intf.Name, err)
 			continue
 		}
 
@@ -138,17 +157,19 @@ func (m *Manager) ScanNetworks() ([]ScanResult, error) {
 				continue
 			}
 
-			// BSS doesn't contain signal strength from scan, so we'll use a placeholder
-			// Real signal can only be obtained from StationInfo when connected
+			// Check if network is encrypted
+			encrypted := len(ap.RSN.PairwiseCiphers) > 0
+
 			result := ScanResult{
 				SSID:      ap.SSID,
-				Signal:    -50, // Placeholder - actual signal not available in scan results
-				Encrypted: len(ap.RSN.PairwiseCiphers) > 0,
+				Signal:    -50, // Placeholder - BSS doesn't contain signal strength
+				Encrypted: encrypted,
 			}
 
 			// Only add if we don't already have this SSID
 			if _, exists := networksMap[ap.SSID]; !exists {
 				networksMap[ap.SSID] = result
+				log.Printf("Found network: %s (encrypted: %v)", ap.SSID, encrypted)
 			}
 		}
 	}
@@ -157,16 +178,6 @@ func (m *Manager) ScanNetworks() ([]ScanResult, error) {
 	results := make([]ScanResult, 0, len(networksMap))
 	for _, result := range networksMap {
 		results = append(results, result)
-	}
-
-	// Sort by signal strength (strongest first)
-	// Simple bubble sort since the list is typically small
-	for i := 0; i < len(results)-1; i++ {
-		for j := 0; j < len(results)-i-1; j++ {
-			if results[j].Signal < results[j+1].Signal {
-				results[j], results[j+1] = results[j+1], results[j]
-			}
-		}
 	}
 
 	log.Printf("Scan complete: found %d unique networks", len(results))
