@@ -99,63 +99,78 @@ func (m *Manager) RemoveNetwork(ssid string) error {
 	return fmt.Errorf("network not found: %s", ssid)
 }
 
-// ScanNetworks scans for available WiFi networks
+// ScanNetworks scans for available WiFi networks using the wifi library
 func (m *Manager) ScanNetworks() ([]ScanResult, error) {
-	log.Printf("WiFi scanning in Gokrazy...")
+	log.Printf("Scanning for WiFi networks...")
 
-	// IMPORTANT: WiFi scanning is not natively supported in Gokrazy
-	// The gokrazy/wifi package only supports connecting to pre-configured networks,
-	// not scanning for available ones. The schollz/wifiscan library uses exec
-	// to run iwlist, which doesn't exist in Gokrazy.
+	cl, err := wifi.New()
+	if err != nil {
+		log.Printf("Failed to create WiFi client for scanning: %v", err)
+		return nil, fmt.Errorf("WiFi client unavailable: %w", err)
+	}
+	defer cl.Close()
 
-	// For now, we'll return an informative message to the user
-	// In production, you would need to:
-	// 1. Pre-configure known networks in /perm/wifi.json
-	// 2. Use a separate device/service for network discovery
-	// 3. Or implement direct netlink communication (complex)
-
-	// Check if we can at least detect the current network from gokrazy config
-	currentNetwork := m.getCurrentNetworkFromConfig()
-
-	if currentNetwork != "" {
-		// Return at least the configured network
-		return []ScanResult{
-			{
-				SSID:      currentNetwork,
-				Signal:    -50, // Assume decent signal
-				Encrypted: true,
-			},
-			{
-				SSID:      "⚠️ Scanning not supported",
-				Signal:    -100,
-				Encrypted: false,
-			},
-			{
-				SSID:      "Configure networks in /perm/wifi.json",
-				Signal:    -100,
-				Encrypted: false,
-			},
-		}, nil
+	interfaces, err := cl.Interfaces()
+	if err != nil {
+		log.Printf("Failed to get WiFi interfaces: %v", err)
+		return nil, fmt.Errorf("no WiFi interfaces: %w", err)
 	}
 
-	// Return informative "networks" to show the limitation
-	return []ScanResult{
-		{
-			SSID:      "⚠️ WiFi scanning not available in Gokrazy",
-			Signal:    -100,
-			Encrypted: false,
-		},
-		{
-			SSID:      "Please configure networks manually",
-			Signal:    -100,
-			Encrypted: false,
-		},
-		{
-			SSID:      "Add to /perm/wifi.json or extra-wifi.json",
-			Signal:    -100,
-			Encrypted: false,
-		},
-	}, nil
+	if len(interfaces) == 0 {
+		return nil, fmt.Errorf("no WiFi interfaces found")
+	}
+
+	// Collect all unique networks from all interfaces
+	networksMap := make(map[string]ScanResult)
+
+	for _, intf := range interfaces {
+		accessPoints, err := cl.AccessPoints(intf)
+		if err != nil {
+			log.Printf("Failed to scan on interface %s: %v", intf.Name, err)
+			continue
+		}
+
+		log.Printf("Found %d access points on interface %s", len(accessPoints), intf.Name)
+
+		for _, ap := range accessPoints {
+			// Skip hidden networks
+			if ap.SSID == "" {
+				continue
+			}
+
+			// BSS doesn't contain signal strength from scan, so we'll use a placeholder
+			// Real signal can only be obtained from StationInfo when connected
+			result := ScanResult{
+				SSID:      ap.SSID,
+				Signal:    -50, // Placeholder - actual signal not available in scan results
+				Encrypted: len(ap.RSN.PairwiseCiphers) > 0,
+			}
+
+			// Only add if we don't already have this SSID
+			if _, exists := networksMap[ap.SSID]; !exists {
+				networksMap[ap.SSID] = result
+			}
+		}
+	}
+
+	// Convert map to slice
+	results := make([]ScanResult, 0, len(networksMap))
+	for _, result := range networksMap {
+		results = append(results, result)
+	}
+
+	// Sort by signal strength (strongest first)
+	// Simple bubble sort since the list is typically small
+	for i := 0; i < len(results)-1; i++ {
+		for j := 0; j < len(results)-i-1; j++ {
+			if results[j].Signal < results[j+1].Signal {
+				results[j], results[j+1] = results[j+1], results[j]
+			}
+		}
+	}
+
+	log.Printf("Scan complete: found %d unique networks", len(results))
+	return results, nil
 }
 
 // getCurrentNetworkFromConfig tries to read the current network from gokrazy config
@@ -243,25 +258,35 @@ func (m *Manager) load() error {
 	return nil
 }
 
-// GetCurrentSSID returns the currently connected SSID by querying the WiFi interface
-func (m *Manager) GetCurrentSSID() (string, error) {
+// ConnectionInfo represents the current WiFi connection details
+type ConnectionInfo struct {
+	SSID   string
+	Signal int // Signal strength in dBm
+}
+
+// GetCurrentConnection returns the currently connected network with signal strength
+func (m *Manager) GetCurrentConnection() (*ConnectionInfo, error) {
 	// Use the wifi library to get actual connection status
 	cl, err := wifi.New()
 	if err != nil {
 		log.Printf("Failed to create WiFi client: %v", err)
 		// Fallback to config file
-		return m.getCurrentNetworkFromConfig(), fmt.Errorf("WiFi client unavailable")
+		ssid := m.getCurrentNetworkFromConfig()
+		if ssid != "" {
+			return &ConnectionInfo{SSID: ssid, Signal: 0}, fmt.Errorf("WiFi client unavailable")
+		}
+		return nil, fmt.Errorf("WiFi client unavailable")
 	}
 	defer cl.Close()
 
 	interfaces, err := cl.Interfaces()
 	if err != nil {
 		log.Printf("Failed to get WiFi interfaces: %v", err)
-		return m.getCurrentNetworkFromConfig(), fmt.Errorf("no WiFi interfaces")
+		return nil, fmt.Errorf("no WiFi interfaces")
 	}
 
 	if len(interfaces) == 0 {
-		return m.getCurrentNetworkFromConfig(), fmt.Errorf("no WiFi interfaces found")
+		return nil, fmt.Errorf("no WiFi interfaces found")
 	}
 
 	// Check each interface for connection
@@ -280,16 +305,27 @@ func (m *Manager) GetCurrentSSID() (string, error) {
 		for _, sta := range stationInfos {
 			if !bytes.Equal(sta.HardwareAddr, net.HardwareAddr{}) {
 				// We're connected! Now get the SSID
-				// The sta object doesn't directly give us SSID, but we can get it from BSS info
 				bss, err := cl.BSS(intf)
 				if err == nil && bss != nil && bss.SSID != "" {
 					log.Printf("Currently connected to SSID: %s (signal: %d dBm)", bss.SSID, sta.Signal)
-					return bss.SSID, nil
+					return &ConnectionInfo{
+						SSID:   bss.SSID,
+						Signal: sta.Signal,
+					}, nil
 				}
 			}
 		}
 	}
 
 	// Not connected to any network
-	return "", fmt.Errorf("not connected to any WiFi network")
+	return nil, fmt.Errorf("not connected to any WiFi network")
+}
+
+// GetCurrentSSID returns the currently connected SSID (for backward compatibility)
+func (m *Manager) GetCurrentSSID() (string, error) {
+	conn, err := m.GetCurrentConnection()
+	if err != nil {
+		return "", err
+	}
+	return conn.SSID, nil
 }
