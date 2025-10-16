@@ -1797,12 +1797,8 @@ key = your-application-key"></textarea>
             document.getElementById(tabName + '-tab').classList.add('active');
 
             // Load data for the selected tab
-            if (tabName === 'devices') refreshDevices();
-            if (tabName === 'gallery') loadGallery('DCIM');
             if (tabName === 'history') loadHistory();
-            if (tabName === 'files') switchFilesView('cards');
             if (tabName === 'wifi') loadWiFiStatus();
-            if (tabName === 'network') loadNetworkInfo();
             if (tabName === 'config') loadConfig();
         }
 
@@ -3404,6 +3400,7 @@ key = your-application-key"></textarea>
         }
 
         // Initialize
+        updateConnectionStatus(false); // Start as disconnected
         connectWebSocket();
         loadHistory();
     </script>
