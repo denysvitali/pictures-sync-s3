@@ -116,6 +116,27 @@ func (m *Manager) SetStatus(status SyncStatus) error {
 	return nil
 }
 
+// SetError sets the error status with a message
+func (m *Manager) SetError(errorMsg string) error {
+	m.mu.Lock()
+	m.currentState.Status = StatusError
+	if m.currentState.CurrentSync != nil {
+		m.currentState.CurrentSync.Error = errorMsg
+		m.currentState.CurrentSync.Status = "error"
+	}
+
+	if err := m.save(); err != nil {
+		m.mu.Unlock()
+		return err
+	}
+
+	stateCopy := m.currentState
+	m.mu.Unlock()
+
+	m.notifyListenersAsync(stateCopy)
+	return nil
+}
+
 // SetSDCard updates SD card mount status
 func (m *Manager) SetSDCard(mounted bool, path string) error {
 	m.mu.Lock()
