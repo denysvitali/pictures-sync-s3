@@ -1,3 +1,6 @@
+// Package events provides a publish-subscribe event system for system-wide notifications.
+// It supports event distribution for SD card operations, sync progress, and system status changes.
+// Events are delivered asynchronously to all subscribers via buffered channels.
 package events
 
 import (

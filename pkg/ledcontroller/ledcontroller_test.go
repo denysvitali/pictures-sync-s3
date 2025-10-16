@@ -79,19 +79,20 @@ func (c *Controller) StartMocked(m *MockStateManager) error {
 		return nil
 	}
 
-	// Subscribe to state changes
-	stateUpdates := m.Subscribe()
+	c.stateUpdates = m.Subscribe()
 
+	c.wg.Add(1)
 	go func() {
+		defer c.wg.Done()
 		var currentStatus state.SyncStatus
 		for {
 			select {
 			case <-c.stopChan:
 				return
-			case state := <-stateUpdates:
-				if state.Status != currentStatus {
-					currentStatus = state.Status
-					c.updatePattern(currentStatus)
+			case newState := <-c.stateUpdates:
+				if newState.Status != currentStatus {
+					currentStatus = newState.Status
+					c.handleStatusChange(currentStatus)
 				}
 			}
 		}
@@ -174,6 +175,7 @@ func createTestController() (*Controller, *TestLED) {
 			available:    true,
 		},
 		stopChan: make(chan struct{}),
+		wg:       sync.WaitGroup{},
 	}
 
 	return c, testLED
@@ -287,6 +289,7 @@ func TestPatternNotStopping(t *testing.T) {
 			available:    true,
 		},
 		stopChan: make(chan struct{}),
+		wg:       sync.WaitGroup{},
 	}
 
 	err := c.StartMocked(mock)
@@ -432,6 +435,7 @@ func TestStateChangeDuringBlink(t *testing.T) {
 			available:    true,
 		},
 		stopChan: make(chan struct{}),
+		wg:       sync.WaitGroup{},
 	}
 
 	err := c.StartMocked(mock)
@@ -599,6 +603,7 @@ func TestLEDStateAfterErrors(t *testing.T) {
 			available:    true,
 		},
 		stopChan: make(chan struct{}),
+		wg:       sync.WaitGroup{},
 	}
 
 	err = c.StartMocked(mock)
@@ -642,6 +647,7 @@ func TestCleanupOnShutdown(t *testing.T) {
 			available:    true,
 		},
 		stopChan: make(chan struct{}),
+		wg:       sync.WaitGroup{},
 	}
 
 	err := c.StartMocked(mock)
@@ -859,9 +865,10 @@ func TestRunPatternRepeatEdgeCases(t *testing.T) {
 				stopChan: make(chan struct{}),
 			}
 
+			patternStop := make(chan struct{})
 			done := make(chan struct{})
 			go func() {
-				c.runPattern(led, tt.pattern)
+				c.runPattern(led, tt.pattern, patternStop)
 				close(done)
 			}()
 
@@ -869,7 +876,7 @@ func TestRunPatternRepeatEdgeCases(t *testing.T) {
 			time.Sleep(tt.timeout)
 
 			// Stop the pattern
-			close(c.stopChan)
+			close(patternStop)
 
 			// Wait for goroutine to exit
 			select {
@@ -928,6 +935,7 @@ func TestStopChanCloseVsSend(t *testing.T) {
 	c := &Controller{
 		actLED:   led,
 		stopChan: make(chan struct{}),
+		wg:       sync.WaitGroup{},
 	}
 
 	mock := NewMockStateManager()

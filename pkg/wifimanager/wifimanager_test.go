@@ -22,13 +22,13 @@ func setupTestManager(t *testing.T) (*Manager, string, func()) {
 	// Override the config path for testing
 	testPath := filepath.Join(tmpDir, "extra-wifi.json")
 
-	// This is a hack - we need to modify the const, but we can't
-	// Instead, we'll create the manager and manually set the path
-	// This reveals BUG #1: No way to inject config path for testing
+	// Save original path and set test path
+	originalPath := WiFiConfigPath
+	WiFiConfigPath = testPath
 
 	cleanup := func() {
+		WiFiConfigPath = originalPath
 		os.RemoveAll(tmpDir)
-		// Can't restore original path due to const
 	}
 
 	m := &Manager{

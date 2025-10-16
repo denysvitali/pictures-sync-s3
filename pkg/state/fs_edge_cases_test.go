@@ -24,7 +24,7 @@ func TestFullDiskScenario(t *testing.T) {
 
 	mgr := &Manager{
 		currentState:      CurrentState{Status: StatusIdle},
-		listeners:         make([]chan CurrentState, 0),
+		notifier:          newNotifier(),
 		history:           make([]SyncRecord, 0),
 		progressSaveDelay: 5 * time.Second,
 	}

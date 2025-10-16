@@ -17,8 +17,8 @@ import (
 func setupTestManager(t testing.TB) *Manager {
 	mgr := &Manager{
 		currentState:      CurrentState{Status: StatusIdle},
-		listeners:         make([]chan CurrentState, 0),
-		history:          make([]SyncRecord, 0),
+		notifier:          newNotifier(),
+		history:           make([]SyncRecord, 0),
 		progressSaveDelay: 5 * time.Second,
 		lastProgressSave:  time.Now(),
 	}
@@ -301,8 +301,8 @@ func TestUnboundedSliceGrowth(t *testing.T) {
 		listeners = append(listeners, ch)
 	}
 
-	initialLen := len(mgr.listeners)
-	initialCap := cap(mgr.listeners)
+	initialLen := mgr.notifier.getListenerCount()
+	initialCap := cap(mgr.notifier.getListeners())
 	t.Logf("Initial listeners: len=%d, cap=%d", initialLen, initialCap)
 
 	// Unsubscribe half
@@ -310,10 +310,8 @@ func TestUnboundedSliceGrowth(t *testing.T) {
 		mgr.Unsubscribe(listeners[i])
 	}
 
-	mgr.mu.RLock()
-	afterUnsubLen := len(mgr.listeners)
-	afterUnsubCap := cap(mgr.listeners)
-	mgr.mu.RUnlock()
+	afterUnsubLen := mgr.notifier.getListenerCount()
+	afterUnsubCap := cap(mgr.notifier.getListeners())
 
 	t.Logf("After unsubscribe: len=%d, cap=%d", afterUnsubLen, afterUnsubCap)
 

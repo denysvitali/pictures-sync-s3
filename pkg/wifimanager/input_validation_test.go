@@ -1,6 +1,7 @@
 package wifimanager
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -409,6 +410,3 @@ func TestInputValidation_ScanResults(t *testing.T) {
 		}
 	}
 }
-
-// Add missing import
-import "fmt"
