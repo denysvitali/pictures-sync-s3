@@ -1,11 +1,16 @@
 package wifimanager
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"sync"
+
+	"github.com/mdlayher/wifi"
 )
 
 const (
@@ -238,15 +243,53 @@ func (m *Manager) load() error {
 	return nil
 }
 
-// GetCurrentSSID returns the currently connected SSID
+// GetCurrentSSID returns the currently connected SSID by querying the WiFi interface
 func (m *Manager) GetCurrentSSID() (string, error) {
-	// In Gokrazy, we can't easily determine the current connection
-	// We'll return the configured network from the config file
+	// Use the wifi library to get actual connection status
+	cl, err := wifi.New()
+	if err != nil {
+		log.Printf("Failed to create WiFi client: %v", err)
+		// Fallback to config file
+		return m.getCurrentNetworkFromConfig(), fmt.Errorf("WiFi client unavailable")
+	}
+	defer cl.Close()
 
-	currentNetwork := m.getCurrentNetworkFromConfig()
-	if currentNetwork != "" {
-		return currentNetwork, nil
+	interfaces, err := cl.Interfaces()
+	if err != nil {
+		log.Printf("Failed to get WiFi interfaces: %v", err)
+		return m.getCurrentNetworkFromConfig(), fmt.Errorf("no WiFi interfaces")
 	}
 
-	return "", fmt.Errorf("no network configured")
+	if len(interfaces) == 0 {
+		return m.getCurrentNetworkFromConfig(), fmt.Errorf("no WiFi interfaces found")
+	}
+
+	// Check each interface for connection
+	for _, intf := range interfaces {
+		stationInfos, err := cl.StationInfo(intf)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				// Not connected on this interface
+				continue
+			}
+			log.Printf("Failed to get station info for %s: %v", intf.Name, err)
+			continue
+		}
+
+		// Check if we have a valid connection
+		for _, sta := range stationInfos {
+			if !bytes.Equal(sta.HardwareAddr, net.HardwareAddr{}) {
+				// We're connected! Now get the SSID
+				// The sta object doesn't directly give us SSID, but we can get it from BSS info
+				bss, err := cl.BSS(intf)
+				if err == nil && bss != nil && bss.SSID != "" {
+					log.Printf("Currently connected to SSID: %s (signal: %d dBm)", bss.SSID, sta.Signal)
+					return bss.SSID, nil
+				}
+			}
+		}
+	}
+
+	// Not connected to any network
+	return "", fmt.Errorf("not connected to any WiFi network")
 }
