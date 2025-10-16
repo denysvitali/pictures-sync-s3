@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/denysvitali/pictures-sync-s3/pkg/events"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ledcontroller"
 	"github.com/denysvitali/pictures-sync-s3/pkg/sdmonitor"
 	"github.com/denysvitali/pictures-sync-s3/pkg/settings"
@@ -21,6 +22,16 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
 	log.Println("Photo Backup Station - Starting...")
+
+	// Wait for gokrazy's NTP daemon to sync time
+	// The gokrazy NTP daemon runs automatically and syncs time on boot
+	// We just need to wait a moment for it to complete initial sync
+	log.Println("Waiting for time synchronization (gokrazy NTP daemon)...")
+	time.Sleep(5 * time.Second)
+	log.Println("Time sync wait complete. Current time:", time.Now())
+
+	// Initialize event manager
+	eventMgr := events.NewManager()
 
 	// Initialize state manager
 	stateMgr, err := state.NewManager()
@@ -70,6 +81,12 @@ func main() {
 
 	// Initialize SD card monitor
 	monitor := sdmonitor.NewMonitor(state.MountDir)
+
+	// Get event channel BEFORE starting monitor to avoid missing events
+	eventChan := monitor.Events()
+	log.Printf("Event channel obtained: %p", eventChan)
+
+	// Now start the monitor - any events sent during Start() will be buffered
 	if err := monitor.Start(); err != nil {
 		log.Fatalf("Failed to start SD card monitor: %v", err)
 	}
@@ -77,14 +94,22 @@ func main() {
 	log.Println("SD card monitor started")
 
 	// Set initial status
+	log.Println("Setting initial status to idle...")
 	stateMgr.SetStatus(state.StatusIdle)
 
+	// Note: No need to manually check for already-mounted cards here.
+	// The SD monitor's Start() method calls checkDevices() which will detect
+	// any already-mounted cards and send an insertion event automatically.
+	// This prevents duplicate events and race conditions.
+
 	// Handle signals
+	log.Println("Setting up signal handling...")
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
 	// Main event loop
 	log.Println("Ready - waiting for SD card insertion...")
+	log.Println("Entering main event loop...")
 
 	for {
 		select {
@@ -92,19 +117,25 @@ func main() {
 			log.Println("Received shutdown signal, exiting...")
 			return
 
-		case event := <-monitor.Events():
+		case event := <-eventChan:
+			log.Printf("Received event from monitor: %+v", event)
 			switch event.Type {
 			case sdmonitor.EventInserted:
-				handleCardInserted(event, monitor, stateMgr, syncMgr, appSettings)
+				log.Printf("Processing card insertion event: %s at %s", event.DevName, event.MountPath)
+				handleCardInserted(event, monitor, stateMgr, syncMgr, appSettings, eventMgr)
 			case sdmonitor.EventRemoved:
-				handleCardRemoved(event, stateMgr, syncMgr)
+				log.Printf("Processing card removal event: %s", event.DevName)
+				handleCardRemoved(event, stateMgr, syncMgr, eventMgr)
 			}
 		}
 	}
 }
 
-func handleCardInserted(event sdmonitor.Event, monitor *sdmonitor.Monitor, stateMgr *state.Manager, syncMgr *syncmanager.Manager, appSettings *settings.Settings) {
+func handleCardInserted(event sdmonitor.Event, monitor *sdmonitor.Monitor, stateMgr *state.Manager, syncMgr *syncmanager.Manager, appSettings *settings.Settings, eventMgr *events.Manager) {
 	log.Printf("SD card inserted: %s, mounted at %s", event.DevName, event.MountPath)
+
+	// Emit SD card inserted event
+	eventMgr.EmitSDCardInserted(event.DevName, event.MountPath)
 
 	// Update state
 	stateMgr.SetSDCard(true, event.MountPath)
@@ -118,9 +149,37 @@ func handleCardInserted(event sdmonitor.Event, monitor *sdmonitor.Monitor, state
 
 	// Run the sync operation in a goroutine to avoid blocking the event loop
 	go func() {
+		// Emit detecting photos event
+		eventMgr.Emit(events.EventDetectingPhotos, "Scanning SD card for photos", map[string]interface{}{
+			"mount_path": event.MountPath,
+		})
+
 		// Check for DCIM directory
 		if !sdmonitor.HasDCIM(event.MountPath) {
-			log.Println("No DCIM directory found on SD card, ignoring")
+			log.Printf("No DCIM directory found on SD card at %s", event.MountPath)
+
+			// List contents of the root directory to see what's actually there
+			entries, err := os.ReadDir(event.MountPath)
+			if err != nil {
+				log.Printf("Failed to read SD card contents: %v", err)
+			} else {
+				log.Printf("SD card contents (%d items):", len(entries))
+				for i, entry := range entries {
+					if i >= 10 { // Limit output to first 10 items
+						log.Printf("  ... and %d more items", len(entries)-10)
+						break
+					}
+					if entry.IsDir() {
+						log.Printf("  [DIR]  %s", entry.Name())
+					} else {
+						info, _ := entry.Info()
+						log.Printf("  [FILE] %s (%d bytes)", entry.Name(), info.Size())
+					}
+				}
+			}
+
+			log.Println("Ignoring SD card (no DCIM directory)")
+			eventMgr.EmitError("No DCIM directory found on SD card", nil)
 			stateMgr.SetStatus(state.StatusIdle)
 			return
 		}
@@ -129,6 +188,7 @@ func handleCardInserted(event sdmonitor.Event, monitor *sdmonitor.Monitor, state
 		totalFiles, totalBytes, err := sdmonitor.CountPhotos(event.MountPath)
 		if err != nil {
 			log.Printf("Error counting photos: %v", err)
+			eventMgr.EmitError("Failed to count photos on SD card", err)
 			stateMgr.SetStatus(state.StatusIdle)
 			return
 		}
@@ -137,9 +197,13 @@ func handleCardInserted(event sdmonitor.Event, monitor *sdmonitor.Monitor, state
 
 		if totalFiles == 0 {
 			log.Println("No photos found on SD card")
+			eventMgr.Emit(events.EventNoPhotosFound, "No photos found on SD card", nil)
 			stateMgr.SetStatus(state.StatusIdle)
 			return
 		}
+
+		// Emit photos detected event
+		eventMgr.EmitPhotosDetected(totalFiles, totalBytes)
 
 		// Handle empty cards (zero files) with user-friendly message
 		if totalFiles == 0 {
@@ -153,14 +217,17 @@ func handleCardInserted(event sdmonitor.Event, monitor *sdmonitor.Monitor, state
 		cardID, isNewCard, err := sdmonitor.GetOrCreateCardID(event.MountPath, monitor)
 		if err != nil {
 			log.Printf("Error getting card ID: %v", err)
+			eventMgr.EmitError("Failed to get or create card ID", err)
 			stateMgr.SetStatus(state.StatusError)
 			return
 		}
 
 		if isNewCard {
 			log.Printf("New card detected: %s", cardID)
+			eventMgr.EmitCardIDCreated(cardID)
 		} else {
 			log.Printf("Known card detected: %s", cardID)
+			eventMgr.EmitCardIDFound(cardID)
 
 			// Check if card was reformatted
 			lastSync := stateMgr.FindLastSyncByCardID(cardID)
@@ -181,9 +248,12 @@ func handleCardInserted(event sdmonitor.Event, monitor *sdmonitor.Monitor, state
 					newCardID, err := sdmonitor.CreateNewCardID(event.MountPath, monitor)
 					if err != nil {
 						log.Printf("Warning: Failed to create new card ID: %v", err)
+						eventMgr.EmitError("Failed to create new card ID for reformatted card", err)
 					} else {
+						oldCardID := cardID
 						cardID = newCardID
 						log.Printf("New card ID created: %s", cardID)
+						eventMgr.EmitReformatDetected(oldCardID, newCardID, percentageOfLast)
 					}
 				}
 			}
@@ -196,12 +266,22 @@ func handleCardInserted(event sdmonitor.Event, monitor *sdmonitor.Monitor, state
 		log.Printf("Starting sync of %d files (%.2f MB) to card folder: %s",
 			totalFiles, float64(totalBytes)/(1024*1024), cardID)
 
+		eventMgr.Emit(events.EventSyncStarting, "Preparing to start sync operation", map[string]interface{}{
+			"card_id":     cardID,
+			"total_files": totalFiles,
+			"total_bytes": totalBytes,
+		})
+
 		_, err = stateMgr.StartSync(cardID, int64(totalFiles), totalBytes)
 		if err != nil {
 			log.Printf("Error starting sync: %v", err)
+			eventMgr.EmitError("Failed to start sync operation", err)
 			stateMgr.SetStatus(state.StatusError)
 			return
 		}
+
+		// Emit sync started event
+		eventMgr.EmitSyncStarted(cardID, totalFiles, totalBytes)
 
 		// Perform sync
 		dcimPath := filepath.Join(event.MountPath, "DCIM")
@@ -209,10 +289,12 @@ func handleCardInserted(event sdmonitor.Event, monitor *sdmonitor.Monitor, state
 
 		if err != nil {
 			log.Printf("Sync failed: %v", err)
+			eventMgr.EmitSyncFailed(cardID, err)
 			stateMgr.FinishSync(false, err)
 			stateMgr.SetStatus(state.StatusError)
 		} else {
 			log.Println("Sync completed successfully!")
+			eventMgr.EmitSyncCompleted(cardID, int64(totalFiles), totalBytes, time.Since(time.Now()))
 			stateMgr.FinishSync(true, nil)
 			stateMgr.SetStatus(state.StatusSuccess)
 
@@ -223,8 +305,9 @@ func handleCardInserted(event sdmonitor.Event, monitor *sdmonitor.Monitor, state
 	}()
 }
 
-func handleCardRemoved(event sdmonitor.Event, stateMgr *state.Manager, syncMgr *syncmanager.Manager) {
+func handleCardRemoved(event sdmonitor.Event, stateMgr *state.Manager, syncMgr *syncmanager.Manager, eventMgr *events.Manager) {
 	log.Printf("SD card removed: %s", event.DevName)
+	eventMgr.EmitSDCardRemoved(event.DevName)
 	stateMgr.SetSDCard(false, "")
 
 	// If we were syncing, cancel and mark as error

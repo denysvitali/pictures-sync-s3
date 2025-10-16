@@ -40,10 +40,10 @@ func validateCardID(cardID string) error {
 		return fmt.Errorf("card ID contains invalid characters")
 	}
 
-	// Ensure card ID matches expected format (card-XXXXXXXX)
-	validCardID := regexp.MustCompile(`^card-[a-zA-Z0-9]{8}$`)
+	// Ensure card ID matches expected format (card-XXXXXXXXXXXXXXXX for 16 hex chars, or card-NNNNNNNNNN for timestamp fallback)
+	validCardID := regexp.MustCompile(`^card-[a-fA-F0-9]{16}$|^card-[0-9]{10,}$`)
 	if !validCardID.MatchString(cardID) {
-		return fmt.Errorf("card ID format invalid, expected: card-XXXXXXXX")
+		return fmt.Errorf("card ID format invalid, expected: card-XXXXXXXXXXXXXXXX (16 hex chars) or card-NNNNNNNNNN (timestamp)")
 	}
 
 	return nil
@@ -244,12 +244,14 @@ func (m *Manager) Sync(sourcePath, cardID string, totalFiles int, totalBytes int
 	done := make(chan struct{})
 	go m.monitorProgress(ctx, stats, totalFiles, totalBytes, alreadySyncedBytes, done)
 
-	// Perform sync operation with retry logic
+	// Perform sync operation with retry logic and exponential backoff
 	log.Printf("Starting sync operation...")
-	const maxRetries = 3
+	const maxAttempts = 10
+	const initialRetries = 3 // First 3 attempts use fixed delay
 	var lastErr error
+	backoff := 5 * time.Second
 
-	for attempt := 1; attempt <= maxRetries; attempt++ {
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		// Check if context was cancelled
 		select {
 		case <-ctx.Done():
@@ -267,12 +269,28 @@ func (m *Manager) Sync(sourcePath, cardID string, totalFiles int, totalBytes int
 		lastErr = err
 
 		// Check if it's a network error and we should retry
-		if attempt < maxRetries && isRetryableError(err) {
-			log.Printf("Sync attempt %d failed with retryable error: %v. Retrying in 5 seconds...", attempt, err)
+		if attempt < maxAttempts && isRetryableError(err) {
+			// Calculate delay: fixed 5s for first 3 attempts, then exponential backoff
+			var delay time.Duration
+			if attempt <= initialRetries {
+				delay = 5 * time.Second
+				log.Printf("Sync attempt %d/%d failed with retryable error: %v. Retrying in %v...",
+					attempt, maxAttempts, err, delay)
+			} else {
+				delay = backoff
+				log.Printf("Sync attempt %d/%d failed with retryable error: %v. Retrying with exponential backoff in %v...",
+					attempt, maxAttempts, err, delay)
+
+				// Exponential backoff: 5s, 10s, 20s, 40s, 80s (capped at 120s)
+				backoff *= 2
+				if backoff > 120*time.Second {
+					backoff = 120 * time.Second
+				}
+			}
 
 			// Wait before retry (with context cancellation check)
 			select {
-			case <-time.After(5 * time.Second):
+			case <-time.After(delay):
 				// Continue to next attempt
 			case <-ctx.Done():
 				close(done)
@@ -288,7 +306,7 @@ func (m *Manager) Sync(sourcePath, cardID string, totalFiles int, totalBytes int
 	close(done)
 
 	if lastErr != nil {
-		return fmt.Errorf("sync failed after %d attempts: %w", maxRetries, lastErr)
+		return fmt.Errorf("sync failed after %d attempts: %w", maxAttempts, lastErr)
 	}
 
 	log.Printf("Sync completed successfully")

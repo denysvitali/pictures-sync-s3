@@ -5,16 +5,25 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
 
-const (
-	PermDir    = "/perm/pictures-sync"
-	MountDir   = "/perm/pictures-sync/mounts/sdcard"
-	ConfigFile = "/perm/pictures-sync/rclone.conf"
-	HistoryFile = "/perm/pictures-sync/sync-history.json"
-	StateFile  = "/perm/pictures-sync/state.json"
+func getPermDir() string {
+	// Use local directory for development if /perm doesn't exist
+	if _, err := os.Stat("/perm"); os.IsNotExist(err) {
+		return "/tmp/pictures-sync"
+	}
+	return "/perm/pictures-sync"
+}
+
+var (
+	PermDir    = getPermDir()
+	MountDir   = filepath.Join(PermDir, "mounts/sdcard")
+	ConfigFile = filepath.Join(PermDir, "rclone.conf")
+	HistoryFile = filepath.Join(PermDir, "sync-history.json")
+	StateFile  = filepath.Join(PermDir, "state.json")
 )
 
 // SyncStatus represents the current sync operation status
@@ -101,6 +110,26 @@ func NewManager() (*Manager, error) {
 		m.currentState = CurrentState{Status: StatusIdle}
 	}
 
+	// Clear any stale in-progress sync from previous crash/restart
+	if m.currentState.CurrentSync != nil {
+		log.Printf("Clearing stale sync record from previous run: %s", m.currentState.CurrentSync.CardID)
+		// Move it to history as failed
+		m.currentState.CurrentSync.EndTime = time.Now()
+		m.currentState.CurrentSync.Status = "error"
+		m.currentState.CurrentSync.Error = "Service restarted during sync"
+		m.history = append(m.history, *m.currentState.CurrentSync)
+		m.currentState.LastSync = m.currentState.CurrentSync
+		m.currentState.CurrentSync = nil
+		m.currentState.Status = StatusIdle
+		// Save cleaned state
+		if err := m.save(); err != nil {
+			log.Printf("Warning: Failed to save cleaned state: %v", err)
+		}
+		if err := m.saveHistory(); err != nil {
+			log.Printf("Warning: Failed to save history: %v", err)
+		}
+	}
+
 	return m, nil
 }
 
@@ -113,62 +142,86 @@ func (m *Manager) GetState() CurrentState {
 
 // SetStatus updates the current status
 func (m *Manager) SetStatus(status SyncStatus) error {
+	log.Printf("SetStatus: Attempting to set status to %s", status)
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	log.Printf("SetStatus: Lock acquired, setting status to %s", status)
 
 	m.currentState.Status = status
 
+	log.Printf("SetStatus: Calling save()")
 	if err := m.save(); err != nil {
+		log.Printf("SetStatus: Save failed: %v", err)
+		m.mu.Unlock()
 		return err
 	}
+	log.Printf("SetStatus: Save completed")
 
-	m.notifyListeners()
+	log.Printf("SetStatus: Calling notifyListeners()")
+	// Create a copy of the current state to pass to notifyListeners
+	stateCopy := m.currentState
+	m.mu.Unlock()
+
+	// Note: We call notifyListeners without holding the lock to avoid deadlock
+	go m.notifyListenersAsync(stateCopy)
+	log.Printf("SetStatus: SetStatus completed successfully")
 	return nil
 }
 
 // SetSDCard updates SD card mount status
 func (m *Manager) SetSDCard(mounted bool, path string) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	m.currentState.SDCardMounted = mounted
 	m.currentState.SDCardPath = path
 
 	if err := m.save(); err != nil {
+		m.mu.Unlock()
 		return err
 	}
 
-	m.notifyListeners()
+	// Create a copy of the current state to pass to notifyListeners
+	stateCopy := m.currentState
+	m.mu.Unlock()
+
+	// Note: We call notifyListenersAsync without holding the lock to avoid deadlock
+	go m.notifyListenersAsync(stateCopy)
 	return nil
 }
 
 // SetAvailableDevices updates the list of available storage devices
 func (m *Manager) SetAvailableDevices(devices []DeviceInfo) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	m.currentState.AvailableDevices = devices
 
 	if err := m.save(); err != nil {
+		m.mu.Unlock()
 		return err
 	}
 
-	m.notifyListeners()
+	// Create a copy of the current state to pass to notifyListeners
+	stateCopy := m.currentState
+	m.mu.Unlock()
+
+	// Note: We call notifyListenersAsync without holding the lock to avoid deadlock
+	go m.notifyListenersAsync(stateCopy)
 	return nil
 }
 
 // SetNeedsDeviceSelect sets whether manual device selection is needed
 func (m *Manager) SetNeedsDeviceSelect(needs bool) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	m.currentState.NeedsDeviceSelect = needs
 
 	if err := m.save(); err != nil {
+		m.mu.Unlock()
 		return err
 	}
 
-	m.notifyListeners()
+	// Create a copy of the current state to pass to notifyListeners
+	stateCopy := m.currentState
+	m.mu.Unlock()
+
+	// Note: We call notifyListenersAsync without holding the lock to avoid deadlock
+	go m.notifyListenersAsync(stateCopy)
 	return nil
 }
 
@@ -192,13 +245,18 @@ func (m *Manager) StartSync(cardID string, totalFiles, totalBytes int64) (*SyncR
 
 	m.currentState.CurrentSync = record
 	m.currentState.Status = StatusSyncing
-	m.mu.Unlock()
 
 	if err := m.save(); err != nil {
+		m.mu.Unlock()
 		return nil, err
 	}
 
-	m.notifyListeners()
+	// Create a copy of the current state to pass to notifyListeners
+	stateCopy := m.currentState
+	m.mu.Unlock()
+
+	// Note: We call notifyListenersAsync without holding the lock to avoid deadlock
+	go m.notifyListenersAsync(stateCopy)
 	return record, nil
 }
 
@@ -206,10 +264,10 @@ func (m *Manager) StartSync(cardID string, totalFiles, totalBytes int64) (*SyncR
 // Saves to disk only periodically (throttled) to reduce SD card wear
 func (m *Manager) UpdateSyncProgress(filesSynced, bytesSynced int64, currentFile string, currentFileSize int64, transferSpeed float64, eta string) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	// Return error if no sync is in progress (fail-fast instead of silent failure)
 	if m.currentState.CurrentSync == nil {
+		m.mu.Unlock()
 		return fmt.Errorf("no sync in progress")
 	}
 
@@ -227,20 +285,26 @@ func (m *Manager) UpdateSyncProgress(filesSynced, bytesSynced int64, currentFile
 		m.lastProgressSave = time.Now()
 		// Save to disk if throttle period has elapsed
 		if err := m.save(); err != nil {
+			m.mu.Unlock()
 			return err
 		}
 	}
 
-	m.notifyListeners()
+	// Create a copy of the current state to pass to notifyListeners
+	stateCopy := m.currentState
+	m.mu.Unlock()
+
+	// Note: We call notifyListenersAsync without holding the lock to avoid deadlock
+	go m.notifyListenersAsync(stateCopy)
 	return nil
 }
 
 // FinishSync completes the current sync operation
 func (m *Manager) FinishSync(success bool, err error) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	if m.currentState.CurrentSync == nil {
+		m.mu.Unlock()
 		return fmt.Errorf("no sync in progress")
 	}
 
@@ -263,13 +327,20 @@ func (m *Manager) FinishSync(success bool, err error) error {
 
 	// Save state and history
 	if saveErr := m.save(); saveErr != nil {
+		m.mu.Unlock()
 		return saveErr
 	}
 	if saveErr := m.saveHistory(); saveErr != nil {
+		m.mu.Unlock()
 		return saveErr
 	}
 
-	m.notifyListeners()
+	// Create a copy of the current state to pass to notifyListeners
+	stateCopy := m.currentState
+	m.mu.Unlock()
+
+	// Note: We call notifyListenersAsync without holding the lock to avoid deadlock
+	go m.notifyListenersAsync(stateCopy)
 	return nil
 }
 
@@ -332,6 +403,14 @@ func (m *Manager) Unsubscribe(ch chan CurrentState) {
 func (m *Manager) notifyListeners() {
 	m.mu.RLock()
 	state := m.currentState
+	m.mu.RUnlock()
+
+	m.notifyListenersAsync(state)
+}
+
+// notifyListenersAsync sends a given state to all subscribers without acquiring locks
+func (m *Manager) notifyListenersAsync(state CurrentState) {
+	m.mu.RLock()
 	// Deep copy the listeners slice to avoid race conditions
 	listenersCopy := make([]chan CurrentState, len(m.listeners))
 	copy(listenersCopy, m.listeners)
