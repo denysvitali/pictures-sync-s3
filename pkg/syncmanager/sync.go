@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/denysvitali/pictures-sync-s3/pkg/utils"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/accounting"
 	rcsync "github.com/rclone/rclone/fs/sync"
@@ -65,16 +66,10 @@ func (m *Manager) Sync(sourcePath, cardID string, totalFiles int, totalBytes int
 
 	log.Printf("Syncing from %s to %s", sourcePath, destPath)
 
-	// Create source filesystem
+	// Create source filesystem (local, doesn't need network)
 	srcFs, err := fs.NewFs(ctx, sourcePath)
 	if err != nil {
 		return fmt.Errorf("failed to create source filesystem: %w", err)
-	}
-
-	// Create destination filesystem
-	dstFs, err := fs.NewFs(ctx, destPath)
-	if err != nil {
-		return fmt.Errorf("failed to create destination filesystem: %w", err)
 	}
 
 	// Set up config for progress tracking and parallel transfers
@@ -92,8 +87,9 @@ func (m *Manager) Sync(sourcePath, cardID string, totalFiles int, totalBytes int
 	go m.monitorProgress(ctx, stats, totalFiles, totalBytes, alreadySyncedBytes, done)
 
 	// Perform sync operation with retry logic and exponential backoff
+	// This now includes filesystem creation which may fail due to network issues
 	log.Printf("Starting sync operation...")
-	err = m.syncWithRetry(ctx, dstFs, srcFs)
+	err = m.syncWithRetry(ctx, srcFs, destPath)
 
 	// Stop progress monitoring
 	close(done)
@@ -119,7 +115,7 @@ func (m *Manager) Sync(sourcePath, cardID string, totalFiles int, totalBytes int
 }
 
 // syncWithRetry performs the sync operation with retry logic
-func (m *Manager) syncWithRetry(ctx context.Context, dstFs, srcFs fs.Fs) error {
+func (m *Manager) syncWithRetry(ctx context.Context, srcFs fs.Fs, destPath string) error {
 	const maxAttempts = 10
 	const initialRetries = 3 // First 3 attempts use fixed delay
 	var lastErr error
@@ -133,7 +129,46 @@ func (m *Manager) syncWithRetry(ctx context.Context, dstFs, srcFs fs.Fs) error {
 		default:
 		}
 
-		err := rcsync.Sync(ctx, dstFs, srcFs, false)
+		// Create destination filesystem (may fail due to network issues)
+		dstFs, err := fs.NewFs(ctx, destPath)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to create destination filesystem: %w", err)
+
+			// Check if it's a network error and we should retry
+			if attempt < maxAttempts && utils.IsRetryableNetworkError(lastErr) {
+				// Calculate delay: fixed 5s for first 3 attempts, then exponential backoff
+				var delay time.Duration
+				if attempt <= initialRetries {
+					delay = 5 * time.Second
+					log.Printf("Destination filesystem creation attempt %d/%d failed with retryable error: %v. Retrying in %v...",
+						attempt, maxAttempts, err, delay)
+				} else {
+					delay = backoff
+					log.Printf("Destination filesystem creation attempt %d/%d failed with retryable error: %v. Retrying with exponential backoff in %v...",
+						attempt, maxAttempts, err, delay)
+
+					// Exponential backoff: 5s, 10s, 20s, 40s, 80s (capped at 120s)
+					backoff *= 2
+					if backoff > 120*time.Second {
+						backoff = 120 * time.Second
+					}
+				}
+
+				// Wait before retry (with context cancellation check)
+				select {
+				case <-time.After(delay):
+					// Continue to next attempt
+				case <-ctx.Done():
+					return fmt.Errorf("sync cancelled during retry wait")
+				}
+				continue
+			}
+			// Non-retryable error or last attempt
+			return lastErr
+		}
+
+		// Now try the actual sync
+		err = rcsync.Sync(ctx, dstFs, srcFs, false)
 		if err == nil {
 			// Success!
 			return nil

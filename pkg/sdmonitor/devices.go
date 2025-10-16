@@ -66,7 +66,7 @@ func findDeviceByPattern(pattern string) string {
 	return ""
 }
 
-// isDeviceMountedElsewhere checks if device is mounted (helper for findStorageDevice)
+// isDeviceMountedElsewhere checks if device is mounted somewhere other than our mount point
 // This is a simpler version without the Monitor's cache
 func isDeviceMountedElsewhere(device string) bool {
 	data, err := os.ReadFile("/proc/mounts")
@@ -74,8 +74,28 @@ func isDeviceMountedElsewhere(device string) bool {
 		return false
 	}
 
-	// Check if device appears in mounts
-	return strings.Contains(string(data), device+" ")
+	// Check if device appears in mounts at a location other than our mount point
+	lines := strings.Split(string(data), "\n")
+	ourMountPoint := "/perm/pictures-sync/mounts/sdcard"
+
+	for _, line := range lines {
+		if strings.HasPrefix(line, device+" ") {
+			// Device is mounted, check where
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				mountPoint := parts[1]
+				// If it's mounted at our location, it's not "elsewhere"
+				if mountPoint == ourMountPoint {
+					return false
+				}
+				// Mounted somewhere else
+				return true
+			}
+		}
+	}
+
+	// Not mounted at all
+	return false
 }
 
 // ListAllStorageDevices returns information about all detected storage devices

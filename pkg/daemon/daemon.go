@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"log"
+	"net"
 	"time"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/daemon/cardhandler"
@@ -42,8 +43,48 @@ func DefaultConfig() Config {
 func New(cfg Config) (*Service, error) {
 	// Wait for gokrazy's NTP daemon to sync time
 	log.Println("Waiting for time synchronization (gokrazy NTP daemon)...")
-	time.Sleep(cfg.NTPSyncDelay)
-	log.Println("Time sync wait complete. Current time:", time.Now())
+
+	// Wait until we have a reasonable time (not 1970 epoch)
+	startWait := time.Now()
+	for {
+		now := time.Now()
+		// Check if time is after year 2020 (definitely synced)
+		if now.Year() > 2020 {
+			log.Printf("Time synchronized successfully. Current time: %s", now)
+			break
+		}
+
+		// Check if we've been waiting too long (fallback after 2 minutes)
+		if time.Since(startWait) > 2*time.Minute {
+			log.Printf("Warning: Time sync timeout after 2 minutes. Current time: %s (may be incorrect)", now)
+			log.Println("Continuing anyway, but timestamps may be inaccurate")
+			break
+		}
+
+		log.Printf("Time not synced yet (current: %s), waiting...", now)
+		time.Sleep(2 * time.Second)
+	}
+
+	// Wait for DNS to be available (check if we can resolve a common domain)
+	log.Println("Checking DNS availability...")
+	dnsReady := false
+	for i := 0; i < 60; i++ { // Try for 2 minutes (60 * 2s)
+		_, err := net.LookupHost("google.com")
+		if err == nil {
+			log.Println("DNS is ready")
+			dnsReady = true
+			break
+		}
+		// Only log every 5 attempts to reduce log spam
+		if i%5 == 0 {
+			log.Printf("DNS not ready yet (attempt %d/60): %v", i+1, err)
+		}
+		time.Sleep(2 * time.Second)
+	}
+
+	if !dnsReady {
+		log.Println("Warning: DNS may not be fully available after 2 minutes. Network operations will retry with backoff.")
+	}
 
 	// Initialize event manager
 	eventMgr := events.NewManager()
