@@ -140,25 +140,23 @@
                 </div>
             </div>
 
-            <!-- Quick Actions -->
+            <!-- System Actions -->
             <div class="card">
                 <div class="card-header">
-                    <h5 class="mb-0">Quick Actions</h5>
+                    <h5 class="mb-0">System Actions</h5>
                 </div>
                 <div class="card-body">
-                    <div class="d-flex gap-2 flex-wrap">
-                        <button class="btn btn-primary" onclick="window.location.href='/config'">
-                            ⚙️ Configure Cloud Storage
-                        </button>
-                        <button class="btn btn-secondary" onclick="window.location.href='/wifi'">
-                            📶 Manage WiFi
-                        </button>
-                        <button class="btn btn-secondary" onclick="window.location.href='/gallery'">
-                            🖼️ View Gallery
-                        </button>
-                        <button class="btn btn-secondary" onclick="loadStatus()">
-                            🔄 Refresh Status
-                        </button>
+                    <div class="row g-2">
+                        <div class="col-md-6">
+                            <button class="btn btn-outline-primary w-100" onclick="loadStatus()">
+                                🔄 Refresh Status
+                            </button>
+                        </div>
+                        <div class="col-md-6">
+                            <button class="btn btn-outline-secondary w-100" onclick="window.location.href='/config'">
+                                ⚙️ Settings
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>

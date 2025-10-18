@@ -99,14 +99,16 @@
                     <div class="d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">🔍 Available Networks</h5>
                         <div class="d-flex gap-2 align-items-center flex-wrap">
-                            <select id="sort-select" class="form-select form-select-sm" style="width: auto;">
-                                <option value="signal">📶 Signal Strength</option>
-                                <option value="name">🔤 Network Name</option>
-                                <option value="security">🔒 Security Status</option>
-                            </select>
-                            <button class="btn btn-sm btn-primary" id="scan-btn" onclick="scanNetworks()">
-                                🔄 Scan
-                            </button>
+                            <div class="mobile-stack">
+                                <select id="sort-select" class="form-select form-select-sm" style="min-width: 160px;">
+                                    <option value="signal">📶 Signal Strength</option>
+                                    <option value="name">🔤 Network Name</option>
+                                    <option value="security">🔒 Security Status</option>
+                                </select>
+                                <button class="btn btn-sm btn-primary" id="scan-btn" onclick="scanNetworks()">
+                                    🔄 Scan
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
