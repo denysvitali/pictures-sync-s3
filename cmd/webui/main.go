@@ -6,13 +6,14 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/auth"
 	"github.com/denysvitali/pictures-sync-s3/pkg/events"
 	"github.com/denysvitali/pictures-sync-s3/pkg/handlers"
-	"github.com/denysvitali/pictures-sync-s3/pkg/ratelimit"
 	"github.com/denysvitali/pictures-sync-s3/pkg/settings"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ssrf"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
@@ -85,16 +86,24 @@ func main() {
 		port = "8080"
 	}
 
-	// Create a background context for the WebSocket token cleanup goroutine
-	// In a production deployment, this could be enhanced with signal handling
-	// to gracefully shutdown on SIGTERM/SIGINT
-	bgCtx := context.Background()
+	// Create a context that will be cancelled on shutdown signals
+	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+	defer shutdownCancel()
+
+	// Setup signal handling for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		sig := <-sigChan
+		log.Printf("Received signal %v, initiating graceful shutdown...", sig)
+		shutdownCancel() // Cancel context to stop cleanup goroutines
+	}()
 
 	// Start WebSocket token cleanup goroutine with context for proper shutdown
-	go websocket.CleanupExpiredWSTokens(bgCtx)
+	go websocket.CleanupExpiredWSTokens(shutdownCtx)
 
 	// Start WebSocket rate limiter cleanup goroutine
-	go websocket.StartRateLimiterCleanup(bgCtx)
+	go websocket.StartRateLimiterCleanup(shutdownCtx)
 
 	// Initialize event manager
 	eventMgr := events.NewManager()
@@ -132,18 +141,7 @@ func main() {
 		logConfiguredWiFiNetworks(wifiMgr)
 	}
 
-	// Initialize CSRF token
-	auth.InitCSRFToken()
-	log.Println("CSRF protection enabled")
 	log.Println("Security headers middleware enabled")
-
-	// Initialize rate limiter for authentication
-	authLimiter := ratelimit.NewLimiter(ratelimit.AuthConfig())
-	log.Println("Rate limiting enabled: 5 auth attempts per 15 minutes, 2 req/s for auth endpoints")
-
-	// Initialize rate limiter for expensive operations
-	expensiveOpLimiter := ratelimit.NewLimiter(ratelimit.ExpensiveOpConfig())
-	log.Println("Rate limiting enabled for expensive operations: 1 req/s for thumbnails/file listings")
 
 	// Initialize SSRF validator with rate limiting
 	// Allow 10 network diagnostic requests per minute per client IP
@@ -159,54 +157,77 @@ func main() {
 		SSRFValidator: ssrfValidator,
 	}
 
-	// Expensive operation middleware wrapper
-	expensiveOp := auth.ExpensiveOperationMiddleware(expensiveOpLimiter)
-
 	// Setup HTTP handlers
-	http.HandleFunc("/api/csrf-token", handlers.HandleCSRFToken) // GET endpoint for CSRF token
-	http.HandleFunc("/api/ws-token", handlers.HandleWSToken)     // GET endpoint for WebSocket token
+	http.HandleFunc("/api/ws-token", handlers.HandleWSToken) // GET endpoint for WebSocket token
 	http.HandleFunc("/api/status", ctx.HandleStatus)
 	http.HandleFunc("/api/history", ctx.HandleHistory)
-	http.HandleFunc("/api/config", auth.CSRFProtection(ctx.HandleConfig))          // CSRF protected
-	http.HandleFunc("/api/config/test", auth.CSRFProtection(ctx.HandleConfigTest)) // CSRF protected
-	http.HandleFunc("/api/settings", auth.CSRFProtection(ctx.HandleSettings))      // CSRF protected
+	http.HandleFunc("/api/config", ctx.HandleConfig)
+	http.HandleFunc("/api/config/test", ctx.HandleConfigTest)
+	http.HandleFunc("/api/settings", ctx.HandleSettings)
 	http.HandleFunc("/api/devices", ctx.HandleDevices)
-	http.HandleFunc("/api/devices/select", auth.CSRFProtection(ctx.HandleDeviceSelect)) // CSRF protected
-	http.HandleFunc("/api/sync/start", auth.CSRFProtection(ctx.HandleSyncStart))        // CSRF protected
-	http.HandleFunc("/api/sync/cancel", auth.CSRFProtection(ctx.HandleSyncCancel))      // CSRF protected
+	http.HandleFunc("/api/devices/select", ctx.HandleDeviceSelect)
+	http.HandleFunc("/api/sync/start", ctx.HandleSyncStart)
+	http.HandleFunc("/api/sync/cancel", ctx.HandleSyncCancel)
 	http.HandleFunc("/api/wifi/scan", ctx.HandleWiFiScan)
 	http.HandleFunc("/api/wifi/networks", ctx.HandleWiFiNetworks)
-	http.HandleFunc("/api/wifi/connect", auth.CSRFProtection(ctx.HandleWiFiConnect))       // CSRF protected
-	http.HandleFunc("/api/wifi/disconnect", auth.CSRFProtection(ctx.HandleWiFiDisconnect)) // CSRF protected
+	http.HandleFunc("/api/wifi/connect", ctx.HandleWiFiConnect)
+	http.HandleFunc("/api/wifi/disconnect", ctx.HandleWiFiDisconnect)
+	http.HandleFunc("/api/wifi/reorder", ctx.HandleWiFiReorder)
 	http.HandleFunc("/api/wifi/status", ctx.HandleWiFiStatus)
-	http.HandleFunc("/api/files/cards", expensiveOp(ctx.HandleFileCards))              // Rate limited - expensive
-	http.HandleFunc("/api/files", expensiveOp(ctx.HandleFiles))                        // Rate limited - expensive
-	http.HandleFunc("/api/files/paginated", expensiveOp(ctx.HandleFilesPaginated))     // Rate limited - expensive
+	http.HandleFunc("/api/files/cards", ctx.HandleFileCards)
+	http.HandleFunc("/api/files", ctx.HandleFiles)
+	http.HandleFunc("/api/files/paginated", ctx.HandleFilesPaginated)
 	http.HandleFunc("/api/files/view", ctx.HandleFileView)
-	http.HandleFunc("/api/thumbnail", expensiveOp(ctx.HandleThumbnail))                // Rate limited - expensive
-	http.HandleFunc("/api/sdcard/files", expensiveOp(ctx.HandleSDCardFiles))           // Rate limited - expensive
-	http.HandleFunc("/api/sdcard/preview", expensiveOp(ctx.HandleSDCardPreview))       // Rate limited - expensive
+	http.HandleFunc("/api/thumbnail", ctx.HandleThumbnail)
+	http.HandleFunc("/api/sdcard/files", ctx.HandleSDCardFiles)
+	http.HandleFunc("/api/sdcard/preview", ctx.HandleSDCardPreview)
 	http.HandleFunc("/api/network/dns", ctx.HandleNetworkDNS)
 	http.HandleFunc("/api/network/interfaces", ctx.HandleNetworkInterfaces)
 	http.HandleFunc("/api/network/dns-lookup", ctx.HandleDNSLookup)
 	http.HandleFunc("/api/network/ping", ctx.HandlePing)
 	http.HandleFunc("/api/network/diagnostics", ctx.HandleNetworkDiagnostics)
 	http.HandleFunc("/ws", websocket.HandleWebSocket(stateMgr, eventMgr))
+
+	// Page routes
 	http.HandleFunc("/", webui.HandleIndex)
+	http.HandleFunc("/wifi", webui.HandleWiFi)
+	http.HandleFunc("/history", webui.HandleHistory)
+	http.HandleFunc("/gallery", webui.HandleGallery)
+	http.HandleFunc("/config", webui.HandleConfig)
+
+	// Static assets
+	http.HandleFunc("/static/css/main.css", webui.HandleStaticCSS)
+	http.HandleFunc("/static/css/theme.css", webui.HandleThemeCSS)
+	http.HandleFunc("/static/bootstrap/css/bootstrap.min.css", webui.HandleBootstrapCSS)
+	http.HandleFunc("/static/bootstrap/js/bootstrap.bundle.min.js", webui.HandleBootstrapJS)
+	http.HandleFunc("/static/js/utils.js", webui.HandleUtilsJS)
 
 	// Wrap default mux with middleware chain: security headers -> basic auth
 	// Security headers are applied first so they're present on all responses (including auth failures)
 	handler := auth.SecurityHeadersMiddleware(
-		auth.BasicAuthMiddleware(authPassword, authLimiter)(http.DefaultServeMux),
+		auth.BasicAuthMiddleware(authPassword, nil)(http.DefaultServeMux),
 	)
 
-	// Start HTTPS server
+	// Start server (HTTPS if certificates are available, HTTP for development)
 	addr := ":" + port
 	certFile := "/etc/ssl/gokrazy-web.pem"
 	keyFile := "/etc/ssl/gokrazy-web.key.pem"
 
-	log.Printf("WebUI HTTPS server listening on %s", addr)
-	if err := http.ListenAndServeTLS(addr, certFile, keyFile, handler); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+	// Check if SSL certificates exist
+	if _, err := os.Stat(certFile); err == nil {
+		if _, err := os.Stat(keyFile); err == nil {
+			log.Printf("WebUI HTTPS server listening on %s", addr)
+			if err := http.ListenAndServeTLS(addr, certFile, keyFile, handler); err != nil {
+				log.Fatalf("Failed to start HTTPS server: %v", err)
+			}
+			return
+		}
+	}
+
+	// Fallback to HTTP for development
+	log.Printf("SSL certificates not found, starting HTTP server on %s", addr)
+	log.Println("Note: Using HTTP for development. Production should use HTTPS.")
+	if err := http.ListenAndServe(addr, handler); err != nil {
+		log.Fatalf("Failed to start HTTP server: %v", err)
 	}
 }
