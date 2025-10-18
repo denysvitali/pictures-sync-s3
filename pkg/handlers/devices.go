@@ -12,6 +12,12 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 )
 
+const (
+	// successStatusDuration is how long to keep the success status visible after manual sync completion.
+	// This provides visual feedback to the user via LED patterns before returning to idle state.
+	successStatusDuration = 5 * time.Second
+)
+
 // HandleDevices lists all available storage devices
 func (ctx *Context) HandleDevices(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -156,7 +162,7 @@ func (ctx *Context) HandleSyncStart(w http.ResponseWriter, r *http.Request) {
 			ctx.StateMgr.SetStatus(state.StatusSuccess)
 
 			// Keep success status for a few seconds, then go idle
-			time.Sleep(5 * time.Second)
+			time.Sleep(successStatusDuration)
 			ctx.StateMgr.SetStatus(state.StatusIdle)
 		}
 	}()

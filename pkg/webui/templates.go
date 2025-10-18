@@ -1,15 +1,18 @@
 package webui
 
 import (
+	"compress/gzip"
 	"embed"
 	"html/template"
+	"io"
 	"net/http"
+	"strings"
 )
 
 //go:embed templates/*.html
 var templatesFS embed.FS
 
-//go:embed static/css/*.css static/bootstrap/css/*.css static/bootstrap/js/*.js static/js/*.js
+//go:embed static/css/theme.css static/bootstrap/css/*.css static/bootstrap/js/*.js static/js/*.js
 var staticFS embed.FS
 
 var templates *template.Template
@@ -109,29 +112,6 @@ func HandleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// HandleStaticCSS serves static CSS files (legacy)
-func HandleStaticCSS(w http.ResponseWriter, r *http.Request) {
-	// Read the CSS file from embedded filesystem
-	content, err := staticFS.ReadFile("static/css/main.css")
-	if err != nil {
-		http.Error(w, "CSS file not found", http.StatusNotFound)
-		return
-	}
-
-	// Moderate caching for legacy CSS
-	w.Header().Set("Content-Type", "text/css; charset=utf-8")
-	w.Header().Set("Cache-Control", "public, max-age=86400") // 24 hours
-	w.Header().Set("ETag", `"main-css-v1"`)
-	w.Header().Set("Vary", "Accept-Encoding")
-
-	// Check if client has cached version
-	if r.Header.Get("If-None-Match") == `"main-css-v1"` {
-		w.WriteHeader(http.StatusNotModified)
-		return
-	}
-
-	w.Write(content)
-}
 
 // HandleBootstrapCSS serves Bootstrap CSS with aggressive caching
 func HandleBootstrapCSS(w http.ResponseWriter, r *http.Request) {
@@ -153,7 +133,7 @@ func HandleBootstrapCSS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Write(content)
+	serveWithGzip(w, r, content)
 }
 
 // HandleThemeCSS serves custom theme CSS with moderate caching
@@ -167,16 +147,44 @@ func HandleThemeCSS(w http.ResponseWriter, r *http.Request) {
 	// Moderate caching for custom assets that may change
 	w.Header().Set("Content-Type", "text/css; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=86400") // 24 hours
-	w.Header().Set("ETag", `"theme-css-v1"`)
+	w.Header().Set("ETag", `"theme-css-v2"`)
 	w.Header().Set("Vary", "Accept-Encoding")
 
 	// Check if client has cached version
-	if r.Header.Get("If-None-Match") == `"theme-css-v1"` {
+	if r.Header.Get("If-None-Match") == `"theme-css-v2"` {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
 
-	w.Write(content)
+	serveWithGzip(w, r, content)
+}
+
+// gzipResponseWriter wraps http.ResponseWriter to provide gzip compression
+type gzipResponseWriter struct {
+	io.Writer
+	http.ResponseWriter
+}
+
+func (w gzipResponseWriter) Write(b []byte) (int, error) {
+	return w.Writer.Write(b)
+}
+
+// serveWithGzip serves content with gzip compression if client accepts it
+func serveWithGzip(w http.ResponseWriter, r *http.Request, content []byte) {
+	// Check if client accepts gzip
+	if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+		w.Write(content)
+		return
+	}
+
+	// Add gzip encoding header
+	w.Header().Set("Content-Encoding", "gzip")
+
+	// Create gzip writer
+	gz := gzip.NewWriter(w)
+	defer gz.Close()
+
+	gz.Write(content)
 }
 
 // HandleBootstrapJS serves Bootstrap JavaScript bundle with aggressive caching
@@ -199,7 +207,7 @@ func HandleBootstrapJS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Write(content)
+	serveWithGzip(w, r, content)
 }
 
 // HandleUtilsJS serves utility JavaScript with moderate caching
@@ -222,5 +230,5 @@ func HandleUtilsJS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Write(content)
+	serveWithGzip(w, r, content)
 }

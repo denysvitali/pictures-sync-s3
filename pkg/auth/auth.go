@@ -211,22 +211,25 @@ func BasicAuthMiddleware(authPassword string, limiter *ratelimit.Limiter) func(h
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ip := extractIP(r)
 
-			// Check if IP is locked out due to too many failed attempts
-			if limiter.IsLockedOut(ip) {
-				w.Header().Set("WWW-Authenticate", `Basic realm="Photo Backup Station"`)
-				http.Error(w, "Too many failed authentication attempts - temporarily locked out", http.StatusTooManyRequests)
-				log.Printf("SECURITY: Blocked authentication attempt from locked-out IP %s for %s %s",
-					ip, r.Method, r.URL.Path)
-				return
-			}
+			// Only apply rate limiting if limiter is provided
+			if limiter != nil {
+				// Check if IP is locked out due to too many failed attempts
+				if limiter.IsLockedOut(ip) {
+					w.Header().Set("WWW-Authenticate", `Basic realm="Photo Backup Station"`)
+					http.Error(w, "Too many failed authentication attempts - temporarily locked out", http.StatusTooManyRequests)
+					log.Printf("SECURITY: Blocked authentication attempt from locked-out IP %s for %s %s",
+						ip, r.Method, r.URL.Path)
+					return
+				}
 
-			// Check general rate limit for this IP
-			if !limiter.Allow(ip, authConfig) {
-				w.Header().Set("WWW-Authenticate", `Basic realm="Photo Backup Station"`)
-				http.Error(w, "Too many requests - rate limit exceeded", http.StatusTooManyRequests)
-				log.Printf("SECURITY: Rate limit exceeded for IP %s on %s %s",
-					ip, r.Method, r.URL.Path)
-				return
+				// Check general rate limit for this IP
+				if !limiter.Allow(ip, authConfig) {
+					w.Header().Set("WWW-Authenticate", `Basic realm="Photo Backup Station"`)
+					http.Error(w, "Too many requests - rate limit exceeded", http.StatusTooManyRequests)
+					log.Printf("SECURITY: Rate limit exceeded for IP %s on %s %s",
+						ip, r.Method, r.URL.Path)
+					return
+				}
 			}
 
 			username, password, ok := r.BasicAuth()
@@ -236,24 +239,30 @@ func BasicAuthMiddleware(authPassword string, limiter *ratelimit.Limiter) func(h
 			passwordMatch := subtle.ConstantTimeCompare([]byte(password), []byte(authPassword)) == 1
 
 			if !ok || !usernameMatch || !passwordMatch {
-				// Record failed authentication attempt
-				isLockedOut := limiter.RecordAuthFailure(ip, authConfig)
-
 				w.Header().Set("WWW-Authenticate", `Basic realm="Photo Backup Station"`)
 
-				if isLockedOut {
-					http.Error(w, "Too many failed authentication attempts - account locked", http.StatusTooManyRequests)
+				// Record failed authentication attempt if rate limiter is enabled
+				if limiter != nil {
+					isLockedOut := limiter.RecordAuthFailure(ip, authConfig)
+					if isLockedOut {
+						http.Error(w, "Too many failed authentication attempts - account locked", http.StatusTooManyRequests)
+					} else {
+						http.Error(w, "Unauthorized", http.StatusUnauthorized)
+					}
+					log.Printf("SECURITY: Failed authentication attempt from IP %s for %s %s (attempts: %d)",
+						ip, r.Method, r.URL.Path, limiter.GetAuthFailureCount(ip))
 				} else {
 					http.Error(w, "Unauthorized", http.StatusUnauthorized)
+					log.Printf("SECURITY: Failed authentication attempt from IP %s for %s %s",
+						ip, r.Method, r.URL.Path)
 				}
-
-				log.Printf("SECURITY: Failed authentication attempt from IP %s for %s %s (attempts: %d)",
-					ip, r.Method, r.URL.Path, limiter.GetAuthFailureCount(ip))
 				return
 			}
 
-			// Successful authentication - reset failure counter for this IP
-			limiter.ResetAuthFailures(ip)
+			// Successful authentication - reset failure counter for this IP if rate limiter is enabled
+			if limiter != nil {
+				limiter.ResetAuthFailures(ip)
+			}
 
 			// Limit request body size to prevent DoS (10MB max)
 			r.Body = http.MaxBytesReader(w, r.Body, 10*1024*1024)

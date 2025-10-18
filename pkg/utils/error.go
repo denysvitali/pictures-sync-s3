@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -60,21 +61,24 @@ func IsRetryableNetworkError(err error) bool {
 }
 
 // JoinErrors combines multiple errors into a single error message.
+// Deprecated: Use errors.Join from the standard library instead (Go 1.20+).
 func JoinErrors(errs []error) error {
 	if len(errs) == 0 {
 		return nil
 	}
 
-	var messages []string
+	// Filter out nil errors for errors.Join
+	var nonNilErrs []error
 	for _, err := range errs {
 		if err != nil {
-			messages = append(messages, err.Error())
+			nonNilErrs = append(nonNilErrs, err)
 		}
 	}
 
-	if len(messages) == 0 {
+	if len(nonNilErrs) == 0 {
 		return nil
 	}
 
-	return fmt.Errorf("multiple errors: %s", strings.Join(messages, "; "))
+	// Use standard library errors.Join
+	return errors.Join(nonNilErrs...)
 }

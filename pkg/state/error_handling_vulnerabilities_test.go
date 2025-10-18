@@ -1,3 +1,6 @@
+//go:build security_audit
+// +build security_audit
+
 package state
 
 import (

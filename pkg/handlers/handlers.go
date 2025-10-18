@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/denysvitali/pictures-sync-s3/pkg/captiveportal"
 	"github.com/denysvitali/pictures-sync-s3/pkg/settings"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ssrf"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
@@ -16,9 +17,10 @@ import (
 type Context struct {
 	StateMgr       *state.Manager
 	SyncMgr        *syncmanager.Manager
-	WiFiMgr        *wifimanager.Manager
+	WiFiMgr        wifimanager.WiFiManager
 	AppSettings    *settings.Settings
 	SSRFValidator  *ssrf.Validator
+	CaptivePortal  *captiveportal.Authenticator
 }
 
 // JSONResponse writes a JSON response

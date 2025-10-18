@@ -9,6 +9,12 @@ import (
 	"time"
 )
 
+const (
+	// devModeCardCreationDelay is the wait time before creating a mock SD card in development mode.
+	// This simulates the delay of physical card insertion for testing purposes.
+	devModeCardCreationDelay = 3 * time.Second
+)
+
 // Monitor monitors for SD card insertion/removal
 type Monitor struct {
 	eventChan    chan Event
@@ -265,7 +271,7 @@ func (m *Monitor) isMountedElsewhere(device string) bool {
 // createDevModeCard creates a mock SD card for development mode
 func (m *Monitor) createDevModeCard() {
 	// Wait a few seconds to simulate card insertion
-	time.Sleep(3 * time.Second)
+	time.Sleep(devModeCardCreationDelay)
 
 	log.Println("SD Monitor: Simulating SD card insertion in dev mode")
 

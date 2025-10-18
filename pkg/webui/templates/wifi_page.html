@@ -24,46 +24,51 @@
         </header>
 
         <!-- Navigation -->
-        <nav class="app-nav">
-            <ul class="nav nav-pills">
-                <li class="nav-item">
-                    <a href="/" class="nav-link {{if eq .ActivePage "status"}}active{{end}}">
-                        📊 Status
+        <nav class="app-nav" role="navigation" aria-label="Main navigation">
+            <ul class="nav nav-pills" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <a href="/" class="nav-link {{if eq .ActivePage "status"}}active{{end}}"
+                       role="tab" aria-label="Status page" {{if eq .ActivePage "status"}}aria-current="page"{{end}}>
+                        <span aria-hidden="true">📊</span> Status
                     </a>
                 </li>
-                <li class="nav-item">
-                    <a href="/history" class="nav-link {{if eq .ActivePage "history"}}active{{end}}">
-                        📋 History
+                <li class="nav-item" role="presentation">
+                    <a href="/history" class="nav-link {{if eq .ActivePage "history"}}active{{end}}"
+                       role="tab" aria-label="History page" {{if eq .ActivePage "history"}}aria-current="page"{{end}}>
+                        <span aria-hidden="true">📋</span> History
                     </a>
                 </li>
-                <li class="nav-item">
-                    <a href="/wifi" class="nav-link {{if eq .ActivePage "wifi"}}active{{end}}">
-                        📶 WiFi
+                <li class="nav-item" role="presentation">
+                    <a href="/wifi" class="nav-link {{if eq .ActivePage "wifi"}}active{{end}}"
+                       role="tab" aria-label="WiFi management page" {{if eq .ActivePage "wifi"}}aria-current="page"{{end}}>
+                        <span aria-hidden="true">📶</span> WiFi
                     </a>
                 </li>
-                <li class="nav-item">
-                    <a href="/gallery" class="nav-link {{if eq .ActivePage "gallery"}}active{{end}}">
-                        🖼️ Gallery
+                <li class="nav-item" role="presentation">
+                    <a href="/gallery" class="nav-link {{if eq .ActivePage "gallery"}}active{{end}}"
+                       role="tab" aria-label="Photo gallery page" {{if eq .ActivePage "gallery"}}aria-current="page"{{end}}>
+                        <span aria-hidden="true">🖼️</span> Gallery
                     </a>
                 </li>
-                <li class="nav-item">
-                    <a href="/config" class="nav-link {{if eq .ActivePage "config"}}active{{end}}">
-                        ⚙️ Configuration
+                <li class="nav-item" role="presentation">
+                    <a href="/config" class="nav-link {{if eq .ActivePage "config"}}active{{end}}"
+                       role="tab" aria-label="Configuration page" {{if eq .ActivePage "config"}}aria-current="page"{{end}}>
+                        <span aria-hidden="true">⚙️</span> Configuration
                     </a>
                 </li>
             </ul>
         </nav>
 
         <!-- Main Content -->
-        <main class="main-content-card">
+        <main class="main-content-card" role="main" aria-label="Main content">
             <h2 class="mb-4">WiFi Management</h2>
 
             <!-- Current WiFi Status -->
             <div class="card mb-4">
                 <div class="card-header">
-                    <h5 class="mb-0">📡 Current Status</h5>
+                    <h5 class="mb-0"><span aria-hidden="true">📡</span> Current Status</h5>
                 </div>
-                <div class="card-body" id="wifi-status">
+                <div class="card-body" id="wifi-status" role="status" aria-live="polite" aria-label="Current WiFi connection status">
                     <div class="text-center py-3">
                         <div class="spinner-border spinner-border-sm text-primary" role="status">
                             <span class="visually-hidden">Loading...</span>
@@ -76,13 +81,13 @@
             <!-- Configured Networks -->
             <div class="card mb-4">
                 <div class="card-header">
-                    <h5 class="mb-0">📋 Configured Networks</h5>
+                    <h5 class="mb-0"><span aria-hidden="true">📋</span> Configured Networks</h5>
                 </div>
                 <div class="card-body">
-                    <p class="text-muted small mb-3">
-                        <i class="bi bi-info-circle"></i> Drag networks to reorder priority (first = highest priority)
+                    <p class="text-muted small mb-3" role="note">
+                        <span aria-hidden="true">ℹ️</span> Drag networks to reorder priority (first = highest priority)
                     </p>
-                    <div id="configured-networks">
+                    <div id="configured-networks" role="list" aria-label="Configured WiFi networks">
                         <div class="text-center py-3">
                             <div class="spinner-border spinner-border-sm text-primary" role="status">
                                 <span class="visually-hidden">Loading...</span>
@@ -97,25 +102,26 @@
             <div class="card mb-4">
                 <div class="card-header">
                     <div class="d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0">🔍 Available Networks</h5>
+                        <h5 class="mb-0"><span aria-hidden="true">🔍</span> Available Networks</h5>
                         <div class="d-flex gap-2 align-items-center flex-wrap">
                             <div class="mobile-stack">
-                                <select id="sort-select" class="form-select form-select-sm" style="min-width: 160px;">
-                                    <option value="signal">📶 Signal Strength</option>
-                                    <option value="name">🔤 Network Name</option>
-                                    <option value="security">🔒 Security Status</option>
+                                <label for="sort-select" class="visually-hidden">Sort networks by</label>
+                                <select id="sort-select" class="form-select form-select-sm" style="min-width: 160px;" aria-label="Sort networks by">
+                                    <option value="signal"><span aria-hidden="true">📶</span> Signal Strength</option>
+                                    <option value="name"><span aria-hidden="true">🔤</span> Network Name</option>
+                                    <option value="security"><span aria-hidden="true">🔒</span> Security Status</option>
                                 </select>
-                                <button class="btn btn-sm btn-primary" id="scan-btn" onclick="scanNetworks()">
-                                    🔄 Scan
+                                <button class="btn btn-sm btn-primary" id="scan-btn" onclick="scanNetworks()" aria-label="Scan for WiFi networks">
+                                    <span aria-hidden="true">🔄</span> Scan
                                 </button>
                             </div>
                         </div>
                     </div>
                 </div>
                 <div class="card-body">
-                    <div id="available-networks">
+                    <div id="available-networks" role="list" aria-label="Available WiFi networks">
                         <div class="empty-state">
-                            <div class="empty-state-icon">📡</div>
+                            <div class="empty-state-icon" aria-hidden="true">📡</div>
                             <p>Click "Scan" to discover WiFi networks</p>
                         </div>
                     </div>

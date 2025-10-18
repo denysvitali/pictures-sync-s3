@@ -298,11 +298,11 @@ func (s *Settings) SetGooglePhotos(enabled bool, remoteName string) error {
 // Helper methods
 
 // ToJSON returns settings as JSON for API responses
-func (s *Settings) ToJSON() map[string]interface{} {
+func (s *Settings) ToJSON() map[string]any {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	return map[string]interface{}{
+	return map[string]any{
 		"remote_name":               s.RemoteName,
 		"remote_path":               s.RemotePath,
 		"reformat_threshold":        s.ReformatThreshold,

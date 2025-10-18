@@ -14,6 +14,13 @@ import (
 	"github.com/mdlayher/wifi"
 )
 
+const (
+	// scanWaitDelay is the wait time after triggering a WiFi scan before attempting to read results.
+	// This allows the wireless driver and kernel to complete the scan operation and populate
+	// the access point list.
+	scanWaitDelay = 2 * time.Second
+)
+
 // ScanResult represents a scanned WiFi network
 type ScanResult struct {
 	SSID      string `json:"ssid"`
@@ -117,7 +124,7 @@ func scanInterface(cl *wifi.Client, intf *wifi.Interface) ([]*wifi.BSS, error) {
 		}
 
 		log.Printf("Scan triggered, waiting for completion...")
-		time.Sleep(2 * time.Second)
+		time.Sleep(scanWaitDelay)
 
 		accessPoints, err = cl.AccessPoints(intf)
 		if err != nil {

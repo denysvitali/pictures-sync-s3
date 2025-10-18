@@ -63,8 +63,3 @@ func CountPhotos(mountPath string) (int, int64, error) {
 	return count, totalSize, err
 }
 
-// isPhotoFile checks if a file is a photo or video based on extension
-func isPhotoFile(filename string) bool {
-	ext := strings.ToLower(filepath.Ext(filename))
-	return photoExtensions[ext]
-}

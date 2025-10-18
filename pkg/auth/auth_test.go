@@ -468,3 +468,85 @@ func TestSecurityHeadersWebSocket(t *testing.T) {
 		t.Error("X-Frame-Options should still be present for WebSocket")
 	}
 }
+
+// TestBasicAuthWithNilRateLimiter tests that authentication works when rate limiter is nil
+func TestBasicAuthWithNilRateLimiter(t *testing.T) {
+	// Pass nil rate limiter - this should not crash
+	middleware := BasicAuthMiddleware("testpass", nil)
+	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("authenticated"))
+	}))
+
+	t.Run("successful auth with nil limiter", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.RemoteAddr = "192.168.1.200:12345"
+		req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("gokrazy:testpass")))
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d", rr.Code)
+		}
+
+		if rr.Body.String() != "authenticated" {
+			t.Errorf("Expected 'authenticated', got %s", rr.Body.String())
+		}
+	})
+
+	t.Run("failed auth with nil limiter", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.RemoteAddr = "192.168.1.201:12345"
+		req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("gokrazy:wrongpass")))
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusUnauthorized {
+			t.Errorf("Expected status 401, got %d", rr.Code)
+		}
+
+		// Check WWW-Authenticate header is still present
+		if auth := rr.Header().Get("WWW-Authenticate"); auth == "" {
+			t.Error("Expected WWW-Authenticate header")
+		}
+	})
+
+	t.Run("multiple failed attempts with nil limiter", func(t *testing.T) {
+		// With nil limiter, there should be no rate limiting or lockout
+		wrongAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte("gokrazy:wrongpass"))
+
+		// Make many failed attempts - none should be rate limited
+		for i := 0; i < 10; i++ {
+			req := httptest.NewRequest("GET", "/test", nil)
+			req.RemoteAddr = "192.168.1.202:12345"
+			req.Header.Set("Authorization", wrongAuth)
+
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusUnauthorized {
+				t.Errorf("Attempt %d: Expected status 401 (not rate limited), got %d", i+1, rr.Code)
+			}
+		}
+	})
+
+	t.Run("rapid requests with nil limiter", func(t *testing.T) {
+		// With nil limiter, there should be no rate limiting even for rapid requests
+		correctAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte("gokrazy:testpass"))
+
+		for i := 0; i < 10; i++ {
+			req := httptest.NewRequest("GET", "/test", nil)
+			req.RemoteAddr = "192.168.1.203:12345"
+			req.Header.Set("Authorization", correctAuth)
+
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusOK {
+				t.Errorf("Request %d: Expected status 200 (not rate limited), got %d", i+1, rr.Code)
+			}
+		}
+	})
+}

@@ -8,7 +8,7 @@ import (
 )
 
 // MarshalJSONIndent marshals a value to indented JSON.
-func MarshalJSONIndent(v interface{}) ([]byte, error) {
+func MarshalJSONIndent(v any) ([]byte, error) {
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal JSON: %w", err)
@@ -17,7 +17,7 @@ func MarshalJSONIndent(v interface{}) ([]byte, error) {
 }
 
 // UnmarshalJSON unmarshals JSON data into a value.
-func UnmarshalJSON(data []byte, v interface{}) error {
+func UnmarshalJSON(data []byte, v any) error {
 	if err := json.Unmarshal(data, v); err != nil {
 		return fmt.Errorf("failed to unmarshal JSON: %w", err)
 	}
@@ -26,7 +26,7 @@ func UnmarshalJSON(data []byte, v interface{}) error {
 
 // SaveJSON marshals a value to JSON and saves it atomically to a file.
 // Ensures the parent directory exists before writing.
-func SaveJSON(filePath string, v interface{}, perm os.FileMode) error {
+func SaveJSON(filePath string, v any, perm os.FileMode) error {
 	// Ensure parent directory exists
 	if err := EnsureDir(filepath.Dir(filePath), 0755); err != nil {
 		return err
@@ -42,7 +42,7 @@ func SaveJSON(filePath string, v interface{}, perm os.FileMode) error {
 
 // LoadJSON loads JSON from a file and unmarshals it into a value.
 // Returns the provided default value if the file doesn't exist.
-func LoadJSON(filePath string, v interface{}, defaultValue interface{}) error {
+func LoadJSON(filePath string, v any, defaultValue any) error {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -64,7 +64,7 @@ func LoadJSON(filePath string, v interface{}, defaultValue interface{}) error {
 
 // LoadJSONOrDefault loads JSON from a file, or returns the default value if the file doesn't exist.
 // This is a convenience function that returns the value directly.
-func LoadJSONOrDefault(filePath string, defaultValue interface{}) (interface{}, error) {
+func LoadJSONOrDefault(filePath string, defaultValue any) (any, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -73,7 +73,7 @@ func LoadJSONOrDefault(filePath string, defaultValue interface{}) (interface{}, 
 		return nil, fmt.Errorf("failed to read file: %w", err)
 	}
 
-	var result interface{}
+	var result any
 	if err := UnmarshalJSON(data, &result); err != nil {
 		return nil, err
 	}

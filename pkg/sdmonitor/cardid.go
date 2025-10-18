@@ -104,11 +104,18 @@ func CreateNewCardID(mountPath string, monitor *Monitor) (string, error) {
 
 // generateCardID generates a unique card ID
 func generateCardID() string {
-	// Generate 8 random bytes
+	// Generate 8 random bytes using crypto/rand
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
-		// Fallback to timestamp-based ID if crypto/rand fails
-		return fmt.Sprintf("card-%d", time.Now().Unix())
+		// Fallback to high-resolution timestamp with process ID if crypto/rand fails
+		// This is extremely unlikely but provides collision resistance even in failure case
+		// Format: card-<nanoseconds>-<pid>
+		// Example: card-1729180000123456789-1234
+		now := time.Now().UnixNano()
+		pid := os.Getpid()
+		return fmt.Sprintf("card-%d-%d", now, pid)
 	}
+	// Format: card-<16 hex chars>
+	// Example: card-a1b2c3d4e5f6a7b8
 	return fmt.Sprintf("card-%s", hex.EncodeToString(b))
 }

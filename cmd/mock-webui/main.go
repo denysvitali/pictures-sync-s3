@@ -66,7 +66,6 @@ func main() {
 	mux.HandleFunc("/config", webui.HandleConfig)
 
 	// Static assets (same as production)
-	mux.HandleFunc("/static/css/main.css", webui.HandleStaticCSS)
 	mux.HandleFunc("/static/css/theme.css", webui.HandleThemeCSS)
 	mux.HandleFunc("/static/bootstrap/css/bootstrap.min.css", webui.HandleBootstrapCSS)
 	mux.HandleFunc("/static/bootstrap/js/bootstrap.bundle.min.js", webui.HandleBootstrapJS)

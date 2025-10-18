@@ -12,6 +12,11 @@ import (
 
 const (
 	sysfsLEDPath = "/sys/class/leds"
+
+	// patternCleanupDelay is the wait time after stopping a LED pattern to allow cleanup.
+	// This brief delay ensures the pattern goroutine has time to complete and release resources
+	// before starting a new pattern.
+	patternCleanupDelay = 10 * time.Millisecond
 )
 
 // LED represents a single LED device
@@ -194,7 +199,7 @@ func (c *Controller) stopCurrentPattern() {
 	c.patternStopMu.Unlock()
 
 	// Brief wait to allow pattern goroutine to clean up
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(patternCleanupDelay)
 }
 
 // runPattern executes a LED pattern until stopped

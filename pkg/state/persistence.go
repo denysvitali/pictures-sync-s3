@@ -10,12 +10,28 @@ import (
 
 // File paths for persistent storage
 var (
-	PermDir     = getPermDir()
+	stateDir    = getPermDir()
+	PermDir     = stateDir
 	MountDir    = filepath.Join(PermDir, "mounts/sdcard")
 	ConfigFile  = filepath.Join(PermDir, "rclone.conf")
 	HistoryFile = filepath.Join(PermDir, "sync-history.json")
 	StateFile   = filepath.Join(PermDir, "state.json")
 )
+
+// GetStateDir returns the current state directory (for testing)
+func GetStateDir() string {
+	return stateDir
+}
+
+// SetStateDir sets the state directory and updates all file paths (for testing)
+func SetStateDir(dir string) {
+	stateDir = dir
+	PermDir = dir
+	MountDir = filepath.Join(PermDir, "mounts/sdcard")
+	ConfigFile = filepath.Join(PermDir, "rclone.conf")
+	HistoryFile = filepath.Join(PermDir, "sync-history.json")
+	StateFile = filepath.Join(PermDir, "state.json")
+}
 
 // getPermDir returns the appropriate permanent directory path
 // Uses /perm for production (Gokrazy), falls back to /tmp for development
@@ -112,4 +128,9 @@ func loadStateFile() ([]byte, error) {
 // unmarshalState unmarshals JSON data into a CurrentState
 func unmarshalState(data []byte, state *CurrentState) error {
 	return utils.UnmarshalJSON(data, state)
+}
+
+// marshalState marshals CurrentState to JSON (for testing)
+func marshalState(state *CurrentState) ([]byte, error) {
+	return utils.MarshalJSONIndent(state)
 }

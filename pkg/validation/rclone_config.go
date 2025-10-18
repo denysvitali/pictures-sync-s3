@@ -215,13 +215,13 @@ func parseINI(data []byte) (*RcloneConfig, error) {
 			return nil, fmt.Errorf("line %d: key-value pair outside of section", lineNum)
 		}
 
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 {
+		key, value, found := strings.Cut(line, "=")
+		if !found {
 			return nil, fmt.Errorf("line %d: invalid key-value format", lineNum)
 		}
 
-		key := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
 
 		// Validate key and value lengths
 		if len(key) > MaxKeyLength {
