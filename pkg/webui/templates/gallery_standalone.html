@@ -108,26 +108,35 @@
 
         // Initialize on page load
         document.addEventListener('DOMContentLoaded', () => {
-            loadFiles('');
-            createWebSocket(() => {}, null, null);
-
             // Initialize image modal
             imageModal = new bootstrap.Modal(document.getElementById('image-modal'));
 
-            // Event delegation for file navigation
+            // Load initial path from URL hash
+            const initialPath = getPathFromHash();
+            loadFiles(initialPath);
+
+            createWebSocket(() => {}, null, null);
+
+            // Event delegation for file navigation and preview
             document.addEventListener('click', (e) => {
-                if (e.target.matches('a[data-action="navigate"]')) {
+                if (e.target.matches('a[data-action="navigate"]') || e.target.closest('a[data-action="navigate"]')) {
                     e.preventDefault();
-                    const path = e.target.getAttribute('data-path');
-                    loadFiles(path || '');
-                } else if (e.target.matches('.file-item img') || e.target.closest('.file-item.image-file')) {
+                    const link = e.target.matches('a[data-action="navigate"]') ? e.target : e.target.closest('a[data-action="navigate"]');
+                    const path = link.getAttribute('data-path');
+                    navigateToPath(path || '');
+                } else if (e.target.matches('[data-action="preview"]') || e.target.closest('[data-action="preview"]')) {
                     e.preventDefault();
-                    const path = e.target.getAttribute('data-path') ||
-                                e.target.closest('.file-item').getAttribute('data-path');
-                    const name = e.target.getAttribute('alt') ||
-                                e.target.closest('.file-item').getAttribute('data-name');
+                    const item = e.target.matches('[data-action="preview"]') ? e.target : e.target.closest('[data-action="preview"]');
+                    const path = item.getAttribute('data-path');
+                    const name = item.getAttribute('data-name');
                     if (path) previewImage(path, name);
                 }
+            });
+
+            // Handle browser back/forward
+            window.addEventListener('hashchange', () => {
+                const path = getPathFromHash();
+                loadFiles(path);
             });
         });
 
@@ -154,7 +163,7 @@
             }
         }
 
-        // Display files in grid
+        // Display files in list
         function displayFiles(files) {
             const container = document.getElementById('gallery-container');
 
@@ -163,41 +172,76 @@
                 return;
             }
 
-            let html = '<div class="file-grid">';
+            let html = '<div class="list-group gallery-list">';
 
             files.forEach(file => {
                 const isImage = /\.(jpg|jpeg|png|gif|webp)$/i.test(file.name);
+                const isVideo = /\.(mp4|mov|avi|mkv)$/i.test(file.name);
                 const isDir = file.isDir || file.is_dir;
+                const fileSize = file.size ? formatBytes(file.size) : '';
+                const modTime = file.mod_time ? new Date(file.mod_time).toLocaleDateString() : '';
 
                 if (isDir) {
                     html += `
-                        <div class="file-item cursor-pointer" data-path="${escapeHtml(file.path)}">
-                            <a href="#" data-action="navigate" data-path="${escapeHtml(file.path)}" class="text-decoration-none">
-                                <div class="text-center">
-                                    <div style="font-size: 4rem; opacity: 0.7;">📁</div>
-                                    <div class="file-name mt-2">${escapeHtml(file.name)}</div>
-                                </div>
-                            </a>
-                        </div>
+                        <a href="#path=${encodeURIComponent(file.name)}"
+                           data-action="navigate"
+                           data-path="${escapeHtml(file.name)}"
+                           class="list-group-item list-group-item-action d-flex align-items-center">
+                            <div class="me-3 text-primary" style="font-size: 1.5rem;">📁</div>
+                            <div class="flex-grow-1">
+                                <div class="fw-bold">${escapeHtml(file.name)}</div>
+                                <small class="text-muted">Folder</small>
+                            </div>
+                            <div class="text-muted">
+                                <span style="font-size: 1.2rem;">❯</span>
+                            </div>
+                        </a>
                     `;
                 } else if (isImage) {
                     html += `
-                        <div class="file-item image-file cursor-pointer" data-path="${escapeHtml(file.path)}" data-name="${escapeHtml(file.name)}">
-                            <img src="/api/thumbnail?path=${encodeURIComponent(file.path)}"
-                                 alt="${escapeHtml(file.name)}"
-                                 data-path="${escapeHtml(file.path)}"
-                                 loading="lazy"
-                                 class="rounded"
-                                 onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22150%22%3E%3Crect fill=%22%23ddd%22 width=%22200%22 height=%22150%22/%3E%3Ctext fill=%22%23999%22 x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 dy=%22.3em%22%3ENo Preview%3C/text%3E%3C/svg%3E'">
-                            <div class="file-name mt-2">${escapeHtml(file.name)}</div>
+                        <div class="list-group-item d-flex align-items-center cursor-pointer"
+                             data-action="preview"
+                             data-path="${escapeHtml(file.path || file.name)}"
+                             data-name="${escapeHtml(file.name)}">
+                            <div class="me-3">
+                                <img src="/api/thumbnail?path=${encodeURIComponent(file.path || file.name)}"
+                                     alt="${escapeHtml(file.name)}"
+                                     style="width: 48px; height: 48px; object-fit: cover; border-radius: 4px;"
+                                     loading="lazy"
+                                     onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2248%22 height=%2248%22%3E%3Crect fill=%22%23ddd%22 width=%2248%22 height=%2248%22/%3E%3Ctext fill=%22%23999%22 x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 dy=%22.3em%22%3E📷%3C/text%3E%3C/svg%3E'">
+                            </div>
+                            <div class="flex-grow-1">
+                                <div class="fw-bold">${escapeHtml(file.name)}</div>
+                                <small class="text-muted">
+                                    📷 Image${fileSize ? ` • ${fileSize}` : ''}${modTime ? ` • ${modTime}` : ''}
+                                </small>
+                            </div>
+                            <div class="text-muted">
+                                <span style="font-size: 1.2rem;">🔍</span>
+                            </div>
+                        </div>
+                    `;
+                } else if (isVideo) {
+                    html += `
+                        <div class="list-group-item d-flex align-items-center">
+                            <div class="me-3 text-danger" style="font-size: 1.5rem;">🎬</div>
+                            <div class="flex-grow-1">
+                                <div class="fw-bold">${escapeHtml(file.name)}</div>
+                                <small class="text-muted">
+                                    🎬 Video${fileSize ? ` • ${fileSize}` : ''}${modTime ? ` • ${modTime}` : ''}
+                                </small>
+                            </div>
                         </div>
                     `;
                 } else {
                     html += `
-                        <div class="file-item">
-                            <div class="text-center">
-                                <div style="font-size: 4rem; opacity: 0.7;">📄</div>
-                                <div class="file-name mt-2">${escapeHtml(file.name)}</div>
+                        <div class="list-group-item d-flex align-items-center">
+                            <div class="me-3 text-secondary" style="font-size: 1.5rem;">📄</div>
+                            <div class="flex-grow-1">
+                                <div class="fw-bold">${escapeHtml(file.name)}</div>
+                                <small class="text-muted">
+                                    📄 File${fileSize ? ` • ${fileSize}` : ''}${modTime ? ` • ${modTime}` : ''}
+                                </small>
                             </div>
                         </div>
                     `;
@@ -224,12 +268,27 @@
                     if (isLast) {
                         html += `<li class="breadcrumb-item active" aria-current="page">${escapeHtml(part)}</li>`;
                     } else {
-                        html += `<li class="breadcrumb-item"><a href="#" data-action="navigate" data-path="${escapeHtml(currentPath)}">${escapeHtml(part)}</a></li>`;
+                        html += `<li class="breadcrumb-item"><a href="#path=${encodeURIComponent(currentPath)}" data-action="navigate" data-path="${escapeHtml(currentPath)}">${escapeHtml(part)}</a></li>`;
                     }
                 });
             }
 
             breadcrumb.innerHTML = html;
+        }
+
+        // URL routing helpers
+        function getPathFromHash() {
+            const hash = window.location.hash;
+            if (hash.startsWith('#path=')) {
+                return decodeURIComponent(hash.substring(6));
+            }
+            return '';
+        }
+
+        function navigateToPath(path) {
+            const encodedPath = encodeURIComponent(path);
+            window.location.hash = path ? `path=${encodedPath}` : '';
+            loadFiles(path);
         }
 
         // Preview image in modal
