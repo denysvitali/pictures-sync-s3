@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} - Photo Backup Station</title>
+
+    <!-- Bootstrap CSS -->
+    <link rel="stylesheet" href="/static/bootstrap/css/bootstrap.min.css">
+    <!-- Custom Theme CSS -->
+    <link rel="stylesheet" href="/static/css/theme.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="d-flex justify-content-between align-items-center">
+                <h1>📸 Photo Backup Station</h1>
+                <div class="connection-indicator" id="connection-status">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Connecting...</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Navigation -->
+        <nav class="app-nav">
+            <ul class="nav nav-pills">
+                <li class="nav-item">
+                    <a href="/" class="nav-link {{if eq .ActivePage "status"}}active{{end}}">
+                        📊 Status
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="/history" class="nav-link {{if eq .ActivePage "history"}}active{{end}}">
+                        📋 History
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="/wifi" class="nav-link {{if eq .ActivePage "wifi"}}active{{end}}">
+                        📶 WiFi
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="/gallery" class="nav-link {{if eq .ActivePage "gallery"}}active{{end}}">
+                        🖼️ Gallery
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="/config" class="nav-link {{if eq .ActivePage "config"}}active{{end}}">
+                        ⚙️ Configuration
+                    </a>
+                </li>
+            </ul>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content-card">
+            <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+                <h2 class="mb-0">Photo Gallery</h2>
+                <button class="btn btn-secondary" onclick="loadFiles(currentPath)">
+                    🔄 Refresh
+                </button>
+            </div>
+
+            <!-- Breadcrumb Navigation -->
+            <nav aria-label="breadcrumb" class="mb-4">
+                <ol class="breadcrumb" id="breadcrumb">
+                    <li class="breadcrumb-item active">Loading...</li>
+                </ol>
+            </nav>
+
+            <!-- Gallery Grid -->
+            <div id="gallery-container">
+                <div class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-3 text-muted">Loading files...</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Image Preview Modal -->
+    <div class="modal fade" id="image-modal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="image-modal-title">Image Preview</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body text-center">
+                    <img id="image-modal-img" src="" alt="" class="img-fluid" style="max-height: 70vh;">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS Bundle -->
+    <script src="/static/bootstrap/js/bootstrap.bundle.min.js"></script>
+    <!-- Utility Functions -->
+    <script src="/static/js/utils.js"></script>
+
+    <script>
+        let currentPath = '';
+        let imageModal = null;
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            loadFiles('');
+            createWebSocket(() => {}, null, null);
+
+            // Initialize image modal
+            imageModal = new bootstrap.Modal(document.getElementById('image-modal'));
+
+            // Event delegation for file navigation
+            document.addEventListener('click', (e) => {
+                if (e.target.matches('a[data-action="navigate"]')) {
+                    e.preventDefault();
+                    const path = e.target.getAttribute('data-path');
+                    loadFiles(path || '');
+                } else if (e.target.matches('.file-item img') || e.target.closest('.file-item.image-file')) {
+                    e.preventDefault();
+                    const path = e.target.getAttribute('data-path') ||
+                                e.target.closest('.file-item').getAttribute('data-path');
+                    const name = e.target.getAttribute('alt') ||
+                                e.target.closest('.file-item').getAttribute('data-name');
+                    if (path) previewImage(path, name);
+                }
+            });
+        });
+
+        // Load files for a given path
+        async function loadFiles(path = '') {
+            currentPath = path;
+            const container = document.getElementById('gallery-container');
+            showLoading(container);
+
+            try {
+                const url = path ? `/api/files?path=${encodeURIComponent(path)}` : '/api/files';
+                const data = await apiRequest(url);
+
+                if (data.error) {
+                    showError(container, data.error);
+                    return;
+                }
+
+                displayFiles(data.files || []);
+                updateBreadcrumb(path);
+            } catch (error) {
+                console.error('Failed to load files:', error);
+                showError(container, error.message);
+            }
+        }
+
+        // Display files in grid
+        function displayFiles(files) {
+            const container = document.getElementById('gallery-container');
+
+            if (!files || files.length === 0) {
+                showEmptyState(container, 'No files found in this location', '📁');
+                return;
+            }
+
+            let html = '<div class="file-grid">';
+
+            files.forEach(file => {
+                const isImage = /\.(jpg|jpeg|png|gif|webp)$/i.test(file.name);
+                const isDir = file.isDir || file.is_dir;
+
+                if (isDir) {
+                    html += `
+                        <div class="file-item cursor-pointer" data-path="${escapeHtml(file.path)}">
+                            <a href="#" data-action="navigate" data-path="${escapeHtml(file.path)}" class="text-decoration-none">
+                                <div class="text-center">
+                                    <div style="font-size: 4rem; opacity: 0.7;">📁</div>
+                                    <div class="file-name mt-2">${escapeHtml(file.name)}</div>
+                                </div>
+                            </a>
+                        </div>
+                    `;
+                } else if (isImage) {
+                    html += `
+                        <div class="file-item image-file cursor-pointer" data-path="${escapeHtml(file.path)}" data-name="${escapeHtml(file.name)}">
+                            <img src="/api/thumbnail?path=${encodeURIComponent(file.path)}"
+                                 alt="${escapeHtml(file.name)}"
+                                 data-path="${escapeHtml(file.path)}"
+                                 loading="lazy"
+                                 class="rounded"
+                                 onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22150%22%3E%3Crect fill=%22%23ddd%22 width=%22200%22 height=%22150%22/%3E%3Ctext fill=%22%23999%22 x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 dy=%22.3em%22%3ENo Preview%3C/text%3E%3C/svg%3E'">
+                            <div class="file-name mt-2">${escapeHtml(file.name)}</div>
+                        </div>
+                    `;
+                } else {
+                    html += `
+                        <div class="file-item">
+                            <div class="text-center">
+                                <div style="font-size: 4rem; opacity: 0.7;">📄</div>
+                                <div class="file-name mt-2">${escapeHtml(file.name)}</div>
+                            </div>
+                        </div>
+                    `;
+                }
+            });
+
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        // Update breadcrumb navigation
+        function updateBreadcrumb(path) {
+            const breadcrumb = document.getElementById('breadcrumb');
+            let html = '<li class="breadcrumb-item"><a href="#" data-action="navigate" data-path="">🏠 Home</a></li>';
+
+            if (path) {
+                const parts = path.split('/').filter(p => p);
+                let currentPath = '';
+
+                parts.forEach((part, index) => {
+                    currentPath += (currentPath ? '/' : '') + part;
+                    const isLast = index === parts.length - 1;
+
+                    if (isLast) {
+                        html += `<li class="breadcrumb-item active" aria-current="page">${escapeHtml(part)}</li>`;
+                    } else {
+                        html += `<li class="breadcrumb-item"><a href="#" data-action="navigate" data-path="${escapeHtml(currentPath)}">${escapeHtml(part)}</a></li>`;
+                    }
+                });
+            }
+
+            breadcrumb.innerHTML = html;
+        }
+
+        // Preview image in modal
+        function previewImage(path, name) {
+            const modalImg = document.getElementById('image-modal-img');
+            const modalTitle = document.getElementById('image-modal-title');
+
+            modalTitle.textContent = name || 'Image Preview';
+            modalImg.src = `/api/files/view?path=${encodeURIComponent(path)}`;
+            modalImg.alt = name || '';
+
+            imageModal.show();
+        }
+    </script>
+</body>
+</html>

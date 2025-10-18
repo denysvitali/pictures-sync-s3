@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} - Photo Backup Station</title>
+
+    <!-- Bootstrap CSS -->
+    <link rel="stylesheet" href="/static/bootstrap/css/bootstrap.min.css">
+    <!-- Custom Theme CSS -->
+    <link rel="stylesheet" href="/static/css/theme.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="d-flex justify-content-between align-items-center">
+                <h1>📸 Photo Backup Station</h1>
+                <div class="connection-indicator" id="connection-status">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Connecting...</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Navigation -->
+        <nav class="app-nav">
+            <ul class="nav nav-pills">
+                <li class="nav-item">
+                    <a href="/" class="nav-link {{if eq .ActivePage "status"}}active{{end}}">
+                        📊 Status
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="/history" class="nav-link {{if eq .ActivePage "history"}}active{{end}}">
+                        📋 History
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="/wifi" class="nav-link {{if eq .ActivePage "wifi"}}active{{end}}">
+                        📶 WiFi
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="/gallery" class="nav-link {{if eq .ActivePage "gallery"}}active{{end}}">
+                        🖼️ Gallery
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="/config" class="nav-link {{if eq .ActivePage "config"}}active{{end}}">
+                        ⚙️ Configuration
+                    </a>
+                </li>
+            </ul>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content-card">
+            <h2 class="mb-4">WiFi Management</h2>
+
+            <!-- Current WiFi Status -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">📡 Current Status</h5>
+                </div>
+                <div class="card-body" id="wifi-status">
+                    <div class="text-center py-3">
+                        <div class="spinner-border spinner-border-sm text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <span class="ms-2 text-muted">Loading WiFi status...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Configured Networks -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">📋 Configured Networks</h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small mb-3">
+                        <i class="bi bi-info-circle"></i> Drag networks to reorder priority (first = highest priority)
+                    </p>
+                    <div id="configured-networks">
+                        <div class="text-center py-3">
+                            <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <span class="ms-2 text-muted">Loading networks...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Available Networks -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">🔍 Available Networks</h5>
+                        <div class="d-flex gap-2 align-items-center flex-wrap">
+                            <select id="sort-select" class="form-select form-select-sm" style="width: auto;">
+                                <option value="signal">📶 Signal Strength</option>
+                                <option value="name">🔤 Network Name</option>
+                                <option value="security">🔒 Security Status</option>
+                            </select>
+                            <button class="btn btn-sm btn-primary" id="scan-btn" onclick="scanNetworks()">
+                                🔄 Scan
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div id="available-networks">
+                        <div class="empty-state">
+                            <div class="empty-state-icon">📡</div>
+                            <p>Click "Scan" to discover WiFi networks</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Bootstrap JS Bundle -->
+    <script src="/static/bootstrap/js/bootstrap.bundle.min.js"></script>
+    <!-- Utility Functions -->
+    <script src="/static/js/utils.js"></script>
+
+    <script>
+        let scanning = false;
+        let draggedElement = null;
+        let lastScanResults = null;
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            loadWiFiStatus();
+            loadConfiguredNetworks();
+            createWebSocket(() => {}, null, null);
+
+            // Event delegation for network action buttons
+            document.addEventListener('click', (e) => {
+                if (e.target.matches('button[data-action="connect"]')) {
+                    e.preventDefault();
+                    const ssid = e.target.getAttribute('data-ssid');
+                    if (ssid) connectToNetwork(ssid);
+                } else if (e.target.matches('button[data-action="disconnect"]')) {
+                    e.preventDefault();
+                    const ssid = e.target.getAttribute('data-ssid');
+                    if (ssid) disconnectNetwork(ssid);
+                }
+            });
+
+            // Listen for sort dropdown changes
+            document.getElementById('sort-select').addEventListener('change', () => {
+                if (lastScanResults && lastScanResults.length > 0) {
+                    resortNetworks();
+                }
+            });
+        });
+
+        // Load WiFi status
+        async function loadWiFiStatus() {
+            try {
+                const data = await apiRequest('/api/wifi/status');
+                displayWiFiStatus(data);
+            } catch (error) {
+                console.error('Failed to load WiFi status:', error);
+                document.getElementById('wifi-status').innerHTML =
+                    `<div class="alert alert-danger">Failed to load status: ${escapeHtml(error.message)}</div>`;
+            }
+        }
+
+        // Display WiFi status
+        function displayWiFiStatus(data) {
+            const statusDiv = document.getElementById('wifi-status');
+
+            if (data.connected) {
+                let html = `
+                    <div class="alert alert-success mb-0">
+                        <div class="d-flex align-items-center">
+                            <span class="fs-4 me-3">✓</span>
+                            <div class="flex-grow-1">
+                                <strong>Connected to: ${escapeHtml(data.ssid)}</strong>
+                                <div class="row mt-2 small">
+                                    ${data.ip ? `<div class="col-md-6">IP: ${escapeHtml(data.ip)}</div>` : ''}
+                                    ${data.signal ? `<div class="col-md-6">Signal: ${escapeHtml(data.signal)}</div>` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                statusDiv.innerHTML = html;
+            } else {
+                statusDiv.innerHTML = `
+                    <div class="alert alert-warning mb-0">
+                        <span class="fs-5 me-2">⚠️</span>
+                        Not connected to WiFi
+                    </div>
+                `;
+            }
+        }
+
+        // Load configured networks
+        async function loadConfiguredNetworks() {
+            try {
+                const data = await apiRequest('/api/wifi/networks');
+                displayConfiguredNetworks(data.networks || []);
+            } catch (error) {
+                console.error('Failed to load configured networks:', error);
+                document.getElementById('configured-networks').innerHTML =
+                    `<div class="alert alert-danger">Failed to load networks: ${escapeHtml(error.message)}</div>`;
+            }
+        }
+
+        // Display configured networks
+        function displayConfiguredNetworks(networks) {
+            const networksDiv = document.getElementById('configured-networks');
+
+            if (!networks || networks.length === 0) {
+                showEmptyState(networksDiv, 'No configured networks', '📡');
+                return;
+            }
+
+            let html = '<div class="list-group">';
+            networks.forEach((network, index) => {
+                html += `
+                    <div class="list-group-item network-item" draggable="true" data-ssid="${escapeHtml(network.ssid)}">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div class="d-flex align-items-center flex-grow-1">
+                                <span class="drag-handle me-3">☰</span>
+                                <div>
+                                    <div class="fw-bold">${escapeHtml(network.ssid)}</div>
+                                    <small class="text-muted">Priority: ${index + 1}</small>
+                                </div>
+                            </div>
+                            <button class="btn btn-sm btn-danger" data-ssid="${escapeHtml(network.ssid)}" data-action="disconnect">
+                                Remove
+                            </button>
+                        </div>
+                    </div>
+                `;
+            });
+            html += '</div>';
+
+            networksDiv.innerHTML = html;
+            setupDragAndDrop();
+        }
+
+        // Setup drag and drop for network reordering
+        function setupDragAndDrop() {
+            const items = document.querySelectorAll('#configured-networks .network-item');
+
+            items.forEach(item => {
+                item.addEventListener('dragstart', handleDragStart);
+                item.addEventListener('dragend', handleDragEnd);
+                item.addEventListener('dragover', handleDragOver);
+                item.addEventListener('drop', handleDrop);
+            });
+        }
+
+        function handleDragStart(e) {
+            draggedElement = this;
+            this.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+        }
+
+        function handleDragEnd(e) {
+            this.classList.remove('dragging');
+            document.querySelectorAll('.network-item').forEach(item => {
+                item.classList.remove('drag-over');
+            });
+        }
+
+        function handleDragOver(e) {
+            if (e.preventDefault) e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            return false;
+        }
+
+        function handleDrop(e) {
+            if (e.stopPropagation) e.stopPropagation();
+
+            if (draggedElement !== this) {
+                const container = document.querySelector('#configured-networks .list-group');
+                const items = Array.from(container.querySelectorAll('.network-item'));
+                const draggedIndex = items.indexOf(draggedElement);
+                const targetIndex = items.indexOf(this);
+
+                if (draggedIndex < targetIndex) {
+                    this.parentNode.insertBefore(draggedElement, this.nextSibling);
+                } else {
+                    this.parentNode.insertBefore(draggedElement, this);
+                }
+
+                saveNetworkOrder();
+            }
+
+            return false;
+        }
+
+        // Save network order to server
+        async function saveNetworkOrder() {
+            const items = document.querySelectorAll('#configured-networks .network-item');
+            const ssids = Array.from(items).map(item => item.getAttribute('data-ssid'));
+
+            try {
+                await apiRequest('/api/wifi/reorder', {
+                    method: 'POST',
+                    body: JSON.stringify({ ssids: ssids })
+                });
+                showToast('Network order saved', 'success', 3000);
+                loadConfiguredNetworks();
+            } catch (error) {
+                showToast('Failed to save network order: ' + error.message, 'error');
+                loadConfiguredNetworks();
+            }
+        }
+
+        // Scan for WiFi networks
+        async function scanNetworks() {
+            if (scanning) return;
+
+            scanning = true;
+            const networksDiv = document.getElementById('available-networks');
+            const scanBtn = document.getElementById('scan-btn');
+            const sortBy = document.getElementById('sort-select').value;
+
+            scanBtn.disabled = true;
+            scanBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Scanning...';
+            showLoading(networksDiv);
+
+            try {
+                const data = await apiRequest('/api/wifi/scan', {
+                    method: 'POST',
+                    body: JSON.stringify({ sort_by: sortBy })
+                });
+
+                lastScanResults = data.networks || [];
+                displayAvailableNetworks(lastScanResults);
+            } catch (error) {
+                showError(networksDiv, error.message);
+                showToast('Scan failed: ' + error.message, 'error');
+            } finally {
+                scanning = false;
+                scanBtn.disabled = false;
+                scanBtn.innerHTML = '🔄 Scan';
+            }
+        }
+
+        // Display available networks
+        function displayAvailableNetworks(networks) {
+            const networksDiv = document.getElementById('available-networks');
+
+            if (!networks || networks.length === 0) {
+                showEmptyState(networksDiv, 'No networks found', '📡');
+                return;
+            }
+
+            let html = '<div class="list-group">';
+            networks.forEach(network => {
+                const signalIcon = getSignalIcon(network.signal);
+                const signalClass = getSignalClass(network.signal);
+
+                html += `
+                    <div class="list-group-item">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <div class="fw-bold">${escapeHtml(network.ssid)}</div>
+                                <small class="text-muted">
+                                    ${network.encrypted ? '🔒 Secured' : '🔓 Open'}
+                                    ${network.signal ? `<span class="signal-strength ${signalClass} ms-2">${signalIcon} ${network.signal} dBm</span>` : ''}
+                                </small>
+                            </div>
+                            <button class="btn btn-sm btn-primary" data-ssid="${escapeHtml(network.ssid)}" data-action="connect">
+                                Connect
+                            </button>
+                        </div>
+                    </div>
+                `;
+            });
+            html += '</div>';
+
+            networksDiv.innerHTML = html;
+        }
+
+        // Resort networks without rescanning
+        function resortNetworks() {
+            if (!lastScanResults || lastScanResults.length === 0) return;
+
+            const sortBy = document.getElementById('sort-select').value;
+            const sorted = sortNetworksClientSide(lastScanResults, sortBy);
+            displayAvailableNetworks(sorted);
+        }
+
+        // Sort networks client-side
+        function sortNetworksClientSide(networks, sortBy) {
+            const sorted = [...networks];
+
+            switch (sortBy) {
+                case 'signal':
+                    sorted.sort((a, b) => (b.signal || 0) - (a.signal || 0));
+                    break;
+                case 'name':
+                case 'ssid':
+                    sorted.sort((a, b) => a.ssid.toLowerCase().localeCompare(b.ssid.toLowerCase()));
+                    break;
+                case 'security':
+                    sorted.sort((a, b) => {
+                        if (a.encrypted !== b.encrypted) {
+                            return b.encrypted - a.encrypted;
+                        }
+                        return (b.signal || 0) - (a.signal || 0);
+                    });
+                    break;
+                default:
+                    sorted.sort((a, b) => (b.signal || 0) - (a.signal || 0));
+            }
+
+            return sorted;
+        }
+
+        // Get signal icon
+        function getSignalIcon(signal) {
+            const strength = parseInt(signal);
+            if (strength > -50) return '▂▃▅▆█';
+            if (strength > -60) return '▂▃▅▆▬';
+            if (strength > -70) return '▂▃▅▬▬';
+            return '▂▃▬▬▬';
+        }
+
+        // Get signal strength class
+        function getSignalClass(signal) {
+            const strength = parseInt(signal);
+            if (strength > -60) return '';
+            if (strength > -70) return 'medium';
+            return 'weak';
+        }
+
+        // Connect to network (using Bootstrap modal instead of prompt)
+        function connectToNetwork(ssid) {
+            showPromptModal(
+                'Connect to WiFi',
+                `Enter password for "${ssid}":`,
+                '',
+                async (password) => {
+                    try {
+                        await apiRequest('/api/wifi/connect', {
+                            method: 'POST',
+                            body: JSON.stringify({ ssid: ssid, password: password })
+                        });
+
+                        showToast(`Successfully connected to ${ssid}`, 'success');
+                        loadWiFiStatus();
+                        loadConfiguredNetworks();
+                    } catch (error) {
+                        showToast('Connection failed: ' + error.message, 'error');
+                    }
+                },
+                'password'
+            );
+        }
+
+        // Disconnect network (using Bootstrap modal instead of confirm)
+        function disconnectNetwork(ssid) {
+            showConfirmModal(
+                'Remove Network',
+                `Are you sure you want to remove "${ssid}"?`,
+                async () => {
+                    try {
+                        await apiRequest('/api/wifi/disconnect', {
+                            method: 'POST',
+                            body: JSON.stringify({ ssid: ssid })
+                        });
+
+                        showToast('Network removed', 'success');
+                        loadConfiguredNetworks();
+                        loadWiFiStatus();
+                    } catch (error) {
+                        showToast('Failed to remove: ' + error.message, 'error');
+                    }
+                }
+            );
+        }
+    </script>
+</body>
+</html>
