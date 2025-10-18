@@ -1,8 +1,6 @@
 package wifimanager
 
 import (
-	"os"
-
 	"github.com/denysvitali/pictures-sync-s3/pkg/utils"
 )
 
@@ -42,8 +40,3 @@ func (m *Manager) load() error {
 	return nil
 }
 
-// atomicWriteFile writes data to a file atomically using a temp file
-// Uses the utils package for consistent atomic writes across the codebase
-func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
-	return utils.AtomicWrite(path, data, perm)
-}

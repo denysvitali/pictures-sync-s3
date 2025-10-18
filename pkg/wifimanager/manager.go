@@ -11,6 +11,16 @@ type Network struct {
 	PSK  string `json:"psk,omitempty"` // Password, optional for open networks
 }
 
+// WiFiManager is an interface for WiFi management operations
+type WiFiManager interface {
+	GetNetworks() []Network
+	AddNetwork(ssid, password string) error
+	RemoveNetwork(ssid string) error
+	ReorderNetworks(orderedSSIDs []string) error
+	ScanNetworks() ([]ScanResult, error)
+	GetCurrentConnection() (*ConnectionInfo, error)
+}
+
 // Manager manages WiFi configuration
 type Manager struct {
 	mu       sync.RWMutex
@@ -49,6 +59,13 @@ func (m *Manager) AddNetwork(ssid, password string) error {
 		return fmt.Errorf("SSID cannot be empty")
 	}
 
+	// Validate password strength for WPA/WPA2 networks
+	if password != "" {
+		if err := ValidateWiFiPassword(password); err != nil {
+			return err
+		}
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -85,4 +102,33 @@ func (m *Manager) RemoveNetwork(ssid string) error {
 	}
 
 	return fmt.Errorf("network not found: %s", ssid)
+}
+
+// ReorderNetworks updates the order of networks
+func (m *Manager) ReorderNetworks(orderedSSIDs []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Validate that all SSIDs exist
+	networkMap := make(map[string]Network)
+	for _, net := range m.networks {
+		networkMap[net.SSID] = net
+	}
+
+	// Check all SSIDs are valid
+	if len(orderedSSIDs) != len(m.networks) {
+		return fmt.Errorf("number of SSIDs doesn't match number of networks")
+	}
+
+	newNetworks := make([]Network, 0, len(orderedSSIDs))
+	for _, ssid := range orderedSSIDs {
+		net, exists := networkMap[ssid]
+		if !exists {
+			return fmt.Errorf("network not found: %s", ssid)
+		}
+		newNetworks = append(newNetworks, net)
+	}
+
+	m.networks = newNetworks
+	return m.save()
 }

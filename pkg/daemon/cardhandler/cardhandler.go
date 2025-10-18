@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/events"
@@ -14,13 +15,26 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/syncmanager"
 )
 
+const (
+	// preSyncDelay is the wait time before starting sync operations after card detection.
+	// This delay allows the filesystem to fully stabilize and ensures all files are accessible
+	// before the sync begins.
+	preSyncDelay = 2 * time.Second
+
+	// successStatusDuration is how long to keep the success status visible after sync completion.
+	// This provides visual feedback to the user via LED patterns before returning to idle state.
+	successStatusDuration = 5 * time.Second
+)
+
 // Handler manages SD card insertion and removal events
 type Handler struct {
-	monitor     *sdmonitor.Monitor
-	stateMgr    *state.Manager
-	syncMgr     *syncmanager.Manager
-	settings    *settings.Settings
-	eventMgr    *events.Manager
+	monitor      *sdmonitor.Monitor
+	stateMgr     *state.Manager
+	syncMgr      *syncmanager.Manager
+	settings     *settings.Settings
+	eventMgr     *events.Manager
+	syncStartMu  sync.Mutex // Protects syncStarting flag
+	syncStarting bool       // True when a sync operation is being initiated
 }
 
 // NewHandler creates a new card handler
@@ -51,13 +65,22 @@ func (h *Handler) HandleInserted(event sdmonitor.Event) {
 	h.stateMgr.SetSDCard(true, event.MountPath)
 	h.stateMgr.SetStatus(state.StatusDetected)
 
-	// Check if a sync is already running
-	if h.syncMgr.IsRunning() {
-		log.Println("Sync already in progress, ignoring new card insertion")
+	// Atomic check-and-set to prevent race condition:
+	// Multiple cards could be inserted rapidly, but only one sync should proceed
+	h.syncStartMu.Lock()
+	defer h.syncStartMu.Unlock()
+
+	// Check if a sync is already running or starting
+	if h.syncMgr.IsRunning() || h.syncStarting {
+		log.Println("Sync already in progress or starting, ignoring new card insertion")
 		return
 	}
 
-	// Run the sync operation in a goroutine to avoid blocking the event loop
+	// Mark that we're starting a sync - this prevents other threads from also starting
+	h.syncStarting = true
+
+	// Launch the sync operation in a goroutine
+	// The goroutine will clear syncStarting flag when sync actually starts or fails
 	go h.processSyncOperation(event)
 }
 
@@ -81,6 +104,16 @@ func (h *Handler) HandleRemoved(event sdmonitor.Event) {
 
 // processSyncOperation handles the complete sync workflow for an inserted card
 func (h *Handler) processSyncOperation(event sdmonitor.Event) {
+	// Ensure we clear the syncStarting flag if we don't make it to actual sync
+	defer func() {
+		h.syncStartMu.Lock()
+		// Only clear if sync is not actually running (i.e., we failed before calling Sync())
+		if !h.syncMgr.IsRunning() {
+			h.syncStarting = false
+		}
+		h.syncStartMu.Unlock()
+	}()
+
 	// Emit detecting photos event
 	h.eventMgr.Emit(events.EventDetectingPhotos, "Scanning SD card for photos", map[string]interface{}{
 		"mount_path": event.MountPath,
@@ -113,14 +146,6 @@ func (h *Handler) processSyncOperation(event sdmonitor.Event) {
 	// Emit photos detected event
 	h.eventMgr.EmitPhotosDetected(totalFiles, totalBytes)
 
-	// Handle empty cards (zero files) with user-friendly message
-	if totalFiles == 0 {
-		log.Println("Note: Card has no photos yet")
-		// Set at least 1 file to avoid division by zero in progress bar
-		totalFiles = 1
-		totalBytes = 1
-	}
-
 	// Get or create card ID and check for reformat
 	cardID, err := h.getCardID(event.MountPath, totalFiles)
 	if err != nil {
@@ -131,7 +156,21 @@ func (h *Handler) processSyncOperation(event sdmonitor.Event) {
 	}
 
 	// Wait a moment before starting sync
-	time.Sleep(2 * time.Second)
+	time.Sleep(preSyncDelay)
+
+	// Verify card is still mounted before starting sync
+	if !h.monitor.IsCardMounted() {
+		log.Println("SD card was removed during preparation, cancelling sync")
+		h.eventMgr.EmitError("SD card removed before sync could start", nil)
+		h.stateMgr.SetStatus(state.StatusIdle)
+		return
+	}
+
+	// Clear syncStarting flag now that we're about to call performSync
+	// The syncMgr.Sync() call will set its own isRunning flag
+	h.syncStartMu.Lock()
+	h.syncStarting = false
+	h.syncStartMu.Unlock()
 
 	// Perform the sync
 	h.performSync(event.MountPath, cardID, totalFiles, totalBytes)
@@ -258,7 +297,7 @@ func (h *Handler) performSync(mountPath, cardID string, totalFiles int, totalByt
 		h.stateMgr.SetStatus(state.StatusSuccess)
 
 		// Keep success status for a few seconds, then go idle
-		time.Sleep(5 * time.Second)
+		time.Sleep(successStatusDuration)
 		h.stateMgr.SetStatus(state.StatusIdle)
 	}
 }

@@ -1,6 +1,30 @@
-// WebSocket connection
+// WebSocket connection state
 let ws = null;
-let reconnectInterval = null;
+let reconnectAttempts = 0;
+let reconnectTimeout = null;
+let heartbeatInterval = null;
+let lastHeartbeat = null;
+let isIntentionalClose = false;
+
+// WebSocket configuration
+const WS_CONFIG = {
+    maxReconnectDelay: 30000,      // Maximum 30 seconds between reconnection attempts
+    initialReconnectDelay: 1000,   // Start with 1 second
+    heartbeatInterval: 30000,      // Send ping every 30 seconds
+    heartbeatTimeout: 10000,       // Expect pong within 10 seconds
+    maxReconnectAttempts: Infinity // Keep trying forever
+};
+
+// WebSocket message types (must match server)
+const WS_MESSAGE_TYPES = {
+    AUTH: 'auth',
+    AUTH_SUCCESS: 'auth_success',
+    STATE: 'state',
+    EVENT: 'event',
+    ERROR: 'error',
+    PING: 'ping',
+    PONG: 'pong'
+};
 
 // Status icons
 const statusIcons = {
@@ -20,6 +44,27 @@ document.addEventListener('DOMContentLoaded', () => {
     loadHistory();
     loadWiFiNetworks();
     loadCurrentSSID();
+
+    // Event delegation for network action buttons
+    document.addEventListener('click', (e) => {
+        if (e.target.matches('button[data-action="select-network"]')) {
+            e.preventDefault();
+            const ssid = e.target.getAttribute('data-ssid');
+            if (ssid) selectNetwork(ssid);
+        } else if (e.target.matches('button[data-action="remove-network"]')) {
+            e.preventDefault();
+            const ssid = e.target.getAttribute('data-ssid');
+            if (ssid) removeNetwork(ssid);
+        }
+    });
+
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', () => {
+        isIntentionalClose = true;
+        if (ws) {
+            ws.close();
+        }
+    });
 });
 
 // Tab navigation
@@ -53,68 +98,240 @@ function initForms() {
     document.getElementById('scan-btn').addEventListener('click', scanNetworks);
 }
 
-// WebSocket connection
-function connectWebSocket() {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
-
-    ws = new WebSocket(wsUrl);
-
-    ws.onopen = () => {
-        console.log('WebSocket connected');
-        updateConnectionStatus(true);
-        if (reconnectInterval) {
-            clearInterval(reconnectInterval);
-            reconnectInterval = null;
+// WebSocket connection with authentication and reconnection
+async function connectWebSocket() {
+    try {
+        // Clear any existing reconnection timeout
+        if (reconnectTimeout) {
+            clearTimeout(reconnectTimeout);
+            reconnectTimeout = null;
         }
-    };
 
-    ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        handleWebSocketMessage(data);
-    };
-
-    ws.onclose = () => {
-        console.log('WebSocket disconnected');
-        updateConnectionStatus(false);
-
-        // Reconnect after 3 seconds
-        if (!reconnectInterval) {
-            reconnectInterval = setInterval(() => {
-                console.log('Attempting to reconnect...');
-                connectWebSocket();
-            }, 3000);
+        // Get authentication token from server
+        updateConnectionStatus(false, false, 'Authenticating...');
+        const tokenResponse = await fetch('/api/ws-token');
+        if (!tokenResponse.ok) {
+            throw new Error('Failed to get WebSocket token');
         }
-    };
+        const tokenData = await tokenResponse.json();
+        const token = tokenData.token;
 
-    ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
-        updateConnectionStatus(false, true);
-    };
-}
+        // Connect to WebSocket
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws`;
 
-// Handle WebSocket messages
-function handleWebSocketMessage(data) {
-    if (data.type === 'state') {
-        updateStatus(data.state);
-    } else if (data.type === 'progress') {
-        updateProgress(data.progress);
+        updateConnectionStatus(false, false, 'Connecting...');
+        ws = new WebSocket(wsUrl);
+
+        // Set up event handlers
+        ws.onopen = () => {
+            console.log('WebSocket connected, sending auth token');
+            // Send authentication token as first message
+            ws.send(JSON.stringify({
+                type: WS_MESSAGE_TYPES.AUTH,
+                token: token
+            }));
+        };
+
+        ws.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                handleWebSocketMessage(data);
+            } catch (error) {
+                console.error('Failed to parse WebSocket message:', error);
+            }
+        };
+
+        ws.onclose = (event) => {
+            console.log('WebSocket disconnected', event.code, event.reason);
+            stopHeartbeat();
+            updateConnectionStatus(false, false);
+
+            // Don't reconnect if this was intentional
+            if (isIntentionalClose) {
+                return;
+            }
+
+            // Schedule reconnection with exponential backoff
+            scheduleReconnection();
+        };
+
+        ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+            updateConnectionStatus(false, true, 'Connection error');
+        };
+
+    } catch (error) {
+        console.error('Failed to connect WebSocket:', error);
+        updateConnectionStatus(false, true, error.message);
+        scheduleReconnection();
     }
 }
 
-// Update connection status indicator
-function updateConnectionStatus(connected, error = false) {
-    const indicator = document.getElementById('connection-status');
-    const text = indicator.querySelector('.text');
+// Schedule WebSocket reconnection with exponential backoff
+function scheduleReconnection() {
+    if (reconnectTimeout) {
+        return; // Already scheduled
+    }
 
-    indicator.classList.remove('connected', 'error');
+    reconnectAttempts++;
+    const delay = Math.min(
+        WS_CONFIG.initialReconnectDelay * Math.pow(2, reconnectAttempts - 1),
+        WS_CONFIG.maxReconnectDelay
+    );
+
+    console.log(`Scheduling reconnection attempt ${reconnectAttempts} in ${delay}ms`);
+    updateConnectionStatus(false, false, `Reconnecting in ${Math.ceil(delay / 1000)}s...`);
+
+    reconnectTimeout = setTimeout(() => {
+        reconnectTimeout = null;
+        console.log(`Reconnection attempt ${reconnectAttempts}`);
+        connectWebSocket();
+    }, delay);
+}
+
+// Start heartbeat monitoring
+function startHeartbeat() {
+    stopHeartbeat(); // Clear any existing heartbeat
+
+    heartbeatInterval = setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            // Check if we received a recent pong
+            if (lastHeartbeat && Date.now() - lastHeartbeat > WS_CONFIG.heartbeatInterval + WS_CONFIG.heartbeatTimeout) {
+                console.warn('Heartbeat timeout - connection appears stale');
+                ws.close();
+                return;
+            }
+
+            // Send ping
+            try {
+                ws.send(JSON.stringify({ type: WS_MESSAGE_TYPES.PING }));
+            } catch (error) {
+                console.error('Failed to send heartbeat:', error);
+            }
+        }
+    }, WS_CONFIG.heartbeatInterval);
+}
+
+// Stop heartbeat monitoring
+function stopHeartbeat() {
+    if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+        heartbeatInterval = null;
+    }
+    lastHeartbeat = null;
+}
+
+// Handle WebSocket messages with type validation
+function handleWebSocketMessage(data) {
+    // Validate message structure
+    if (!data || typeof data !== 'object' || !data.type) {
+        console.warn('Invalid WebSocket message format:', data);
+        return;
+    }
+
+    // Handle different message types
+    switch (data.type) {
+        case WS_MESSAGE_TYPES.AUTH_SUCCESS:
+            console.log('WebSocket authenticated successfully');
+            updateConnectionStatus(true);
+            reconnectAttempts = 0; // Reset reconnection counter on success
+            startHeartbeat(); // Start monitoring connection health
+            break;
+
+        case WS_MESSAGE_TYPES.STATE:
+            if (data.data) {
+                updateStatus(data.data);
+            } else {
+                console.warn('State message missing data:', data);
+            }
+            break;
+
+        case WS_MESSAGE_TYPES.EVENT:
+            if (data.data) {
+                handleRealtimeEvent(data.data);
+            } else {
+                console.warn('Event message missing data:', data);
+            }
+            break;
+
+        case WS_MESSAGE_TYPES.ERROR:
+            console.error('WebSocket error from server:', data.error);
+            showNotification('Connection error: ' + (data.error || 'Unknown error'), 'error');
+            break;
+
+        case WS_MESSAGE_TYPES.PONG:
+            // Update last heartbeat time
+            lastHeartbeat = Date.now();
+            break;
+
+        default:
+            console.warn('Unknown WebSocket message type:', data.type);
+    }
+}
+
+// Handle real-time events from the server
+function handleRealtimeEvent(event) {
+    if (!event || !event.type) {
+        return;
+    }
+
+    console.log('Real-time event:', event.type, event.message);
+
+    // Show notification for important events
+    const notificationEvents = [
+        'sd_card_inserted',
+        'sd_card_removed',
+        'sync_started',
+        'sync_completed',
+        'sync_failed',
+        'error'
+    ];
+
+    if (notificationEvents.includes(event.type)) {
+        const isError = event.type === 'error' || event.type === 'sync_failed';
+        showNotification(event.message, isError ? 'error' : 'info');
+    }
+
+    // Refresh history when sync completes
+    if (event.type === 'sync_completed' || event.type === 'sync_failed') {
+        loadHistory();
+    }
+}
+
+// Show user notification
+function showNotification(message, type = 'info') {
+    // You can enhance this with a toast/notification UI component
+    console.log(`[${type.toUpperCase()}] ${message}`);
+
+    // For now, use browser notifications if available
+    if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification('Photo Backup Station', {
+            body: message,
+            icon: type === 'error' ? '/static/icons/error.png' : '/static/icons/info.png'
+        });
+    }
+}
+
+// Update connection status indicator with detailed state
+function updateConnectionStatus(connected, error = false, customMessage = null) {
+    const indicator = document.getElementById('connection-status');
+    if (!indicator) return; // Element may not exist on all pages
+
+    const text = indicator.querySelector('.text');
+    if (!text) return;
+
+    indicator.classList.remove('connected', 'error', 'connecting');
 
     if (connected) {
         indicator.classList.add('connected');
         text.textContent = 'Connected';
     } else if (error) {
         indicator.classList.add('error');
-        text.textContent = 'Connection Error';
+        text.textContent = customMessage || 'Connection Error';
+    } else if (customMessage) {
+        indicator.classList.add('connecting');
+        text.textContent = customMessage;
     } else {
         text.textContent = 'Disconnected';
     }
@@ -242,12 +459,12 @@ function displayHistory(history) {
         return `
             <div class="history-item ${item.status}">
                 <div class="history-item-header">
-                    <span class="history-item-status">${item.status.toUpperCase()}</span>
+                    <span class="history-item-status">${escapeHtml(item.status).toUpperCase()}</span>
                     <span class="history-item-time">${startTime}</span>
                 </div>
                 <div class="history-item-stats">
                     ${item.files_synced} files • ${formatBytes(item.bytes_synced)} • ${formatDuration(duration)}
-                    ${item.error ? `<br><span style="color: #ef4444;">Error: ${item.error}</span>` : ''}
+                    ${item.error ? `<br><span style="color: #ef4444;">Error: ${escapeHtml(item.error)}</span>` : ''}
                 </div>
             </div>
         `;
@@ -320,7 +537,7 @@ function displayAvailableNetworks(networks) {
                 </div>
             </div>
             <div class="network-actions">
-                <button class="button" onclick="selectNetwork('${escapeHtml(network.ssid)}')">Select</button>
+                <button class="button" data-action="select-network" data-ssid="${escapeHtml(network.ssid)}">Select</button>
             </div>
         </div>
     `).join('');
@@ -359,7 +576,7 @@ function displaySavedNetworks(networks) {
                 <div class="network-name">${escapeHtml(network.ssid)}</div>
             </div>
             <div class="network-actions">
-                <button class="button" onclick="removeNetwork('${escapeHtml(network.ssid)}')">Remove</button>
+                <button class="button" data-action="remove-network" data-ssid="${escapeHtml(network.ssid)}">Remove</button>
             </div>
         </div>
     `).join('');

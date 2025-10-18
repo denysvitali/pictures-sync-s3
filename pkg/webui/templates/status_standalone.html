@@ -24,45 +24,50 @@
         </header>
 
         <!-- Navigation -->
-        <nav class="app-nav">
-            <ul class="nav nav-pills">
-                <li class="nav-item">
-                    <a href="/" class="nav-link {{if eq .ActivePage "status"}}active{{end}}">
-                        📊 Status
+        <nav class="app-nav" role="navigation" aria-label="Main navigation">
+            <ul class="nav nav-pills" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <a href="/" class="nav-link {{if eq .ActivePage "status"}}active{{end}}"
+                       role="tab" aria-label="Status page" {{if eq .ActivePage "status"}}aria-current="page"{{end}}>
+                        <span aria-hidden="true">📊</span> Status
                     </a>
                 </li>
-                <li class="nav-item">
-                    <a href="/history" class="nav-link {{if eq .ActivePage "history"}}active{{end}}">
-                        📋 History
+                <li class="nav-item" role="presentation">
+                    <a href="/history" class="nav-link {{if eq .ActivePage "history"}}active{{end}}"
+                       role="tab" aria-label="History page" {{if eq .ActivePage "history"}}aria-current="page"{{end}}>
+                        <span aria-hidden="true">📋</span> History
                     </a>
                 </li>
-                <li class="nav-item">
-                    <a href="/wifi" class="nav-link {{if eq .ActivePage "wifi"}}active{{end}}">
-                        📶 WiFi
+                <li class="nav-item" role="presentation">
+                    <a href="/wifi" class="nav-link {{if eq .ActivePage "wifi"}}active{{end}}"
+                       role="tab" aria-label="WiFi management page" {{if eq .ActivePage "wifi"}}aria-current="page"{{end}}>
+                        <span aria-hidden="true">📶</span> WiFi
                     </a>
                 </li>
-                <li class="nav-item">
-                    <a href="/gallery" class="nav-link {{if eq .ActivePage "gallery"}}active{{end}}">
-                        🖼️ Gallery
+                <li class="nav-item" role="presentation">
+                    <a href="/gallery" class="nav-link {{if eq .ActivePage "gallery"}}active{{end}}"
+                       role="tab" aria-label="Photo gallery page" {{if eq .ActivePage "gallery"}}aria-current="page"{{end}}>
+                        <span aria-hidden="true">🖼️</span> Gallery
                     </a>
                 </li>
-                <li class="nav-item">
-                    <a href="/config" class="nav-link {{if eq .ActivePage "config"}}active{{end}}">
-                        ⚙️ Configuration
+                <li class="nav-item" role="presentation">
+                    <a href="/config" class="nav-link {{if eq .ActivePage "config"}}active{{end}}"
+                       role="tab" aria-label="Configuration page" {{if eq .ActivePage "config"}}aria-current="page"{{end}}>
+                        <span aria-hidden="true">⚙️</span> Configuration
                     </a>
                 </li>
             </ul>
         </nav>
 
         <!-- Main Content -->
-        <main class="main-content-card">
+        <main class="main-content-card" role="main" aria-label="Main content">
             <h2 class="mb-4">System Status</h2>
 
             <!-- Current Status Card -->
             <div class="card mb-4">
                 <div class="card-body">
                     <div class="d-flex align-items-center mb-3">
-                        <span class="status-icon me-3" id="status-icon">⏸️</span>
+                        <span class="status-icon me-3" id="status-icon" role="img" aria-label="Status indicator">⏸️</span>
                         <div>
                             <h5 class="card-title mb-1" id="status-text">Idle - Waiting for SD card</h5>
                             <p class="text-muted mb-0 small" id="status-subtitle">Insert an SD card to begin backup</p>
@@ -70,13 +75,13 @@
                     </div>
 
                     <!-- SD Card Info (hidden by default) -->
-                    <div id="sdcard-info" class="alert alert-info d-none">
+                    <div id="sdcard-info" class="alert alert-info d-none" role="status" aria-live="polite">
                         <div class="row">
                             <div class="col-md-6">
-                                <strong>Card ID:</strong> <span id="card-id">-</span>
+                                <strong>Card ID:</strong> <span id="card-id" aria-label="Card identifier">-</span>
                             </div>
                             <div class="col-md-6">
-                                <strong>Mount Path:</strong> <span id="mount-path">-</span>
+                                <strong>Mount Path:</strong> <span id="mount-path" aria-label="Filesystem mount path">-</span>
                             </div>
                         </div>
                     </div>
@@ -84,7 +89,7 @@
             </div>
 
             <!-- Progress Section (hidden by default) -->
-            <div id="progress-section" class="d-none">
+            <div id="progress-section" class="d-none" role="region" aria-label="Sync progress information">
                 <div class="card mb-4">
                     <div class="card-header">
                         <h5 class="mb-0">Sync Progress</h5>
@@ -94,44 +99,44 @@
                         <div class="mb-3">
                             <div class="d-flex justify-content-between mb-2">
                                 <span>Overall Progress</span>
-                                <span id="progress-text" class="fw-bold">0%</span>
+                                <span id="progress-text" class="fw-bold" aria-live="polite">0%</span>
                             </div>
-                            <div class="progress">
-                                <div id="progress-fill" class="progress-bar" role="progressbar" style="width: 0%"></div>
+                            <div class="progress" role="progressbar" aria-label="Overall sync progress" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+                                <div id="progress-fill" class="progress-bar" style="width: 0%"></div>
                             </div>
                         </div>
 
                         <!-- Stats Grid -->
-                        <div class="row g-3">
-                            <div class="col-md-3">
+                        <div class="row g-3" role="group" aria-label="Sync statistics">
+                            <div class="col-6 col-md-3">
                                 <div class="card bg-light">
                                     <div class="card-body text-center">
                                         <div class="text-muted small">Files</div>
-                                        <div class="fw-bold" id="files-progress">0 / 0</div>
+                                        <div class="fw-bold" id="files-progress" aria-label="Files synced progress">0 / 0</div>
                                     </div>
                                 </div>
                             </div>
-                            <div class="col-md-3">
+                            <div class="col-6 col-md-3">
                                 <div class="card bg-light">
                                     <div class="card-body text-center">
                                         <div class="text-muted small">Data</div>
-                                        <div class="fw-bold" id="bytes-progress">0 B / 0 B</div>
+                                        <div class="fw-bold" id="bytes-progress" aria-label="Data transferred">0 B / 0 B</div>
                                     </div>
                                 </div>
                             </div>
-                            <div class="col-md-3">
+                            <div class="col-6 col-md-3">
                                 <div class="card bg-light">
                                     <div class="card-body text-center">
                                         <div class="text-muted small">Speed</div>
-                                        <div class="fw-bold" id="speed">-</div>
+                                        <div class="fw-bold" id="speed" aria-label="Transfer speed">-</div>
                                     </div>
                                 </div>
                             </div>
-                            <div class="col-md-3">
+                            <div class="col-6 col-md-3">
                                 <div class="card bg-light">
                                     <div class="card-body text-center">
                                         <div class="text-muted small">ETA</div>
-                                        <div class="fw-bold" id="eta">-</div>
+                                        <div class="fw-bold" id="eta" aria-label="Estimated time remaining">-</div>
                                     </div>
                                 </div>
                             </div>
@@ -148,13 +153,13 @@
                 <div class="card-body">
                     <div class="row g-2">
                         <div class="col-md-6">
-                            <button class="btn btn-outline-primary w-100" onclick="loadStatus()">
-                                🔄 Refresh Status
+                            <button class="btn btn-outline-primary w-100" onclick="loadStatus()" aria-label="Refresh current status">
+                                <span aria-hidden="true">🔄</span> Refresh Status
                             </button>
                         </div>
                         <div class="col-md-6">
-                            <button class="btn btn-outline-secondary w-100" onclick="window.location.href='/config'">
-                                ⚙️ Settings
+                            <button class="btn btn-outline-secondary w-100" onclick="window.location.href='/config'" aria-label="Go to settings">
+                                <span aria-hidden="true">⚙️</span> Settings
                             </button>
                         </div>
                     </div>

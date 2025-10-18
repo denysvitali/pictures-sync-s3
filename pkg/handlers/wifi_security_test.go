@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/wifimanager"
@@ -14,28 +12,12 @@ import (
 // TestHandleWiFiNetworks_NoPasswordExposure verifies the critical security fix:
 // WiFi passwords must NEVER be exposed via API responses
 func TestHandleWiFiNetworks_NoPasswordExposure(t *testing.T) {
-	// Create a temporary directory for the test config
-	tempDir := t.TempDir()
-	configPath := filepath.Join(tempDir, "extra-wifi.json")
-
 	// Set the config path for testing (we'll write directly to simulate a manager)
 	testNetworks := []wifimanager.Network{
 		{SSID: "HomeNetwork", PSK: "SuperSecretPassword123"},
 		{SSID: "GuestNetwork", PSK: "AnotherPassword456"},
 		{SSID: "OpenNetwork", PSK: ""}, // Open network without password
 	}
-
-	// Write test config
-	configData, _ := json.Marshal(testNetworks)
-	os.WriteFile(configPath, configData, 0600)
-
-	// Create a real WiFi manager that will load from our temp config
-	// We'll patch the config path temporarily
-	originalConfigPath := "/perm/extra-wifi.json"
-	defer func() {
-		// Note: In real testing, we'd use dependency injection or build tags
-		// For now, this demonstrates the security test pattern
-	}()
 
 	// Create a mock manager for testing
 	mockMgr := &testWiFiManager{
@@ -60,10 +42,14 @@ func TestHandleWiFiNetworks_NoPasswordExposure(t *testing.T) {
 	}
 
 	// Parse response
-	var safeNetworks []SafeNetworkInfo
-	if err := json.NewDecoder(rec.Body).Decode(&safeNetworks); err != nil {
+	var response struct {
+		Networks []SafeNetworkInfo `json:"networks"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
+
+	safeNetworks := response.Networks
 
 	// Verify correct number of networks
 	if len(safeNetworks) != 3 {
@@ -132,6 +118,10 @@ func (m *testWiFiManager) AddNetwork(ssid, psk string) error {
 }
 
 func (m *testWiFiManager) RemoveNetwork(ssid string) error {
+	return nil
+}
+
+func (m *testWiFiManager) ReorderNetworks(orderedSSIDs []string) error {
 	return nil
 }
 

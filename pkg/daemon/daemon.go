@@ -1,10 +1,12 @@
 package daemon
 
 import (
+	"context"
 	"log"
 	"net"
 	"time"
 
+	"github.com/denysvitali/pictures-sync-s3/pkg/captiveportal"
 	"github.com/denysvitali/pictures-sync-s3/pkg/daemon/cardhandler"
 	"github.com/denysvitali/pictures-sync-s3/pkg/events"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ledcontroller"
@@ -13,19 +15,32 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/signals"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 	"github.com/denysvitali/pictures-sync-s3/pkg/syncmanager"
+	"github.com/denysvitali/pictures-sync-s3/pkg/wifimanager"
+)
+
+const (
+	// timeSyncCheckInterval is how often to check if NTP has synchronized the system time.
+	// This is used during daemon startup to wait for proper time before allowing sync operations.
+	timeSyncCheckInterval = 2 * time.Second
+
+	// dnsCheckInterval is how often to check if DNS resolution is working.
+	// This is used during daemon startup to ensure network connectivity before sync operations.
+	dnsCheckInterval = 2 * time.Second
 )
 
 // Service represents the main photo backup daemon
 type Service struct {
-	eventMgr    *events.Manager
-	stateMgr    *state.Manager
-	settings    *settings.Settings
-	syncMgr     *syncmanager.Manager
-	ledCtrl     *ledcontroller.Controller
-	monitor     *sdmonitor.Monitor
-	cardHandler *cardhandler.Handler
-	sigHandler  *signals.Handler
-	timeSynced  bool // Track if time is properly synced
+	eventMgr       *events.Manager
+	stateMgr       *state.Manager
+	settings       *settings.Settings
+	syncMgr        *syncmanager.Manager
+	ledCtrl        *ledcontroller.Controller
+	monitor        *sdmonitor.Monitor
+	cardHandler    *cardhandler.Handler
+	sigHandler     *signals.Handler
+	wifiMgr        *wifimanager.Manager
+	captivePortal  *captiveportal.Authenticator
+	timeSynced     bool // Track if time is properly synced
 }
 
 // Config holds configuration for the daemon service
@@ -69,14 +84,21 @@ func New(cfg Config) (*Service, error) {
 		}
 
 		log.Printf("Time not synced yet (current: %s), waiting...", now)
-		time.Sleep(2 * time.Second)
+		time.Sleep(timeSyncCheckInterval)
 	}
 
 	// Wait for DNS to be available (check if we can resolve a common domain)
 	log.Println("Checking DNS availability...")
 	dnsReady := false
 	for i := 0; i < 60; i++ { // Try for 2 minutes (60 * 2s)
-		_, err := net.LookupHost("google.com")
+		// Create context with 5-second timeout for DNS lookup
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+
+		// Use custom resolver with context for timeout protection
+		resolver := &net.Resolver{}
+		_, err := resolver.LookupHost(ctx, "google.com")
+		cancel() // Always cancel context to free resources
+
 		if err == nil {
 			log.Println("DNS is ready")
 			dnsReady = true
@@ -86,7 +108,7 @@ func New(cfg Config) (*Service, error) {
 		if i%5 == 0 {
 			log.Printf("DNS not ready yet (attempt %d/60): %v", i+1, err)
 		}
-		time.Sleep(2 * time.Second)
+		time.Sleep(dnsCheckInterval)
 	}
 
 	if !dnsReady {
@@ -150,16 +172,35 @@ func New(cfg Config) (*Service, error) {
 	// Initialize signal handler
 	sigHandler := signals.NewHandler()
 
+	// Initialize WiFi manager for captive portal
+	wifiMgr, err := wifimanager.NewManager()
+	if err != nil {
+		log.Printf("Warning: Failed to initialize WiFi manager: %v", err)
+	}
+
+	// Initialize captive portal authenticator
+	var captivePortal *captiveportal.Authenticator
+	if wifiMgr != nil {
+		log.Println("Initializing captive portal authenticator...")
+		captivePortal = captiveportal.NewAuthenticator(func() (string, error) {
+			return wifiMgr.GetCurrentSSID()
+		})
+		captivePortal.Start()
+		log.Println("Captive portal authenticator started")
+	}
+
 	return &Service{
-		eventMgr:    eventMgr,
-		stateMgr:    stateMgr,
-		settings:    appSettings,
-		syncMgr:     syncMgr,
-		ledCtrl:     ledCtrl,
-		monitor:     monitor,
-		cardHandler: cardHandler,
-		sigHandler:  sigHandler,
-		timeSynced:  timeSynced,
+		eventMgr:      eventMgr,
+		stateMgr:      stateMgr,
+		settings:      appSettings,
+		syncMgr:       syncMgr,
+		ledCtrl:       ledCtrl,
+		monitor:       monitor,
+		cardHandler:   cardHandler,
+		sigHandler:    sigHandler,
+		wifiMgr:       wifiMgr,
+		captivePortal: captivePortal,
+		timeSynced:    timeSynced,
 	}, nil
 }
 
@@ -221,6 +262,10 @@ func (s *Service) Run() error {
 // Shutdown gracefully shuts down the daemon
 func (s *Service) Shutdown() {
 	log.Println("Shutting down daemon...")
+
+	if s.captivePortal != nil {
+		s.captivePortal.Stop()
+	}
 
 	if s.monitor != nil {
 		s.monitor.Stop()

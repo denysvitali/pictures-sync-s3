@@ -65,7 +65,7 @@ func (c *ConnectionRateLimiter) CleanupOldLimiters(ctx context.Context) {
 			c.mu.Lock()
 			// Remove all limiters (they'll be recreated on next connection)
 			// This prevents memory leaks from storing limiters for IPs that no longer connect
-			c.limiters = make(map[string]*rate.Limiter)
+			clear(c.limiters)
 			c.mu.Unlock()
 		}
 	}
@@ -73,19 +73,28 @@ func (c *ConnectionRateLimiter) CleanupOldLimiters(ctx context.Context) {
 
 // StartRateLimiterCleanup starts the rate limiter cleanup goroutine
 func StartRateLimiterCleanup(ctx context.Context) {
-	connRateLimiter.CleanupOldLimiters(ctx)
+	getConnectionRateLimiter().CleanupOldLimiters(ctx)
 }
 
 var (
-	wsTokens           = make(map[string]time.Time) // WebSocket auth tokens with expiry
-	wsTokenMutex       sync.RWMutex
-	connRateLimiter    = NewConnectionRateLimiter()
-	allowedOrigins     = []string{} // Configurable whitelist (empty = use private IP validation)
+	wsTokens            = make(map[string]time.Time) // WebSocket auth tokens with expiry
+	wsTokenMutex        sync.RWMutex
+	connRateLimiter     *ConnectionRateLimiter
+	connRateLimiterOnce sync.Once
+	allowedOrigins      = []string{} // Configurable whitelist (empty = use private IP validation)
 	allowedOriginsMutex sync.RWMutex
-	upgrader           = websocket.Upgrader{
+	upgrader            = websocket.Upgrader{
 		CheckOrigin: checkOriginStrict,
 	}
 )
+
+// getConnectionRateLimiter returns the singleton rate limiter instance
+func getConnectionRateLimiter() *ConnectionRateLimiter {
+	connRateLimiterOnce.Do(func() {
+		connRateLimiter = NewConnectionRateLimiter()
+	})
+	return connRateLimiter
+}
 
 // isPrivateIP checks if an IP address is in a private RFC 1918 range
 func isPrivateIP(ip string) bool {
@@ -268,6 +277,32 @@ func ValidateWSToken(token string) bool {
 	return true
 }
 
+// ValidateAndDeleteWSToken atomically validates and deletes a token to prevent reuse
+// This prevents race conditions where two connections could use the same token
+func ValidateAndDeleteWSToken(token string) bool {
+	if token == "" {
+		return false
+	}
+
+	wsTokenMutex.Lock()
+	defer wsTokenMutex.Unlock()
+
+	expiry, exists := wsTokens[token]
+	if !exists {
+		return false
+	}
+
+	if time.Now().After(expiry) {
+		// Token expired
+		delete(wsTokens, token)
+		return false
+	}
+
+	// Token is valid - delete it immediately to prevent reuse
+	delete(wsTokens, token)
+	return true
+}
+
 // DeleteWSToken removes a token after use
 func DeleteWSToken(token string) {
 	wsTokenMutex.Lock()
@@ -311,7 +346,7 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager) http.Han
 		}
 
 		// Apply rate limiting per IP
-		limiter := connRateLimiter.GetLimiter(clientIP)
+		limiter := getConnectionRateLimiter().GetLimiter(clientIP)
 		if !limiter.Allow() {
 			log.Printf("WebSocket: Rate limit exceeded for IP %s", clientIP)
 			http.Error(w, "Too many connection attempts. Please try again later.", http.StatusTooManyRequests)
@@ -336,25 +371,22 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager) http.Han
 		}
 		if err := conn.ReadJSON(&authMsg); err != nil {
 			log.Printf("WebSocket auth failed: failed to read auth message from %s: %v", r.RemoteAddr, err)
-			conn.WriteJSON(map[string]interface{}{
+			conn.WriteJSON(map[string]any{
 				"type":  "error",
 				"error": "Authentication required",
 			})
 			return
 		}
 
-		// Validate token type and value
-		if authMsg.Type != "auth" || !ValidateWSToken(authMsg.Token) {
+		// Validate token type and atomically delete to prevent concurrent reuse
+		if authMsg.Type != "auth" || !ValidateAndDeleteWSToken(authMsg.Token) {
 			log.Printf("WebSocket auth failed: invalid token from %s", r.RemoteAddr)
-			conn.WriteJSON(map[string]interface{}{
+			conn.WriteJSON(map[string]any{
 				"type":  "error",
 				"error": "Invalid or expired token",
 			})
 			return
 		}
-
-		// Remove token after successful validation (one-time use)
-		DeleteWSToken(authMsg.Token)
 
 		// Clear read deadline after successful auth
 		conn.SetReadDeadline(time.Time{})
@@ -362,7 +394,7 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager) http.Han
 		log.Printf("WebSocket authenticated successfully from %s", r.RemoteAddr)
 
 		// Send auth success message
-		if err := conn.WriteJSON(map[string]interface{}{
+		if err := conn.WriteJSON(map[string]any{
 			"type": "auth_success",
 		}); err != nil {
 			return
@@ -378,7 +410,7 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager) http.Han
 		// Send initial state (reload from disk first to get latest from pictures-sync service)
 		stateMgr.Reload()
 		status := stateMgr.GetState()
-		initialMessage := map[string]interface{}{
+		initialMessage := map[string]any{
 			"type": "state",
 			"data": status,
 		}
@@ -386,9 +418,37 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager) http.Han
 			return
 		}
 
+		// Set up ping/pong handlers for connection health monitoring
+		conn.SetPongHandler(func(string) error {
+			// Extend read deadline when we receive a pong
+			conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+			return nil
+		})
+
+		// Start a goroutine to read client messages (for ping/pong)
+		clientMessages := make(chan map[string]any, 10)
+		go func() {
+			defer close(clientMessages)
+			for {
+				var msg map[string]any
+				if err := conn.ReadJSON(&msg); err != nil {
+					// Connection closed or error reading
+					return
+				}
+				clientMessages <- msg
+			}
+		}()
+
 		// Send updates and periodically reload state from disk
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
+
+		// Ping ticker for connection health
+		pingTicker := time.NewTicker(30 * time.Second)
+		defer pingTicker.Stop()
+
+		// Set initial read deadline
+		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 
 		for {
 			select {
@@ -398,7 +458,7 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager) http.Han
 					return
 				}
 				// Send state update
-				message := map[string]interface{}{
+				message := map[string]any{
 					"type": "state",
 					"data": state,
 				}
@@ -411,12 +471,27 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager) http.Han
 					return
 				}
 				// Send event
-				message := map[string]interface{}{
+				message := map[string]any{
 					"type": "event",
 					"data": event,
 				}
 				if err := conn.WriteJSON(message); err != nil {
 					return
+				}
+			case msg, ok := <-clientMessages:
+				if !ok {
+					// Client disconnected
+					return
+				}
+				// Handle client messages (ping/pong)
+				if msgType, exists := msg["type"].(string); exists && msgType == "ping" {
+					// Respond to ping with pong
+					pongMsg := map[string]any{
+						"type": "pong",
+					}
+					if err := conn.WriteJSON(pongMsg); err != nil {
+						return
+					}
 				}
 			case <-ticker.C:
 				// Reload state from disk (in case pictures-sync service updated it)
@@ -426,11 +501,17 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager) http.Han
 
 				// Send updated state
 				status := stateMgr.GetState()
-				message := map[string]interface{}{
+				message := map[string]any{
 					"type": "state",
 					"data": status,
 				}
 				if err := conn.WriteJSON(message); err != nil {
+					return
+				}
+			case <-pingTicker.C:
+				// Send WebSocket-level ping frame
+				if err := conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(10*time.Second)); err != nil {
+					log.Printf("Failed to send ping: %v", err)
 					return
 				}
 			}

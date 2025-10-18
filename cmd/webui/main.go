@@ -196,7 +196,6 @@ func main() {
 	http.HandleFunc("/config", webui.HandleConfig)
 
 	// Static assets
-	http.HandleFunc("/static/css/main.css", webui.HandleStaticCSS)
 	http.HandleFunc("/static/css/theme.css", webui.HandleThemeCSS)
 	http.HandleFunc("/static/bootstrap/css/bootstrap.min.css", webui.HandleBootstrapCSS)
 	http.HandleFunc("/static/bootstrap/js/bootstrap.bundle.min.js", webui.HandleBootstrapJS)

@@ -3,21 +3,7 @@ package handlers
 import (
 	"log"
 	"net/http"
-
-	"github.com/denysvitali/pictures-sync-s3/pkg/auth"
 )
-
-// HandleCSRFToken returns the CSRF token
-func HandleCSRFToken(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	JSONResponse(w, map[string]string{
-		"csrf_token": auth.GetCSRFToken(),
-	})
-}
 
 // HandleStatus returns current system status
 func (ctx *Context) HandleStatus(w http.ResponseWriter, r *http.Request) {

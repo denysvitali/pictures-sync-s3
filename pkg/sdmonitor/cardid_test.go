@@ -367,6 +367,44 @@ func TestCardIDGenerationCollisions(t *testing.T) {
 	}
 }
 
+// TestSimultaneousCardInsertions tests concurrent card ID generation
+// This specifically tests the bug where two cards inserted in the same second
+// could get identical IDs if timestamp-based generation is used
+func TestSimultaneousCardInsertions(t *testing.T) {
+	// Simulate two cards being inserted simultaneously
+	const numGoroutines = 100
+	idChan := make(chan string, numGoroutines)
+	var wg sync.WaitGroup
+
+	// Generate IDs concurrently to simulate simultaneous insertions
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			id := generateCardID()
+			idChan <- id
+		}()
+	}
+
+	wg.Wait()
+	close(idChan)
+
+	// Collect all IDs and check for duplicates
+	idMap := make(map[string]int)
+	for id := range idChan {
+		idMap[id]++
+		if idMap[id] > 1 {
+			t.Errorf("Collision detected: %s generated %d times", id, idMap[id])
+		}
+	}
+
+	if len(idMap) != numGoroutines {
+		t.Errorf("Expected %d unique IDs, got %d", numGoroutines, len(idMap))
+	} else {
+		t.Logf("Successfully generated %d unique IDs concurrently with no collisions", numGoroutines)
+	}
+}
+
 // TestFileCountCalculationErrors tests edge cases in photo counting
 func TestFileCountCalculationErrors(t *testing.T) {
 	testCases := []struct {

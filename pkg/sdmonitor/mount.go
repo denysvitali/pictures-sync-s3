@@ -10,6 +10,13 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+const (
+	// unmountSettleDelay is the wait time after unmounting to allow the kernel to complete cleanup.
+	// This ensures all filesystem operations are flushed and the device is fully released before
+	// proceeding with other operations.
+	unmountSettleDelay = 100 * time.Millisecond
+)
+
 // mount mounts the device (initially read-write for card ID setup)
 // This is NOT thread-safe - caller must hold m.mountMu
 func (m *Monitor) mount(device string) error {
@@ -94,7 +101,7 @@ func (m *Monitor) unmount() error {
 			}
 			log.Printf("Unmount: Successfully performed lazy unmount of %s", m.mountPath)
 			// Give the kernel a moment to complete the detach
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(unmountSettleDelay)
 			return nil
 		}
 
@@ -121,7 +128,7 @@ func (m *Monitor) forceUnmount() error {
 		log.Printf("ForceUnmount: %s was not mounted", m.mountPath)
 	} else {
 		log.Printf("ForceUnmount: Successfully force unmounted %s", m.mountPath)
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(unmountSettleDelay)
 	}
 
 	return nil
