@@ -109,7 +109,7 @@ func HandleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// HandleStaticCSS serves static CSS files
+// HandleStaticCSS serves static CSS files (legacy)
 func HandleStaticCSS(w http.ResponseWriter, r *http.Request) {
 	// Read the CSS file from embedded filesystem
 	content, err := staticFS.ReadFile("static/css/main.css")
@@ -118,12 +118,22 @@ func HandleStaticCSS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Moderate caching for legacy CSS
 	w.Header().Set("Content-Type", "text/css; charset=utf-8")
-	w.Header().Set("Cache-Control", "public, max-age=31536000") // Cache for 1 year
+	w.Header().Set("Cache-Control", "public, max-age=86400") // 24 hours
+	w.Header().Set("ETag", `"main-css-v1"`)
+	w.Header().Set("Vary", "Accept-Encoding")
+
+	// Check if client has cached version
+	if r.Header.Get("If-None-Match") == `"main-css-v1"` {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
 	w.Write(content)
 }
 
-// HandleBootstrapCSS serves Bootstrap CSS
+// HandleBootstrapCSS serves Bootstrap CSS with aggressive caching
 func HandleBootstrapCSS(w http.ResponseWriter, r *http.Request) {
 	content, err := staticFS.ReadFile("static/bootstrap/css/bootstrap.min.css")
 	if err != nil {
@@ -131,12 +141,22 @@ func HandleBootstrapCSS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Set aggressive caching headers for immutable Bootstrap assets
 	w.Header().Set("Content-Type", "text/css; charset=utf-8")
-	w.Header().Set("Cache-Control", "public, max-age=31536000")
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	w.Header().Set("ETag", `"bootstrap-5.3.8-css"`)
+	w.Header().Set("Vary", "Accept-Encoding")
+
+	// Check if client has cached version
+	if r.Header.Get("If-None-Match") == `"bootstrap-5.3.8-css"` {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
 	w.Write(content)
 }
 
-// HandleThemeCSS serves custom theme CSS
+// HandleThemeCSS serves custom theme CSS with moderate caching
 func HandleThemeCSS(w http.ResponseWriter, r *http.Request) {
 	content, err := staticFS.ReadFile("static/css/theme.css")
 	if err != nil {
@@ -144,12 +164,22 @@ func HandleThemeCSS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Moderate caching for custom assets that may change
 	w.Header().Set("Content-Type", "text/css; charset=utf-8")
-	w.Header().Set("Cache-Control", "public, max-age=31536000")
+	w.Header().Set("Cache-Control", "public, max-age=86400") // 24 hours
+	w.Header().Set("ETag", `"theme-css-v1"`)
+	w.Header().Set("Vary", "Accept-Encoding")
+
+	// Check if client has cached version
+	if r.Header.Get("If-None-Match") == `"theme-css-v1"` {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
 	w.Write(content)
 }
 
-// HandleBootstrapJS serves Bootstrap JavaScript bundle
+// HandleBootstrapJS serves Bootstrap JavaScript bundle with aggressive caching
 func HandleBootstrapJS(w http.ResponseWriter, r *http.Request) {
 	content, err := staticFS.ReadFile("static/bootstrap/js/bootstrap.bundle.min.js")
 	if err != nil {
@@ -157,12 +187,22 @@ func HandleBootstrapJS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Set aggressive caching headers for immutable Bootstrap assets
 	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
-	w.Header().Set("Cache-Control", "public, max-age=31536000")
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	w.Header().Set("ETag", `"bootstrap-5.3.8-js"`)
+	w.Header().Set("Vary", "Accept-Encoding")
+
+	// Check if client has cached version
+	if r.Header.Get("If-None-Match") == `"bootstrap-5.3.8-js"` {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
 	w.Write(content)
 }
 
-// HandleUtilsJS serves utility JavaScript
+// HandleUtilsJS serves utility JavaScript with moderate caching
 func HandleUtilsJS(w http.ResponseWriter, r *http.Request) {
 	content, err := staticFS.ReadFile("static/js/utils.js")
 	if err != nil {
@@ -170,7 +210,17 @@ func HandleUtilsJS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Moderate caching for custom assets that may change
 	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
-	w.Header().Set("Cache-Control", "public, max-age=31536000")
+	w.Header().Set("Cache-Control", "public, max-age=86400") // 24 hours
+	w.Header().Set("ETag", `"utils-js-v1"`)
+	w.Header().Set("Vary", "Accept-Encoding")
+
+	// Check if client has cached version
+	if r.Header.Get("If-None-Match") == `"utils-js-v1"` {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
 	w.Write(content)
 }
