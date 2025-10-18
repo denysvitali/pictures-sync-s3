@@ -1,6 +1,8 @@
 # Binaries
 pictures-sync
 webui
+mock-webui
+!cmd/mock-webui/
 *.exe
 *.exe~
 *.dll
@@ -18,6 +20,15 @@ go.work
 
 # Dependency directories
 vendor/
+
+# Node.js dependencies and artifacts
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Debug scripts
+debug-*.js
 
 # IDE
 .vscode/
