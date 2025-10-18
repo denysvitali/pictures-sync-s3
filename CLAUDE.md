@@ -11,6 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) and agents when work
 4. **Target Changes**: Focus on high-impact changes - prefer fixing critical issues over cosmetic improvements
 5. **Verify First**: Use Read/Glob tools to understand current state before making assumptions
 6. **Document Intent**: When making changes, explain the reasoning and expected impact
+7. **⚠️ NO USELESS DOCUMENTATION**: Do NOT create .md files in the repository root. Only README.md and CLAUDE.md should exist there. Put specific documentation in relevant package directories or skip it entirely if not essential.
 
 ### 🎯 Task Prioritization (High to Low)
 1. **Security vulnerabilities** (CVSS 7.0+)
@@ -303,6 +304,13 @@ make lint                  # Code quality checks
 4. **Mocking**: Use testify/mock for external dependencies
 5. **Coverage**: Aim for 80%+ on new code
 
+### Documentation Guidelines
+1. **Repository Root**: ONLY README.md and CLAUDE.md belong in the root directory
+2. **Package Documentation**: Put specific docs in relevant `/pkg/*/` directories (e.g., `pkg/handlers/PATTERNS.md`)
+3. **Avoid Over-Documentation**: Don't create summary files, index files, or redundant explanations
+4. **Code Comments**: Prefer clear code with minimal comments over external documentation
+5. **Essential Only**: Only create documentation that provides unique value and will be maintained
+
 ## 🔧 Development Tools
 
 ### Code Quality
@@ -337,17 +345,14 @@ go test -race ./...
 
 ## 📚 Documentation Navigation
 
-### Development Guides
-- `REFACTORING_INDEX.md` - Complete refactoring documentation
-- `TEST_GUIDE.md` - Comprehensive testing guide
-- `SECURITY_TESTING_STRATEGY.md` - Security testing approach
-- `pkg/handlers/HANDLER_PATTERNS.md` - HTTP handler patterns
+### Essential Documentation
+- `README.md` - Project overview and quick start
+- `CLAUDE.md` - This file - comprehensive development guide
+- `pkg/handlers/HANDLER_PATTERNS.md` - HTTP handler patterns and examples
+- `tests/e2e/README.md` - End-to-end testing guide
 
-### Implementation References
-- `HTTP_HANDLER_REFACTORING.md` - Handler modernization
-- `PERFORMANCE_TESTS.md` - Performance testing guide
-- `tests/e2e/README.md` - End-to-end testing
-- `BEFORE_AFTER_COMPARISON.md` - Migration examples
+### Package-Specific Documentation
+Documentation is kept close to the code in relevant package directories. Look for README.md files in specific packages for detailed implementation guidance.
 
 ## 🚀 Deployment Considerations
 
