@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#6366f1">
+    <meta name="description" content="Automatic SD card photo backup to cloud storage">
+    <title>Photo Backup Station</title>
+
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="icon" type="image/png" sizes="192x192" href="/static/icons/icon-192.png">
+    <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+
+    <!-- Bootstrap CSS -->
+    <link rel="stylesheet" href="/static/bootstrap/css/bootstrap.min.css">
+    <!-- Custom Theme CSS -->
+    <link rel="stylesheet" href="/static/css/theme.css">
+    <style>
+        /* SPA-specific styles */
+        .page-transition {
+            animation: fadeIn 0.2s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .nav-link {
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .htmx-request .htmx-indicator {
+            display: inline-block;
+        }
+
+        .htmx-indicator {
+            display: none;
+        }
+
+        /* Loading overlay */
+        #loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.9);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+
+        #loading-overlay.htmx-request {
+            display: flex;
+        }
+    </style>
+</head>
+<body>
+    <!-- Loading overlay -->
+    <div id="loading-overlay" class="htmx-indicator">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+    </div>
+
+    <div class="app-container">
+        <!-- Header with prominent status -->
+        <header role="banner" class="app-header">
+            <div class="header-content">
+                <div class="header-left">
+                    <h1 class="app-title">
+                        <span class="icon-inline" aria-hidden="true">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/>
+                                <circle cx="12" cy="13" r="3"/>
+                            </svg>
+                        </span>
+                        <span class="title-text">Photo Backup</span>
+                    </h1>
+                    <div class="system-status-badge" id="header-status-badge" role="status" aria-live="polite">
+                        <span class="status-icon">⏸️</span>
+                        <span class="status-label">Idle</span>
+                    </div>
+                </div>
+                <div class="header-right">
+                    <div class="connection-indicator" id="connection-status" role="status" aria-live="polite">
+                        <span class="status-dot" aria-hidden="true"></span>
+                        <span class="status-text">Connecting</span>
+                    </div>
+                    <button class="btn-icon-header" id="quick-actions-btn" aria-label="Quick actions menu" title="Quick actions">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Navigation -->
+        <nav class="app-nav" role="navigation" aria-label="Main navigation">
+            <ul class="nav nav-pills" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <a href="#/status"
+                       class="nav-link"
+                       hx-get="/api/pages/status"
+                       hx-target="#main-content"
+                       hx-swap="innerHTML show:top"
+                       hx-push-url="false"
+                       role="tab"
+                       aria-label="Status page">
+                        <span class="icon-inline" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span> Status
+                    </a>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <a href="#/history"
+                       class="nav-link"
+                       hx-get="/api/pages/history"
+                       hx-target="#main-content"
+                       hx-swap="innerHTML show:top"
+                       hx-push-url="false"
+                       role="tab"
+                       aria-label="History page">
+                        <span class="icon-inline" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="m9 14 2 2 4-4"/></svg></span> History
+                    </a>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <a href="#/wifi"
+                       class="nav-link"
+                       hx-get="/api/pages/wifi"
+                       hx-target="#main-content"
+                       hx-swap="innerHTML show:top"
+                       hx-push-url="false"
+                       role="tab"
+                       aria-label="WiFi management page">
+                        <span class="icon-inline" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13a10 10 0 0 1 14 0"/><path d="M8.5 16.5a5 5 0 0 1 7 0"/><path d="M2 8.82a15 15 0 0 1 20 0"/><circle cx="12" cy="20" r="1"/></svg></span> WiFi
+                    </a>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <a href="#/gallery"
+                       class="nav-link"
+                       hx-get="/api/pages/gallery"
+                       hx-target="#main-content"
+                       hx-swap="innerHTML show:top"
+                       hx-push-url="false"
+                       role="tab"
+                       aria-label="Photo gallery page">
+                        <span class="icon-inline" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg></span> Gallery
+                    </a>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <a href="#/local-gallery"
+                       class="nav-link"
+                       hx-get="/api/pages/local-gallery"
+                       hx-target="#main-content"
+                       hx-swap="innerHTML show:top"
+                       hx-push-url="false"
+                       role="tab"
+                       aria-label="Local SD card gallery page">
+                        <span class="icon-inline" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 2v6"/><path d="M12 2v6"/><path d="M8 2v6"/><rect width="16" height="20" x="4" y="4" rx="2"/></svg></span> SD Card
+                    </a>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <a href="#/config"
+                       class="nav-link"
+                       hx-get="/api/pages/config"
+                       hx-target="#main-content"
+                       hx-swap="innerHTML show:top"
+                       hx-push-url="false"
+                       role="tab"
+                       aria-label="Configuration page">
+                        <span class="icon-inline" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></span> Configuration
+                    </a>
+                </li>
+            </ul>
+        </nav>
+
+        <!-- Main Content Area (SPA container) -->
+        <main class="main-content-card page-transition" role="main" aria-label="Main content" id="main-content">
+            <!-- Content loaded via htmx -->
+            <div class="text-center py-5">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="mt-3 text-muted">Initializing...</p>
+            </div>
+        </main>
+    </div>
+
+    <!-- Floating Action Button -->
+    <div class="fab-container" id="fab-container">
+        <button class="fab" id="fab-button" aria-label="Quick actions" title="Quick actions">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+        </button>
+        <div class="fab-actions" id="fab-actions" role="menu">
+            <button class="fab-action" data-action="refresh-status" role="menuitem" title="Refresh Status">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                </svg>
+                <span>Refresh</span>
+            </button>
+            <button class="fab-action" data-action="scan-wifi" role="menuitem" title="Scan WiFi Networks">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M5 13a10 10 0 0 1 14 0"/><path d="M8.5 16.5a5 5 0 0 1 7 0"/><path d="M2 8.82a15 15 0 0 1 20 0"/><circle cx="12" cy="20" r="1"/>
+                </svg>
+                <span>Scan WiFi</span>
+            </button>
+            <button class="fab-action" data-action="go-settings" role="menuitem" title="Settings">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>
+                </svg>
+                <span>Settings</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS Bundle -->
+    <script src="/static/bootstrap/js/bootstrap.bundle.min.js"></script>
+    <!-- htmx -->
+    <script src="/static/js/htmx.min.js"></script>
+
+    <!-- Main application script (ES6 modules) -->
+    <script type="module">
+        import { initWebSocket } from '/static/js/components.js';
+        import { router } from '/static/js/router.js';
+        import { appStore } from '/static/js/core/store.js';
+        import '/static/js/theme.js';
+        import '/static/js/keyboard.js';
+
+        // Initialize WebSocket connection (maintained across page changes)
+        let wsManager = null;
+
+        // Initialize state persistence
+        initStatePersistence();
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // Register service worker for PWA
+            if ('serviceWorker' in navigator) {
+                window.addEventListener('load', () => {
+                    navigator.serviceWorker.register('/static/sw.js')
+                        .then(reg => console.log('Service worker registered:', reg.scope))
+                        .catch(err => console.error('Service worker registration failed:', err));
+                });
+            }
+
+            // Initialize WebSocket with store integration
+            wsManager = initWebSocket(handleWebSocketMessage);
+
+            // Initialize router
+            if (router) {
+                router.init();
+            }
+
+            // Add page transition effect after htmx loads
+            document.body.addEventListener('htmx:afterSwap', (event) => {
+                if (event.detail.target.id === 'main-content') {
+                    event.detail.target.classList.remove('page-transition');
+                    // Trigger reflow
+                    void event.detail.target.offsetWidth;
+                    event.detail.target.classList.add('page-transition');
+
+                    // Execute any page-specific init scripts
+                    const scripts = event.detail.target.querySelectorAll('script');
+                    scripts.forEach(script => {
+                        if (script.textContent && script.type === 'module') {
+                            try {
+                                // For module scripts, create a new script element
+                                const newScript = document.createElement('script');
+                                newScript.type = 'module';
+                                newScript.textContent = script.textContent;
+                                script.parentNode.replaceChild(newScript, script);
+                            } catch (e) {
+                                console.error('Script execution error:', e);
+                            }
+                        }
+                    });
+                }
+            });
+
+            // Show/hide loading indicator
+            document.body.addEventListener('htmx:beforeRequest', () => {
+                document.getElementById('loading-overlay').classList.add('htmx-request');
+            });
+
+            document.body.addEventListener('htmx:afterRequest', () => {
+                document.getElementById('loading-overlay').classList.remove('htmx-request');
+            });
+
+            // Debug: expose store globally in development
+            if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+                window._appStore = appStore;
+                console.log('[Store] Exposed as window._appStore for debugging');
+            }
+
+            // Initialize FAB (Floating Action Button)
+            initFAB();
+
+            // Initialize header status updates
+            initHeaderStatus();
+        });
+
+        // FAB (Floating Action Button) functionality
+        function initFAB() {
+            const fabContainer = document.getElementById('fab-container');
+            const fabButton = document.getElementById('fab-button');
+            const fabActions = document.querySelectorAll('.fab-action');
+
+            if (!fabContainer || !fabButton) return;
+
+            // Toggle FAB menu
+            fabButton.addEventListener('click', () => {
+                fabContainer.classList.toggle('active');
+                fabButton.classList.toggle('active');
+            });
+
+            // Close FAB when clicking outside
+            document.addEventListener('click', (e) => {
+                if (!fabContainer.contains(e.target) && fabContainer.classList.contains('active')) {
+                    fabContainer.classList.remove('active');
+                    fabButton.classList.remove('active');
+                }
+            });
+
+            // Handle FAB actions
+            fabActions.forEach(action => {
+                action.addEventListener('click', (e) => {
+                    const actionType = action.dataset.action;
+
+                    switch(actionType) {
+                        case 'refresh-status':
+                            window.location.href = '#/status';
+                            setTimeout(() => window.location.reload(), 100);
+                            break;
+                        case 'scan-wifi':
+                            window.location.href = '#/wifi';
+                            // Could trigger WiFi scan via API here
+                            break;
+                        case 'go-settings':
+                            window.location.href = '#/config';
+                            break;
+                    }
+
+                    // Close FAB menu
+                    fabContainer.classList.remove('active');
+                    fabButton.classList.remove('active');
+                });
+            });
+        }
+
+        // Header status badge updates
+        function initHeaderStatus() {
+            const headerStatusBadge = document.getElementById('header-status-badge');
+            if (!headerStatusBadge) return;
+
+            // Subscribe to app store changes
+            appStore.subscribe((state) => {
+                updateHeaderStatus(state);
+            });
+
+            // Initial update
+            const initialState = {
+                status: 'idle',
+                sdcard_mounted: false,
+                current_sync: null
+            };
+            updateHeaderStatus(initialState);
+        }
+
+        function updateHeaderStatus(state) {
+            const headerStatusBadge = document.getElementById('header-status-badge');
+            if (!headerStatusBadge) return;
+
+            const statusIcon = headerStatusBadge.querySelector('.status-icon');
+            const statusLabel = headerStatusBadge.querySelector('.status-label');
+
+            // Remove all status classes
+            headerStatusBadge.classList.remove('status-idle', 'status-syncing', 'status-success', 'status-error');
+
+            // Determine status
+            let icon = '⏸️';
+            let label = 'Idle';
+            let statusClass = 'status-idle';
+
+            if (state.current_sync) {
+                icon = '🔄';
+                label = 'Syncing';
+                statusClass = 'status-syncing';
+            } else if (state.status === 'syncing') {
+                icon = '🔄';
+                label = 'Syncing';
+                statusClass = 'status-syncing';
+            } else if (state.status === 'success' || state.status === 'completed') {
+                icon = '✅';
+                label = 'Success';
+                statusClass = 'status-success';
+            } else if (state.status === 'error' || state.status === 'failed') {
+                icon = '❌';
+                label = 'Error';
+                statusClass = 'status-error';
+            } else if (state.sdcard_mounted) {
+                icon = '💾';
+                label = 'SD Card Ready';
+                statusClass = 'status-idle';
+            }
+
+            // Update UI
+            if (statusIcon) statusIcon.textContent = icon;
+            if (statusLabel) statusLabel.textContent = label;
+            headerStatusBadge.classList.add(statusClass);
+        }
+
+        /**
+         * WebSocket message handler - updates centralized store
+         * Controllers react to store changes instead of direct WebSocket messages
+         */
+        function handleWebSocketMessage(data) {
+            if (!data || !data.type) return;
+
+            try {
+                switch (data.type) {
+                    case 'state':
+                        // Batch update for state changes
+                        appStore.batch(() => {
+                            const state = data.state || {};
+                            appStore.setState({
+                                status: state.status,
+                                sdcard_mounted: state.sdcard_mounted,
+                                card_id: state.card_id,
+                                sdcard_path: state.sdcard_path,
+                                current_sync: state.current_sync,
+                                last_sync: state.last_sync
+                            });
+                        });
+                        break;
+
+                    case 'progress':
+                        // Granular update for progress - only update current_sync
+                        const progress = data.progress || {};
+                        const currentSync = appStore.get('current_sync') || {};
+                        appStore.setState({
+                            current_sync: {
+                                ...currentSync,
+                                percentage: progress.percentage || 0,
+                                files_synced: progress.transferred_files || 0,
+                                files_total: progress.total_files || currentSync.files_total || 0,
+                                bytes_synced: progress.bytes || 0,
+                                bytes_total: progress.total_bytes || currentSync.bytes_total || 0,
+                                speed: progress.speed,
+                                eta: progress.eta
+                            }
+                        });
+                        break;
+
+                    case 'wifi':
+                        // WiFi state update
+                        appStore.setState({
+                            current_network: data.network,
+                            wifi_networks: data.networks || appStore.get('wifi_networks') || []
+                        });
+                        break;
+
+                    case 'config':
+                        // Configuration update
+                        appStore.setState({
+                            config: data.config || {}
+                        });
+                        break;
+
+                    case 'history':
+                        // History update
+                        appStore.setState({
+                            sync_history: data.history || []
+                        });
+                        break;
+
+                    default:
+                        console.warn('[WebSocket] Unknown message type:', data.type);
+                }
+            } catch (error) {
+                console.error('[WebSocket] Error processing message:', error, data);
+            }
+        }
+
+        /**
+         * Initialize state persistence with localStorage
+         * Saves critical state to localStorage and restores on page load
+         */
+        function initStatePersistence() {
+            const STORAGE_KEY = 'photo-backup-state';
+            const PERSIST_KEYS = ['status', 'sdcard_mounted', 'card_id', 'last_sync', 'config'];
+
+            // Restore state from localStorage
+            try {
+                const savedState = localStorage.getItem(STORAGE_KEY);
+                if (savedState) {
+                    const parsed = JSON.parse(savedState);
+                    // Only restore if not too old (< 1 hour)
+                    if (parsed._timestamp && Date.now() - parsed._timestamp < 3600000) {
+                        const restoreState = {};
+                        PERSIST_KEYS.forEach(key => {
+                            if (parsed[key] !== undefined) {
+                                restoreState[key] = parsed[key];
+                            }
+                        });
+                        appStore.setState(restoreState);
+                        console.log('[Persistence] State restored from localStorage');
+                    }
+                }
+            } catch (error) {
+                console.error('[Persistence] Failed to restore state:', error);
+            }
+
+            // Subscribe to state changes and persist
+            appStore.subscribe((state, changedPaths) => {
+                // Only persist if critical paths changed
+                const shouldPersist = changedPaths.some(path =>
+                    PERSIST_KEYS.some(key => path === key || path.startsWith(key + '.'))
+                );
+
+                if (shouldPersist) {
+                    try {
+                        const toPersist = { _timestamp: Date.now() };
+                        PERSIST_KEYS.forEach(key => {
+                            toPersist[key] = state[key];
+                        });
+                        localStorage.setItem(STORAGE_KEY, JSON.stringify(toPersist));
+                    } catch (error) {
+                        console.error('[Persistence] Failed to save state:', error);
+                    }
+                }
+            });
+
+            // Clear persisted state on page unload if explicitly logged out
+            window.addEventListener('beforeunload', () => {
+                // Could add logout detection here if needed
+            });
+        }
+    </script>
+</body>
+</html>
