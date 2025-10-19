@@ -237,7 +237,7 @@ func getInterfaceConnection(cl *wifi.Client, intf *wifi.Interface) (*ConnectionI
 			// We're connected! Now get the SSID
 			bss, err := cl.BSS(intf)
 			if err == nil && bss != nil && bss.SSID != "" {
-				log.Printf("Currently connected to SSID: %s (signal: %d dBm)", bss.SSID, sta.Signal)
+				// Connection info is already visible in the UI, no need to log
 				return &ConnectionInfo{
 					SSID:   bss.SSID,
 					Signal: sta.Signal,

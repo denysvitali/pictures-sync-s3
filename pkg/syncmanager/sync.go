@@ -79,8 +79,9 @@ func (m *Manager) Sync(sourcePath, cardID string, totalFiles int, totalBytes int
 	ci.Transfers = m.transfers // Upload multiple files in parallel for better performance
 	ci.Checkers = m.checkers    // Use multiple checkers to compare files in parallel
 
-	// Create accounting stats
-	stats := accounting.GlobalStats()
+	// Create context-specific accounting stats (required for proper check/transfer tracking)
+	// NewStats creates a new StatsInfo and embeds it in the context
+	stats := accounting.NewStats(ctx)
 
 	// Start progress monitoring
 	done := make(chan struct{})

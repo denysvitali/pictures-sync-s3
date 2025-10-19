@@ -79,16 +79,19 @@ func (ctx *Context) HandleFiles(w http.ResponseWriter, r *http.Request) {
 
 	// Get path from query param (defaults to root)
 	path := r.URL.Query().Get("path")
+	log.Printf("[Gallery] Listing files for path: '%s'", path)
 
 	// List files on remote
 	files, err := ctx.SyncMgr.ListFiles(path)
 	if err != nil {
+		log.Printf("[Gallery] Error listing files: %v", err)
 		JSONResponse(w, map[string]interface{}{
 			"error": fmt.Sprintf("Failed to list files: %v", err),
 		})
 		return
 	}
 
+	log.Printf("[Gallery] Successfully listed %d files", len(files))
 	JSONResponse(w, map[string]interface{}{
 		"files": files,
 		"path":  path,
