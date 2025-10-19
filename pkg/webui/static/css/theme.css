@@ -917,21 +917,22 @@ body {
     color: var(--primary-dark);
 }
 
-/* Icon Styling */
-.icon-inline {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+/* Icon Styling - Font Awesome */
+.fa-solid, .fa-regular, .fa-brands {
+    display: inline-block;
     vertical-align: middle;
+}
+
+.nav-link .fa-solid {
     margin-right: 0.5rem;
 }
 
-.icon-inline svg {
-    display: block;
-    width: 1.25em;
-    height: 1.25em;
-    stroke: currentColor;
-    fill: none;
+.app-title .fa-solid {
+    margin-right: 0.5rem;
+}
+
+.fab-action .fa-solid {
+    flex-shrink: 0;
 }
 
 /* Utility Classes */
