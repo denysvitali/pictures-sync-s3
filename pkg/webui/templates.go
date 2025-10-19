@@ -12,7 +12,7 @@ import (
 //go:embed templates/*.html templates/components/*.html templates/partials/*.html
 var templatesFS embed.FS
 
-//go:embed static/css/theme.css static/bootstrap/css/*.css static/bootstrap/js/*.js static/js/*.js static/manifest.json static/sw.js
+//go:embed static/css/theme.css static/bootstrap/css/*.css static/bootstrap/js/*.js static/js/*.js static/fontawesome/*.css static/webfonts/* static/manifest.json static/sw.js
 var staticFS embed.FS
 
 var templates *template.Template
@@ -435,4 +435,55 @@ func HandleIcon(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/svg+xml")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	w.Write([]byte(svg))
+}
+// HandleFontAwesomeCSS serves Font Awesome CSS with aggressive caching
+func HandleFontAwesomeCSS(w http.ResponseWriter, r *http.Request) {
+	content, err := staticFS.ReadFile("static/fontawesome/all.min.css")
+	if err != nil {
+		http.Error(w, "Font Awesome CSS not found", http.StatusNotFound)
+		return
+	}
+
+	// Set aggressive caching headers for immutable Font Awesome assets
+	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	w.Header().Set("ETag", `"fontawesome-6.5.1-css"`)
+	w.Header().Set("Vary", "Accept-Encoding")
+
+	// Check if client has cached version
+	if r.Header.Get("If-None-Match") == `"fontawesome-6.5.1-css"` {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
+	serveWithGzip(w, r, content)
+}
+
+// HandleWebfonts serves Font Awesome webfonts with aggressive caching
+func HandleWebfonts(w http.ResponseWriter, r *http.Request) {
+	// Extract font file name from URL (/static/webfonts/fa-solid-900.woff2)
+	fontFile := r.URL.Path[len("/static/"):]
+	
+	content, err := staticFS.ReadFile(fontFile)
+	if err != nil {
+		http.Error(w, "Font not found", http.StatusNotFound)
+		return
+	}
+
+	// Determine content type based on extension
+	contentType := "application/octet-stream"
+	if strings.HasSuffix(fontFile, ".woff2") {
+		contentType = "font/woff2"
+	} else if strings.HasSuffix(fontFile, ".woff") {
+		contentType = "font/woff"
+	} else if strings.HasSuffix(fontFile, ".ttf") {
+		contentType = "font/ttf"
+	}
+
+	// Set aggressive caching headers for immutable font files
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	w.Header().Set("Access-Control-Allow-Origin", "*") // Allow fonts to be used cross-origin
+	
+	w.Write(content)
 }

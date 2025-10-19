@@ -76,6 +76,8 @@ func main() {
 	mux.HandleFunc("/static/css/theme.css", webui.HandleThemeCSS)
 	mux.HandleFunc("/static/bootstrap/css/bootstrap.min.css", webui.HandleBootstrapCSS)
 	mux.HandleFunc("/static/bootstrap/js/bootstrap.bundle.min.js", webui.HandleBootstrapJS)
+	mux.HandleFunc("/static/fontawesome/all.min.css", webui.HandleFontAwesomeCSS)
+	mux.HandleFunc("/static/webfonts/", webui.HandleWebfonts)
 	mux.HandleFunc("/static/js/htmx.min.js", webui.HandleHtmxJS)
 	mux.HandleFunc("/static/js/utils.js", webui.HandleUtilsJS)
 	mux.HandleFunc("/static/js/components.js", webui.HandleComponentsJS)

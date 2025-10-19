@@ -205,6 +205,8 @@ func main() {
 	http.HandleFunc("/static/css/theme.css", webui.HandleThemeCSS)
 	http.HandleFunc("/static/bootstrap/css/bootstrap.min.css", webui.HandleBootstrapCSS)
 	http.HandleFunc("/static/bootstrap/js/bootstrap.bundle.min.js", webui.HandleBootstrapJS)
+	http.HandleFunc("/static/fontawesome/all.min.css", webui.HandleFontAwesomeCSS)
+	http.HandleFunc("/static/webfonts/", webui.HandleWebfonts)
 	http.HandleFunc("/static/js/htmx.min.js", webui.HandleHtmxJS)
 	http.HandleFunc("/static/js/utils.js", webui.HandleUtilsJS)
 	http.HandleFunc("/static/js/components.js", webui.HandleComponentsJS)
