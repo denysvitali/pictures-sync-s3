@@ -471,3 +471,132 @@ document.addEventListener('DOMContentLoaded', () => {
         return new bootstrap.Popover(popoverTriggerEl);
     });
 });
+
+// ========================================
+// Enhanced Error Handling & Retry Logic
+// ========================================
+
+/**
+ * Retry a failed request with exponential backoff
+ * @param {Function} fn - Async function to retry
+ * @param {number} maxRetries - Maximum number of retries
+ * @param {number} baseDelay - Base delay in ms (doubles each retry)
+ * @returns {Promise} - Result of the function
+ */
+async function retryWithBackoff(fn, maxRetries = 3, baseDelay = 1000) {
+    let lastError;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+            return await fn();
+        } catch (error) {
+            lastError = error;
+
+            if (attempt < maxRetries) {
+                const delay = baseDelay * Math.pow(2, attempt);
+                console.log(`Retry attempt ${attempt + 1}/${maxRetries} after ${delay}ms`);
+                await sleep(delay);
+            }
+        }
+    }
+
+    throw lastError;
+}
+
+/**
+ * Enhanced API request with retry logic
+ * @param {string} url - API endpoint URL
+ * @param {object} options - Fetch options
+ * @param {number} maxRetries - Maximum retries (default: 3)
+ * @returns {Promise} - Fetch promise
+ */
+async function apiRequestWithRetry(url, options = {}, maxRetries = 3) {
+    return retryWithBackoff(
+        () => apiRequest(url, options),
+        maxRetries,
+        1000
+    );
+}
+
+/**
+ * Sleep/delay utility
+ * @param {number} ms - Milliseconds to sleep
+ * @returns {Promise} - Promise that resolves after delay
+ */
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Check if user is online
+ * @returns {boolean} - Online status
+ */
+function isOnline() {
+    return navigator.onLine;
+}
+
+/**
+ * Wait for online status
+ * @param {number} timeout - Maximum wait time in ms (default: 30000)
+ * @returns {Promise<boolean>} - True if online, false if timeout
+ */
+function waitForOnline(timeout = 30000) {
+    return new Promise((resolve) => {
+        if (navigator.onLine) {
+            resolve(true);
+            return;
+        }
+
+        const timeoutId = setTimeout(() => {
+            window.removeEventListener('online', onlineHandler);
+            resolve(false);
+        }, timeout);
+
+        const onlineHandler = () => {
+            clearTimeout(timeoutId);
+            window.removeEventListener('online', onlineHandler);
+            resolve(true);
+        };
+
+        window.addEventListener('online', onlineHandler);
+    });
+}
+
+// Offline/Online detection
+window.addEventListener('offline', () => {
+    showToast('You are offline. Some features may be unavailable.', 'warning', 0);
+});
+
+window.addEventListener('online', () => {
+    showToast('Back online!', 'success', 3000);
+    // Dismiss any offline warnings
+    const offlineToasts = document.querySelectorAll('.toast.bg-warning');
+    offlineToasts.forEach(toast => {
+        const bsToast = bootstrap.Toast.getInstance(toast);
+        if (bsToast) bsToast.hide();
+    });
+});
+
+// Global error handler
+window.addEventListener('error', (event) => {
+    console.error('Global error:', event.error);
+
+    // Don't show toast for script errors in development
+    if (event.filename && event.filename.includes('chrome-extension')) {
+        return;
+    }
+
+    // Show user-friendly error message
+    if (!event.defaultPrevented) {
+        showToast('An unexpected error occurred. Please refresh if issues persist.', 'error');
+    }
+});
+
+// Unhandled promise rejection handler
+window.addEventListener('unhandledrejection', (event) => {
+    console.error('Unhandled promise rejection:', event.reason);
+
+    if (!event.defaultPrevented) {
+        showToast('A background operation failed. Please try again.', 'error');
+    }
+});

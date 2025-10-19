@@ -9,13 +9,14 @@ import (
 	"strings"
 )
 
-//go:embed templates/*.html
+//go:embed templates/*.html templates/components/*.html templates/partials/*.html
 var templatesFS embed.FS
 
-//go:embed static/css/theme.css static/bootstrap/css/*.css static/bootstrap/js/*.js static/js/*.js
+//go:embed static/css/theme.css static/bootstrap/css/*.css static/bootstrap/js/*.js static/js/*.js static/manifest.json static/sw.js
 var staticFS embed.FS
 
 var templates *template.Template
+var partials map[string][]byte
 
 // PageData represents the data passed to templates
 type PageData struct {
@@ -26,9 +27,35 @@ type PageData struct {
 // init loads and parses all templates
 func init() {
 	var err error
-	templates, err = template.ParseFS(templatesFS, "templates/*.html")
+	// Parse all templates including layout and components
+	templates, err = template.ParseFS(templatesFS, "templates/*.html", "templates/components/*.html")
 	if err != nil {
 		panic("Failed to parse templates: " + err.Error())
+	}
+
+	// Load partials into memory for fast serving
+	partials = make(map[string][]byte)
+	partialFiles := []string{"status", "history", "wifi", "gallery", "config"}
+	for _, name := range partialFiles {
+		content, err := templatesFS.ReadFile("templates/partials/" + name + ".html")
+		if err != nil {
+			panic("Failed to load partial " + name + ": " + err.Error())
+		}
+		partials[name] = content
+	}
+}
+
+// renderPage is a helper to render a page with the layout
+func renderPage(w http.ResponseWriter, page string, data PageData) {
+	w.Header().Set("Content-Type", "text/html")
+
+	// Execute the page template, which includes the layout
+	// The page template (e.g., status.html) starts with {{template "layout" .}}
+	// and defines the "content" and "scripts" blocks
+	err := templates.ExecuteTemplate(w, page+".html", data)
+	if err != nil {
+		http.Error(w, "Failed to render template: "+err.Error(), http.StatusInternalServerError)
+		return
 	}
 }
 
@@ -39,79 +66,78 @@ func HandleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data := PageData{
+	renderPage(w, "status", PageData{
 		Title:      "Status",
 		ActivePage: "status",
-	}
-
-	w.Header().Set("Content-Type", "text/html")
-	err := templates.ExecuteTemplate(w, "status_standalone.html", data)
-	if err != nil {
-		http.Error(w, "Failed to render template: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
+	})
 }
 
 // HandleWiFi serves the WiFi management page
 func HandleWiFi(w http.ResponseWriter, r *http.Request) {
-	data := PageData{
+	renderPage(w, "wifi", PageData{
 		Title:      "WiFi Management",
 		ActivePage: "wifi",
-	}
-
-	w.Header().Set("Content-Type", "text/html")
-	err := templates.ExecuteTemplate(w, "wifi_page.html", data)
-	if err != nil {
-		http.Error(w, "Failed to render template: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
+	})
 }
 
 // HandleHistory serves the sync history page
 func HandleHistory(w http.ResponseWriter, r *http.Request) {
-	data := PageData{
+	renderPage(w, "history", PageData{
 		Title:      "Sync History",
 		ActivePage: "history",
-	}
-
-	w.Header().Set("Content-Type", "text/html")
-	err := templates.ExecuteTemplate(w, "history_standalone.html", data)
-	if err != nil {
-		http.Error(w, "Failed to render template: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
+	})
 }
 
 // HandleGallery serves the photo gallery page
 func HandleGallery(w http.ResponseWriter, r *http.Request) {
-	data := PageData{
+	renderPage(w, "gallery", PageData{
 		Title:      "Photo Gallery",
 		ActivePage: "gallery",
-	}
-
-	w.Header().Set("Content-Type", "text/html")
-	err := templates.ExecuteTemplate(w, "gallery_standalone.html", data)
-	if err != nil {
-		http.Error(w, "Failed to render template: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
+	})
 }
 
 // HandleConfig serves the configuration page
 func HandleConfig(w http.ResponseWriter, r *http.Request) {
-	data := PageData{
+	renderPage(w, "config", PageData{
 		Title:      "Configuration",
 		ActivePage: "config",
-	}
-
-	w.Header().Set("Content-Type", "text/html")
-	err := templates.ExecuteTemplate(w, "config_standalone.html", data)
-	if err != nil {
-		http.Error(w, "Failed to render template: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
+	})
 }
 
+// HandleSPA serves the single-page application
+func HandleSPA(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+	content, err := templatesFS.ReadFile("templates/spa.html")
+	if err != nil {
+		http.Error(w, "SPA template not found", http.StatusInternalServerError)
+		return
+	}
+	w.Write(content)
+}
+
+// HandlePagePartial serves a page partial for htmx requests
+func HandlePagePartial(w http.ResponseWriter, r *http.Request) {
+	// Extract page name from path (/api/pages/{page})
+	page := r.URL.Path[len("/api/pages/"):]
+
+	// Validate page name
+	if page == "" {
+		http.Error(w, "Page not specified", http.StatusBadRequest)
+		return
+	}
+
+	// Get partial content
+	content, ok := partials[page]
+	if !ok {
+		http.Error(w, "Page not found", http.StatusNotFound)
+		return
+	}
+
+	// Serve partial HTML
+	w.Header().Set("Content-Type", "text/html")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Write(content)
+}
 
 // HandleBootstrapCSS serves Bootstrap CSS with aggressive caching
 func HandleBootstrapCSS(w http.ResponseWriter, r *http.Request) {
@@ -231,4 +257,182 @@ func HandleUtilsJS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	serveWithGzip(w, r, content)
+}
+
+// HandleComponentsJS serves components JavaScript with moderate caching
+func HandleComponentsJS(w http.ResponseWriter, r *http.Request) {
+	content, err := staticFS.ReadFile("static/js/components.js")
+	if err != nil {
+		http.Error(w, "Components JS not found", http.StatusNotFound)
+		return
+	}
+
+	// Moderate caching for custom assets that may change
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=86400") // 24 hours
+	w.Header().Set("ETag", `"components-js-v1"`)
+	w.Header().Set("Vary", "Accept-Encoding")
+
+	// Check if client has cached version
+	if r.Header.Get("If-None-Match") == `"components-js-v1"` {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
+	serveWithGzip(w, r, content)
+}
+
+// HandleHtmxJS serves htmx library with aggressive caching
+func HandleHtmxJS(w http.ResponseWriter, r *http.Request) {
+	content, err := staticFS.ReadFile("static/js/htmx.min.js")
+	if err != nil {
+		http.Error(w, "htmx JS not found", http.StatusNotFound)
+		return
+	}
+
+	// Aggressive caching for immutable htmx library
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	w.Header().Set("ETag", `"htmx-2.0.3-js"`)
+	w.Header().Set("Vary", "Accept-Encoding")
+
+	// Check if client has cached version
+	if r.Header.Get("If-None-Match") == `"htmx-2.0.3-js"` {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
+	serveWithGzip(w, r, content)
+}
+
+// HandleRouterJS serves router JavaScript with moderate caching
+func HandleRouterJS(w http.ResponseWriter, r *http.Request) {
+	content, err := staticFS.ReadFile("static/js/router.js")
+	if err != nil {
+		http.Error(w, "Router JS not found", http.StatusNotFound)
+		return
+	}
+
+	// Moderate caching for custom assets that may change
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=86400") // 24 hours
+	w.Header().Set("ETag", `"router-js-v1"`)
+	w.Header().Set("Vary", "Accept-Encoding")
+
+	// Check if client has cached version
+	if r.Header.Get("If-None-Match") == `"router-js-v1"` {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
+	serveWithGzip(w, r, content)
+}
+
+// HandleThemeJS serves theme manager JavaScript with moderate caching
+func HandleThemeJS(w http.ResponseWriter, r *http.Request) {
+	content, err := staticFS.ReadFile("static/js/theme.js")
+	if err != nil {
+		http.Error(w, "Theme JS not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("ETag", `"theme-js-v1"`)
+	w.Header().Set("Vary", "Accept-Encoding")
+
+	if r.Header.Get("If-None-Match") == `"theme-js-v1"` {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
+	serveWithGzip(w, r, content)
+}
+
+// HandleKeyboardJS serves keyboard shortcuts JavaScript with moderate caching
+func HandleKeyboardJS(w http.ResponseWriter, r *http.Request) {
+	content, err := staticFS.ReadFile("static/js/keyboard.js")
+	if err != nil {
+		http.Error(w, "Keyboard JS not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("ETag", `"keyboard-js-v1"`)
+	w.Header().Set("Vary", "Accept-Encoding")
+
+	if r.Header.Get("If-None-Match") == `"keyboard-js-v1"` {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
+	serveWithGzip(w, r, content)
+}
+
+// HandleSearchJS serves search functionality JavaScript with moderate caching
+func HandleSearchJS(w http.ResponseWriter, r *http.Request) {
+	content, err := staticFS.ReadFile("static/js/search.js")
+	if err != nil {
+		http.Error(w, "Search JS not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("ETag", `"search-js-v1"`)
+	w.Header().Set("Vary", "Accept-Encoding")
+
+	if r.Header.Get("If-None-Match") == `"search-js-v1"` {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
+	serveWithGzip(w, r, content)
+}
+
+// HandleManifestJSON serves PWA manifest with moderate caching
+func HandleManifestJSON(w http.ResponseWriter, r *http.Request) {
+	content, err := staticFS.ReadFile("static/manifest.json")
+	if err != nil {
+		http.Error(w, "Manifest not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/manifest+json")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Write(content)
+}
+
+// HandleServiceWorkerJS serves service worker with no caching (must always be fresh)
+func HandleServiceWorkerJS(w http.ResponseWriter, r *http.Request) {
+	content, err := staticFS.ReadFile("static/sw.js")
+	if err != nil {
+		http.Error(w, "Service worker not found", http.StatusNotFound)
+		return
+	}
+
+	// Service workers must not be cached to ensure updates are applied
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Write(content)
+}
+
+// HandleIcon serves a dynamically generated SVG icon
+func HandleIcon(w http.ResponseWriter, r *http.Request) {
+	// Extract size from path (icon-192.png -> 192)
+	size := "192"
+	if strings.Contains(r.URL.Path, "512") {
+		size = "512"
+	}
+
+	// Generate a simple SVG icon with camera emoji
+	svg := `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ` + size + ` ` + size + `">
+		<rect width="` + size + `" height="` + size + `" fill="#6366f1"/>
+		<text x="50%" y="50%" text-anchor="middle" dy=".35em" font-size="` + size + `px" font-family="sans-serif">📸</text>
+	</svg>`
+
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Write([]byte(svg))
 }

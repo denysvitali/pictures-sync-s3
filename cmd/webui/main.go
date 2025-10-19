@@ -188,18 +188,34 @@ func main() {
 	http.HandleFunc("/api/network/diagnostics", ctx.HandleNetworkDiagnostics)
 	http.HandleFunc("/ws", websocket.HandleWebSocket(stateMgr, eventMgr))
 
-	// Page routes
-	http.HandleFunc("/", webui.HandleIndex)
-	http.HandleFunc("/wifi", webui.HandleWiFi)
-	http.HandleFunc("/history", webui.HandleHistory)
-	http.HandleFunc("/gallery", webui.HandleGallery)
-	http.HandleFunc("/config", webui.HandleConfig)
+	// SPA route (primary interface)
+	http.HandleFunc("/", webui.HandleSPA)
+
+	// API endpoints for page partials (htmx)
+	http.HandleFunc("/api/pages/", webui.HandlePagePartial)
+
+	// Legacy page routes (still work for direct access/bookmarks)
+	http.HandleFunc("/legacy/status", webui.HandleIndex)
+	http.HandleFunc("/legacy/wifi", webui.HandleWiFi)
+	http.HandleFunc("/legacy/history", webui.HandleHistory)
+	http.HandleFunc("/legacy/gallery", webui.HandleGallery)
+	http.HandleFunc("/legacy/config", webui.HandleConfig)
 
 	// Static assets
 	http.HandleFunc("/static/css/theme.css", webui.HandleThemeCSS)
 	http.HandleFunc("/static/bootstrap/css/bootstrap.min.css", webui.HandleBootstrapCSS)
 	http.HandleFunc("/static/bootstrap/js/bootstrap.bundle.min.js", webui.HandleBootstrapJS)
+	http.HandleFunc("/static/js/htmx.min.js", webui.HandleHtmxJS)
 	http.HandleFunc("/static/js/utils.js", webui.HandleUtilsJS)
+	http.HandleFunc("/static/js/components.js", webui.HandleComponentsJS)
+	http.HandleFunc("/static/js/router.js", webui.HandleRouterJS)
+	http.HandleFunc("/static/js/theme.js", webui.HandleThemeJS)
+	http.HandleFunc("/static/js/keyboard.js", webui.HandleKeyboardJS)
+	http.HandleFunc("/static/js/search.js", webui.HandleSearchJS)
+	http.HandleFunc("/static/manifest.json", webui.HandleManifestJSON)
+	http.HandleFunc("/static/sw.js", webui.HandleServiceWorkerJS)
+	http.HandleFunc("/static/icons/icon-192.png", webui.HandleIcon)
+	http.HandleFunc("/static/icons/icon-512.png", webui.HandleIcon)
 
 	// Wrap default mux with middleware chain: security headers -> basic auth
 	// Security headers are applied first so they're present on all responses (including auth failures)

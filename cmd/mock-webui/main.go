@@ -59,17 +59,27 @@ func main() {
 	mockBackend.RegisterHandlers(mux)
 
 	// Page routes (same as production)
-	mux.HandleFunc("/", webui.HandleIndex)
-	mux.HandleFunc("/wifi", webui.HandleWiFi)
-	mux.HandleFunc("/history", webui.HandleHistory)
-	mux.HandleFunc("/gallery", webui.HandleGallery)
-	mux.HandleFunc("/config", webui.HandleConfig)
+	// SPA route (primary interface)
+	mux.HandleFunc("/", webui.HandleSPA)
 
-	// Static assets (same as production)
+	// API endpoints for page partials (htmx)
+	mux.HandleFunc("/api/pages/", webui.HandlePagePartial)
+
+	// Legacy page routes
+	mux.HandleFunc("/legacy/status", webui.HandleIndex)
+	mux.HandleFunc("/legacy/wifi", webui.HandleWiFi)
+	mux.HandleFunc("/legacy/history", webui.HandleHistory)
+	mux.HandleFunc("/legacy/gallery", webui.HandleGallery)
+	mux.HandleFunc("/legacy/config", webui.HandleConfig)
+
+	// Static assets
 	mux.HandleFunc("/static/css/theme.css", webui.HandleThemeCSS)
 	mux.HandleFunc("/static/bootstrap/css/bootstrap.min.css", webui.HandleBootstrapCSS)
 	mux.HandleFunc("/static/bootstrap/js/bootstrap.bundle.min.js", webui.HandleBootstrapJS)
+	mux.HandleFunc("/static/js/htmx.min.js", webui.HandleHtmxJS)
 	mux.HandleFunc("/static/js/utils.js", webui.HandleUtilsJS)
+	mux.HandleFunc("/static/js/components.js", webui.HandleComponentsJS)
+	mux.HandleFunc("/static/js/router.js", webui.HandleRouterJS)
 
 	// Mock WebSocket handler that simulates real-time updates
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
