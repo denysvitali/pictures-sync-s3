@@ -96,22 +96,35 @@ func (m *Manager) ListCardIDs() ([]FileInfo, error) {
 		return nil, err
 	}
 
-	ctx := context.Background()
+	// Create context with 25 second timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
 
 	// List root photos directory
 	fullPath := m.remoteName + ":" + m.remotePath
 	fsys, err := fs.NewFs(ctx, fullPath)
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("timeout accessing remote path (check network and remote configuration)")
+		}
 		return nil, fmt.Errorf("failed to access remote path: %w", err)
 	}
 
 	entries, err := fsys.List(ctx, "")
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("timeout listing card directories (remote may be slow or unreachable)")
+		}
 		return nil, fmt.Errorf("failed to list entries: %w", err)
 	}
 
 	var cardDirs []FileInfo
 	for _, entry := range entries {
+		// Check for timeout during iteration
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("timeout while processing card directories")
+		}
+
 		if dir, ok := entry.(fs.Directory); ok {
 			name := dir.Remote()
 			// Only include card-* directories
@@ -204,7 +217,9 @@ func (m *Manager) ListFiles(path string) ([]FileInfo, error) {
 		return nil, err
 	}
 
-	ctx := context.Background()
+	// Create context with 25 second timeout (less than client's 30s timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
 
 	// Construct full remote path
 	var fullPath string
@@ -217,6 +232,9 @@ func (m *Manager) ListFiles(path string) ([]FileInfo, error) {
 	// Create remote filesystem
 	fsys, err := fs.NewFs(ctx, fullPath)
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("timeout accessing remote path (check network and remote configuration)")
+		}
 		return nil, fmt.Errorf("failed to access remote path: %w", err)
 	}
 
@@ -225,23 +243,43 @@ func (m *Manager) ListFiles(path string) ([]FileInfo, error) {
 	// Use List to get both files and directories at current level
 	entries, err := fsys.List(ctx, "")
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("timeout listing files (remote may be slow or unreachable)")
+		}
 		return nil, fmt.Errorf("failed to list entries: %w", err)
 	}
 
 	for _, entry := range entries {
+		// Check for timeout during iteration
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("timeout while processing files")
+		}
+
 		switch item := entry.(type) {
 		case fs.Directory:
+			name := item.Remote()
+			// Build full path relative to remote root
+			itemPath := name
+			if path != "" && path != "/" {
+				itemPath = filepath.Join(path, name)
+			}
 			files = append(files, FileInfo{
-				Name:    item.Remote(),
-				Path:    item.Remote(),
+				Name:    name,
+				Path:    itemPath,
 				Size:    0,
 				ModTime: item.ModTime(ctx),
 				IsDir:   true,
 			})
 		case fs.Object:
+			name := item.Remote()
+			// Build full path relative to remote root
+			itemPath := name
+			if path != "" && path != "/" {
+				itemPath = filepath.Join(path, name)
+			}
 			files = append(files, FileInfo{
-				Name:    item.Remote(),
-				Path:    item.Remote(),
+				Name:    name,
+				Path:    itemPath,
 				Size:    item.Size(),
 				ModTime: item.ModTime(ctx),
 				IsDir:   false,
@@ -271,7 +309,9 @@ func (m *Manager) GetFile(path string, w io.Writer) error {
 		return err
 	}
 
-	ctx := context.Background()
+	// Create context with 60 second timeout (larger files may take longer)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
 
 	// Split path into directory and filename
 	dir := filepath.Dir(path)
@@ -290,29 +330,52 @@ func (m *Manager) GetFile(path string, w io.Writer) error {
 	// Create filesystem for the directory containing the file
 	fsys, err := fs.NewFs(ctx, remoteDirPath)
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("timeout accessing remote directory (check network and remote configuration)")
+		}
 		return fmt.Errorf("failed to access remote directory %s: %w", remoteDirPath, err)
 	}
 
 	// Get the file object
 	obj, err := fsys.NewObject(ctx, filename)
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("timeout getting file object (remote may be slow or unreachable)")
+		}
 		return fmt.Errorf("failed to get file object %s in %s: %w", filename, remoteDirPath, err)
 	}
 
 	// Open the file for reading
 	rc, err := obj.Open(ctx)
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("timeout opening file (remote may be slow or unreachable)")
+		}
 		return fmt.Errorf("failed to open file: %w", err)
 	}
 	defer rc.Close()
 
-	// Copy the file content to the writer
-	_, err = io.Copy(w, rc)
-	if err != nil {
-		return fmt.Errorf("failed to copy file content: %w", err)
+	// Copy the file content to the writer with timeout awareness
+	type copyResult struct {
+		n   int64
+		err error
 	}
+	resultChan := make(chan copyResult, 1)
 
-	return nil
+	go func() {
+		n, err := io.Copy(w, rc)
+		resultChan <- copyResult{n, err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("timeout downloading file")
+	case result := <-resultChan:
+		if result.err != nil {
+			return fmt.Errorf("failed to copy file content: %w", result.err)
+		}
+		return nil
+	}
 }
 
 // getConfigStorage loads and returns the configuration storage

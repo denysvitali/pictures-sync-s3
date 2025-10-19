@@ -96,7 +96,7 @@ func getConnectionRateLimiter() *ConnectionRateLimiter {
 	return connRateLimiter
 }
 
-// isPrivateIP checks if an IP address is in a private RFC 1918 range
+// isPrivateIP checks if an IP address is in a private RFC 1918 range or Tailscale range
 func isPrivateIP(ip string) bool {
 	// Parse IP address
 	parsedIP := net.ParseIP(ip)
@@ -109,14 +109,16 @@ func isPrivateIP(ip string) bool {
 		return true
 	}
 
-	// Check private IP ranges (RFC 1918)
+	// Check private IP ranges (RFC 1918) and Tailscale CGNAT range
 	privateRanges := []string{
 		"10.0.0.0/8",       // 10.0.0.0 - 10.255.255.255
 		"172.16.0.0/12",    // 172.16.0.0 - 172.31.255.255 (FIXED: was accepting all 172.x)
 		"192.168.0.0/16",   // 192.168.0.0 - 192.168.255.255
 		"169.254.0.0/16",   // Link-local
+		"100.64.0.0/10",    // Tailscale/CGNAT range (100.64.0.0 - 100.127.255.255)
 		"fc00::/7",         // IPv6 Unique Local Addresses
 		"fe80::/10",        // IPv6 Link-local
+		"fd7a:115c:a1e0::/48", // Tailscale IPv6 range
 	}
 
 	for _, cidr := range privateRanges {

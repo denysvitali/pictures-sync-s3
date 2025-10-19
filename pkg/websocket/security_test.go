@@ -118,7 +118,7 @@ func TestCheckOriginStrict_Whitelist(t *testing.T) {
 	}
 }
 
-// TestIsPrivateIP verifies private IP range detection
+// TestIsPrivateIP verifies private IP range detection including Tailscale
 func TestIsPrivateIP(t *testing.T) {
 	tests := []struct {
 		ip   string
@@ -140,6 +140,14 @@ func TestIsPrivateIP(t *testing.T) {
 		// Link-local
 		{"169.254.1.1", true},
 
+		// Tailscale CGNAT range (100.64.0.0/10) - FIX FOR TLS HANDSHAKE ERRORS
+		{"100.64.0.0", true},      // lower bound
+		{"100.106.81.42", true},   // actual IP from error logs
+		{"100.100.100.100", true}, // mid-range
+		{"100.127.255.255", true}, // upper bound
+		{"100.63.255.255", false}, // just below range
+		{"100.128.0.0", false},    // just above range
+
 		// Loopback
 		{"127.0.0.1", true},
 		{"127.0.0.2", true},
@@ -150,10 +158,11 @@ func TestIsPrivateIP(t *testing.T) {
 		{"172.32.1.1", false},
 
 		// IPv6
-		{"::1", true},                           // loopback
-		{"fc00::1", true},                       // unique local
-		{"fe80::1", true},                       // link-local
-		{"2001:4860:4860::8888", false},         // public (Google DNS)
+		{"::1", true},                     // loopback
+		{"fc00::1", true},                 // unique local
+		{"fe80::1", true},                 // link-local
+		{"fd7a:115c:a1e0::1", true},       // Tailscale IPv6
+		{"2001:4860:4860::8888", false},   // public (Google DNS)
 
 		// Invalid IPs
 		{"not-an-ip", false},
