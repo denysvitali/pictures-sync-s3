@@ -18,6 +18,7 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/ssrf"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 	"github.com/denysvitali/pictures-sync-s3/pkg/syncmanager"
+	"github.com/denysvitali/pictures-sync-s3/pkg/tlsconfig"
 	"github.com/denysvitali/pictures-sync-s3/pkg/websocket"
 	"github.com/denysvitali/pictures-sync-s3/pkg/webui"
 	"github.com/denysvitali/pictures-sync-s3/pkg/wifimanager"
@@ -214,6 +215,18 @@ func main() {
 	http.HandleFunc("/static/js/theme.js", webui.HandleThemeJS)
 	http.HandleFunc("/static/js/keyboard.js", webui.HandleKeyboardJS)
 	http.HandleFunc("/static/js/search.js", webui.HandleSearchJS)
+	http.HandleFunc("/static/js/types.js", webui.HandleTypesJS)
+
+	// Page controller modules
+	http.HandleFunc("/static/js/pages/status-controller.js", webui.HandleStatusControllerJS)
+	http.HandleFunc("/static/js/pages/wifi-controller.js", webui.HandleWiFiControllerJS)
+	http.HandleFunc("/static/js/pages/config-controller.js", webui.HandleConfigControllerJS)
+	http.HandleFunc("/static/js/pages/history-controller.js", webui.HandleHistoryControllerJS)
+	http.HandleFunc("/static/js/pages/gallery-controller.js", webui.HandleGalleryControllerJS)
+
+	// Core store module
+	http.HandleFunc("/static/js/core/store.js", webui.HandleStoreJS)
+
 	http.HandleFunc("/static/manifest.json", webui.HandleManifestJSON)
 	http.HandleFunc("/static/sw.js", webui.HandleServiceWorkerJS)
 	http.HandleFunc("/static/icons/icon-192.png", webui.HandleIcon)
@@ -227,24 +240,55 @@ func main() {
 
 	// Start server (HTTPS if certificates are available, HTTP for development)
 	addr := ":" + port
-	certFile := "/etc/ssl/gokrazy-web.pem"
-	keyFile := "/etc/ssl/gokrazy-web.key.pem"
 
-	// Check if SSL certificates exist
-	if _, err := os.Stat(certFile); err == nil {
-		if _, err := os.Stat(keyFile); err == nil {
-			log.Printf("WebUI HTTPS server listening on %s", addr)
-			if err := http.ListenAndServeTLS(addr, certFile, keyFile, handler); err != nil {
-				log.Fatalf("Failed to start HTTPS server: %v", err)
-			}
-			return
+	// Try to load TLS configuration
+	tlsConfig, useTLS, err := tlsconfig.LoadOrDefault()
+	if err != nil {
+		log.Printf("Warning: TLS configuration error: %v", err)
+		log.Println("Falling back to HTTP mode")
+		useTLS = false
+	}
+
+	if useTLS && tlsConfig != nil {
+		// Create server with custom TLS configuration
+		// This properly handles self-signed certificates for internal/development use
+		server := &http.Server{
+			Addr:      addr,
+			Handler:   handler,
+			TLSConfig: tlsConfig,
+			// Timeouts for production readiness
+			ReadTimeout:       30 * time.Second,
+			WriteTimeout:      30 * time.Second,
+			IdleTimeout:       120 * time.Second,
+			ReadHeaderTimeout: 10 * time.Second,
 		}
+
+		log.Printf("WebUI HTTPS server listening on %s", addr)
+		log.Println("TLS configuration: Self-signed certificates accepted for internal use")
+		log.Println("Note: This configuration is secure for internal networks (Tailscale, local LAN)")
+
+		// Get cert and key paths from default config
+		cfg := tlsconfig.DefaultConfig()
+		if err := server.ListenAndServeTLS(cfg.CertFile, cfg.KeyFile); err != nil {
+			log.Fatalf("Failed to start HTTPS server: %v", err)
+		}
+		return
 	}
 
 	// Fallback to HTTP for development
 	log.Printf("SSL certificates not found, starting HTTP server on %s", addr)
 	log.Println("Note: Using HTTP for development. Production should use HTTPS.")
-	if err := http.ListenAndServe(addr, handler); err != nil {
+
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	if err := server.ListenAndServe(); err != nil {
 		log.Fatalf("Failed to start HTTP server: %v", err)
 	}
 }

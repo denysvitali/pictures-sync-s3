@@ -472,6 +472,50 @@ func TestWebSocketOriginValidation(t *testing.T) {
 			conn.Close()
 		}
 	})
+
+	t.Run("accept Tailscale origin", func(t *testing.T) {
+		dialer := websocket.DefaultDialer
+		headers := http.Header{}
+		// Test Tailscale CGNAT IP range (100.64.0.0/10)
+		headers.Add("Origin", "https://100.106.81.42:8080")
+
+		conn, _, err := dialer.Dial(wsURL, headers)
+		if err != nil {
+			t.Errorf("Tailscale IP origin should be accepted: %v", err)
+		}
+		if conn != nil {
+			conn.Close()
+		}
+	})
+
+	t.Run("accept private IP ranges", func(t *testing.T) {
+		testCases := []struct {
+			name   string
+			origin string
+		}{
+			{"10.x network", "http://10.0.0.1:8080"},
+			{"172.16.x network", "http://172.16.0.1:8080"},
+			{"192.168.x network", "http://192.168.1.1:8080"},
+			{"Tailscale lower range", "http://100.64.0.1:8080"},
+			{"Tailscale upper range", "http://100.127.255.254:8080"},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				dialer := websocket.DefaultDialer
+				headers := http.Header{}
+				headers.Add("Origin", tc.origin)
+
+				conn, _, err := dialer.Dial(wsURL, headers)
+				if err != nil {
+					t.Errorf("Private IP origin %s should be accepted: %v", tc.origin, err)
+				}
+				if conn != nil {
+					conn.Close()
+				}
+			})
+		}
+	})
 }
 
 // TestWebSocketCleanup tests proper resource cleanup
