@@ -11,7 +11,7 @@ require (
 	github.com/prometheus-community/pro-bing v0.7.0
 	github.com/rclone/rclone v1.71.1
 	golang.org/x/sys v0.37.0
-	golang.org/x/time v0.12.0
+	golang.org/x/time v0.14.0
 )
 
 require (
