@@ -9,7 +9,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/mdlayher/wifi v0.6.0
 	github.com/prometheus-community/pro-bing v0.7.0
-	github.com/rclone/rclone v1.71.1
+	github.com/rclone/rclone v1.71.2
 	golang.org/x/sys v0.37.0
 	golang.org/x/time v0.12.0
 )
@@ -55,6 +55,7 @@ require (
 	github.com/dsoprea/go-utility/v2 v2.0.0-20221003172846-a3e1774ef349 // indirect
 	github.com/ebitengine/purego v0.8.4 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
+	github.com/fsnotify/fsnotify v1.7.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.9 // indirect
 	github.com/go-chi/chi/v5 v5.2.2 // indirect
 	github.com/go-darwin/apfs v0.0.0-20211011131704-f84b94dbf348 // indirect
