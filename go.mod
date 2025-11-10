@@ -7,11 +7,11 @@ require (
 	github.com/disintegration/imaging v1.6.2
 	github.com/dsoprea/go-exif/v3 v3.0.1
 	github.com/gorilla/websocket v1.5.3
-	github.com/mdlayher/wifi v0.6.0
+	github.com/mdlayher/wifi v0.7.0
 	github.com/prometheus-community/pro-bing v0.7.0
 	github.com/rclone/rclone v1.71.1
-	golang.org/x/sys v0.37.0
-	golang.org/x/time v0.12.0
+	golang.org/x/sys v0.38.0
+	golang.org/x/time v0.14.0
 )
 
 require (
