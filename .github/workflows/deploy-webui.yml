@@ -8,7 +8,9 @@ on:
   push:
     branches: [main, master]
     paths:
+      - 'pkg/webui/templates/**'
       - 'pkg/webui/dist/**'
+      - 'webui-react/**'
       - '.github/workflows/deploy-webui.yml'
   workflow_dispatch:
 
@@ -28,14 +30,35 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - name: Build UI assets
+        run: |
+          cd webui-react
+          corepack enable
+          pnpm install --frozen-lockfile || pnpm install
+          pnpm build
+          cd ..
+          rm -rf pkg/webui/dist/*
+          mkdir -p pkg/webui/dist/static
+          cp -r webui-react/dist/. pkg/webui/dist/ || true
+
       - name: Configure GitHub Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
 
       - name: Upload pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: pkg/webui/dist
 
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

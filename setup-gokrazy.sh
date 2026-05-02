@@ -78,7 +78,6 @@ echo "Creating configuration at: $CONFIG_FILE"
 cat > "$CONFIG_FILE" <<EOF
 {
   "Hostname": "$INSTANCE_NAME",
-  "DeviceType": "rpi4b",
   "Update": {
     "HTTPPort": "80",
     "HTTPSPort": "443",

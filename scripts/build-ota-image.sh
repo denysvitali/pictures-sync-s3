@@ -28,7 +28,6 @@ gok -i "$GOKRAZY_INSTANCE" add ./cmd/webui
 cat > "$GOKRAZY_PARENT_DIR/$GOKRAZY_INSTANCE/config.json" <<EOF
 {
   "Hostname": "$GOKRAZY_INSTANCE",
-  "DeviceType": "rpi4b",
   "Update": {
     "HTTPPort": "80",
     "HTTPSPort": "443",
