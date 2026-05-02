@@ -26,6 +26,7 @@ function isHostedPagesUrl(raw) {
     return false
   }
 }
+
 function useDeviceUrl() {
   const [deviceUrl, setDeviceUrlState] = useState(defaultDeviceUrl)
 
@@ -35,7 +36,12 @@ function useDeviceUrl() {
     setDeviceUrlState(next)
   }
 
-  return [deviceUrl, setDeviceUrl]
+  const clearDeviceUrl = () => {
+    localStorage.removeItem(STORAGE_KEY)
+    setDeviceUrlState('')
+  }
+
+  return [deviceUrl, setDeviceUrl, clearDeviceUrl]
 }
 
 function toApiUrl(base, path) {
@@ -44,42 +50,12 @@ function toApiUrl(base, path) {
   return `${trimmed}${path}`
 }
 
-function JsonBlock({ value }) {
-  return <pre>{JSON.stringify(value, null, 2)}</pre>
-}
-
-function PlaceholderPanel({ title }) {
-  return (
-    <section className="card">
-      <h2>{title}</h2>
-      <p>This section is reachable through the on-device API and will be filled as the backend adds data.</p>
-    </section>
-  )
-}
-
-function DeviceSwitcher({ value, onChange }) {
-  const [raw, setRaw] = useState(value)
-
-  const save = (event) => {
-    event.preventDefault()
-    onChange(raw)
+function toJson(value) {
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
   }
-
-  return (
-    <form className="control-card" onSubmit={save}>
-      <label htmlFor="device-input">Device base URL</label>
-      <div className="row">
-        <input
-          id="device-input"
-          value={raw}
-          onChange={(event) => setRaw(event.target.value)}
-          placeholder="http://192.168.1.10:8080"
-          spellCheck="false"
-        />
-        <button type="submit">Use device</button>
-      </div>
-    </form>
-  )
 }
 
 async function jsonOrText(response) {
@@ -87,10 +63,93 @@ async function jsonOrText(response) {
   if (!response.ok) {
     throw new Error(text || `Request failed (${response.status})`)
   }
-  if (response.headers.get('content-type')?.includes('application/json')) {
+  const contentType = response.headers.get('content-type') || ''
+  if (contentType.includes('application/json')) {
     return JSON.parse(text)
   }
   return text
+}
+
+function StatusAlert({ deviceUrl }) {
+  if (deviceUrl) {
+    return null
+  }
+
+  return (
+    <div className="alert alert-warning d-flex gap-2 align-items-start" role="alert">
+      <i className="fa-solid fa-circle-info mt-1"></i>
+      <div>
+        <strong>Set the device URL first.</strong>
+        <p className="mb-0">
+          You are likely viewing this on GitHub Pages.
+          Enter your device address (for example http://192.168.1.10:8080) to load live data.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+function DeviceSwitcher({ value, onChange, onClear }) {
+  const [raw, setRaw] = useState(value)
+
+  useEffect(() => {
+    setRaw(value)
+  }, [value])
+
+  const save = (event) => {
+    event.preventDefault()
+    onChange(raw)
+  }
+
+  const useCurrentOrigin = () => {
+    onChange(window.location.origin)
+  }
+
+  const quickExamples = ['http://192.168.1.10:8080', 'http://localhost:8080']
+
+  return (
+    <section className="card shadow-sm border-0">
+      <div className="card-header bg-transparent border-0">
+        <h2 className="h5 mb-0">Device endpoint</h2>
+      </div>
+      <div className="card-body pt-0">
+        <form onSubmit={save} className="row g-2 align-items-end">
+          <div className="col-md-8">
+            <label htmlFor="device-input" className="form-label">Base URL</label>
+            <input
+              id="device-input"
+              className="form-control"
+              value={raw}
+              onChange={(event) => setRaw(event.target.value)}
+              placeholder="http://192.168.1.10:8080"
+              spellCheck="false"
+            />
+          </div>
+          <div className="col-md-4 d-flex gap-2">
+            <button type="submit" className="btn btn-primary">Save</button>
+            <button type="button" className="btn btn-outline-secondary" onClick={onClear}>Clear</button>
+            <button type="button" className="btn btn-outline-primary" onClick={useCurrentOrigin}>Use this host</button>
+          </div>
+        </form>
+        <p className="text-muted small mt-3 mb-0">
+          Active target:
+          <code className="ms-2 user-select-all">{value || '(not set)'}</code>
+        </p>
+        <div className="d-flex flex-wrap gap-2 mt-3">
+          {quickExamples.map((item) => (
+            <button
+              key={item}
+              type="button"
+              className="btn btn-sm btn-outline-light"
+              onClick={() => onChange(item)}
+            >
+              {item}
+            </button>
+          ))}
+        </div>
+      </div>
+    </section>
+  )
 }
 
 function ApiStatusPanel({ deviceUrl }) {
@@ -121,27 +180,38 @@ function ApiStatusPanel({ deviceUrl }) {
     load()
   }, [deviceUrl])
 
+  const syncedCount = Array.isArray(history) ? history.length : 0
+
   return (
-    <section className="card">
-      <h2>Status</h2>
-      {loading ? <p className="muted">Loading status...</p> : null}
-      {error ? <p className="error">{error}</p> : null}
-      {!deviceUrl ? (
-        <p className="error">Set your device base URL (for example <code>http://192.168.1.10:8080</code>) to load live status.</p>
-      ) : null}
-      <div className="row two-cols">
-        <div className="stat">
-          <h3>Current status</h3>
-          <JsonBlock value={state || {}} />
+    <section className="panel-section">
+      <StatusAlert deviceUrl={deviceUrl} />
+      <div className="card shadow-sm border-0">
+        <div className="card-header bg-transparent border-0 d-flex justify-content-between align-items-center">
+          <h2 className="h5 mb-0">Status</h2>
+          <button className="btn btn-sm btn-outline-light" onClick={load} disabled={loading || !deviceUrl}>
+            {loading ? <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span> : null}
+            Refresh
+          </button>
         </div>
-        <div className="stat">
-          <h3>Recent history</h3>
-          <p>Items: {Array.isArray(history) ? history.length : 0}</p>
-          <JsonBlock value={history} />
+        <div className="card-body pt-0">
+          {error ? <div className="alert alert-danger">{error}</div> : null}
+          {!deviceUrl ? <p className="text-muted">No device configured.</p> : null}
+          <div className="row g-3">
+            <div className="col-md-6">
+              <div className="border rounded p-3 h-100">
+                <h3 className="h6 text-uppercase text-primary">Current status</h3>
+                <pre className="api-json">{toJson(state || {})}</pre>
+              </div>
+            </div>
+            <div className="col-md-6">
+              <div className="border rounded p-3 h-100">
+                <h3 className="h6 text-uppercase text-primary">Recent history</h3>
+                <p className="mb-2 small text-muted">Items: <strong>{syncedCount}</strong></p>
+                <pre className="api-json">{toJson(history)}</pre>
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
-      <div className="actions">
-        <button onClick={load}>Refresh</button>
       </div>
     </section>
   )
@@ -176,30 +246,64 @@ function ApiWifiPanel({ deviceUrl }) {
   }, [deviceUrl])
 
   return (
-    <section className="card">
-      <h2>Wi-Fi</h2>
-      {loading ? <p className="muted">Loading Wi-Fi info...</p> : null}
-      {!deviceUrl ? <p className="error">Set your device base URL to load Wi-Fi data.</p> : null}
-      {error ? <p className="error">{error}</p> : null}
-      <div className="row two-cols">
-        <div className="stat">
-          <h3>Status</h3>
-          <JsonBlock value={status || {}} />
+    <section className="panel-section">
+      <StatusAlert deviceUrl={deviceUrl} />
+      <div className="card shadow-sm border-0">
+        <div className="card-header bg-transparent border-0 d-flex justify-content-between align-items-center">
+          <h2 className="h5 mb-0">Wi-Fi</h2>
+          <button className="btn btn-sm btn-outline-light" onClick={load} disabled={loading || !deviceUrl}>
+            {loading ? <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span> : null}
+            Refresh
+          </button>
         </div>
-        <div className="stat">
-          <h3>Saved networks</h3>
-          <JsonBlock value={networks} />
+        <div className="card-body pt-0">
+          {error ? <div className="alert alert-danger">{error}</div> : null}
+          <div className="row g-3">
+            <div className="col-md-6">
+              <div className="border rounded p-3 h-100">
+                <h3 className="h6 text-uppercase text-primary">Wi-Fi status</h3>
+                <pre className="api-json">{toJson(status || {})}</pre>
+              </div>
+            </div>
+            <div className="col-md-6">
+              <div className="border rounded p-3 h-100">
+                <h3 className="h6 text-uppercase text-primary">Saved networks</h3>
+                {networks.length === 0 ? (
+                  <p className="text-muted small">No networks available.</p>
+                ) : null}
+                <ul className="list-group list-group-flush api-list">
+                  {networks.map((item, index) => (
+                    <li className="list-group-item bg-transparent" key={item.ssid || item.SSID || item.id || item.networkId || index}>
+                      {item.ssid || item.SSID || JSON.stringify(item)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
-      <div className="actions">
-        <button onClick={load}>Refresh</button>
+    </section>
+  )
+}
+
+function PlaceholderPanel({ title }) {
+  return (
+    <section className="panel-section">
+      <div className="card shadow-sm border-0">
+        <div className="card-header bg-transparent border-0">
+          <h2 className="h5 mb-0">{title}</h2>
+        </div>
+        <div className="card-body pt-0">
+          <p className="text-muted">This screen will be available when backend handlers are added.</p>
+        </div>
       </div>
     </section>
   )
 }
 
 function App() {
-  const [deviceUrl, setDeviceUrl] = useDeviceUrl()
+  const [deviceUrl, setDeviceUrl, clearDeviceUrl] = useDeviceUrl()
   const [tab, setTab] = useState('status')
 
   useEffect(() => {
@@ -223,30 +327,26 @@ function App() {
 
   return (
     <div className="app-shell">
-      <header className="app-header">
-        <div>
-          <h1>Photo Backup Station</h1>
-          <p className="muted">React frontend built from source in webui/</p>
-        </div>
+      <header className="hero-card">
+        <h1>Photo Backup Station</h1>
+        <p className="mb-0 text-muted">Management panel for your on-device sync service.</p>
       </header>
 
-      <section className="control-card">
-        <p className="muted">If you are opening this page from GitHub Pages, the Device base URL must point to your device.</p>
-        <DeviceSwitcher value={deviceUrl} onChange={setDeviceUrl} />
-      </section>
+      <DeviceSwitcher value={deviceUrl} onChange={setDeviceUrl} onClear={clearDeviceUrl} />
 
-      <nav className="tabs" aria-label="Main navigation">
+      <ul className="nav nav-pills mb-3" role="tablist">
         {TABS.map((item) => (
-          <button
-            key={item}
-            type="button"
-            className={item === activeTab ? 'active' : ''}
-            onClick={() => navigate(item)}
-          >
-            {item.toUpperCase()}
-          </button>
+          <li className="nav-item" key={item}>
+            <button
+              type="button"
+              className={`nav-link ${item === activeTab ? 'active' : ''}`}
+              onClick={() => navigate(item)}
+            >
+              {item}
+            </button>
+          </li>
         ))}
-      </nav>
+      </ul>
 
       {activeTab === 'status' && <ApiStatusPanel deviceUrl={deviceUrl} />}
       {activeTab === 'wifi' && <ApiWifiPanel deviceUrl={deviceUrl} />}
