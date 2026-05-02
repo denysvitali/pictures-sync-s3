@@ -23,7 +23,7 @@ jobs:
       GOKRAZY_INSTANCE: photo-backup
       GOKRAZY_PARENT_DIR: ${{ github.workspace }}/gokrazy
       IMAGE_NAME: photo-backup-rpi4b.img
-      TARGET_STORAGE_BYTES: 8589934592
+      TARGET_STORAGE_BYTES: 2147483648
     steps:
       - name: Checkout
         uses: actions/checkout@v6
