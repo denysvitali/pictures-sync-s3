@@ -14,8 +14,8 @@ import (
 
 // Settings represents persistent application settings
 type Settings struct {
-	RemoteName string  `json:"remote_name"`
-	RemotePath string  `json:"remote_path"`
+	RemoteName string `json:"remote_name"`
+	RemotePath string `json:"remote_path"`
 
 	// Card reformat detection threshold (percentage)
 	ReformatThreshold float64 `json:"reformat_threshold"`
@@ -33,14 +33,15 @@ type Settings struct {
 
 // Validation constants
 const (
-	MinTransfers         = 1
-	MaxTransfers         = 128
-	MinCheckers          = 1
-	MaxCheckers          = 256
-	MinReformatThreshold = 0.0
-	MaxReformatThreshold = 1.0
-	MaxRemoteNameLength  = 255
-	MaxRemotePathLength  = 4096
+	MinTransfers              = 1
+	MaxTransfers              = 128
+	MinCheckers               = 1
+	MaxCheckers               = 256
+	MinReformatThreshold      = 0.0
+	MaxReformatThreshold      = 1.0
+	MaxRemoteNameLength       = 255
+	MaxRemotePathLength       = 4096
+	MaxTailscaleAuthKeyLength = 512
 )
 
 // DefaultSettings returns default settings
@@ -142,6 +143,26 @@ func ValidateGooglePhotos(enabled bool, remoteName string) error {
 	}
 	if enabled {
 		return ValidateRemoteName(remoteName)
+	}
+	return nil
+}
+
+// ValidateTailscaleAuthKey validates a Tailscale auth key before it is passed to tailscale.
+func ValidateTailscaleAuthKey(authKey string) error {
+	if authKey == "" {
+		return errors.New("tailscale auth key cannot be empty")
+	}
+	if strings.TrimSpace(authKey) != authKey {
+		return errors.New("tailscale auth key cannot have leading or trailing whitespace")
+	}
+	if len(authKey) > MaxTailscaleAuthKeyLength {
+		return fmt.Errorf("tailscale auth key exceeds maximum length of %d characters", MaxTailscaleAuthKeyLength)
+	}
+	if strings.ContainsAny(authKey, "\x00\r\n\t ") {
+		return errors.New("tailscale auth key contains invalid whitespace or control characters")
+	}
+	if !strings.HasPrefix(authKey, "tskey-auth-") {
+		return errors.New("tailscale auth key must start with tskey-auth-")
 	}
 	return nil
 }

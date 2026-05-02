@@ -18,10 +18,15 @@ const (
 	defaultTimeout   = 15 * time.Second
 )
 
-var moduleOrder = []string{
-	"brcmutil",
-	"brcmfmac-wcc",
-	"brcmfmac",
+type kernelModule struct {
+	name     string
+	optional bool
+}
+
+var moduleOrder = []kernelModule{
+	{name: "brcmutil"},
+	{name: "brcmfmac"},
+	{name: "brcmfmac-wcc", optional: true},
 }
 
 func main() {
@@ -31,8 +36,12 @@ func main() {
 	timeout := getenvDuration("WIFI_INIT_TIMEOUT", defaultTimeout)
 
 	for _, module := range moduleOrder {
-		if err := loadModule(module); err != nil {
-			log.Fatalf("load %s: %v", module, err)
+		if err := loadModule(module.name); err != nil {
+			if module.optional {
+				log.Printf("wifi-init: skipping optional module %s: %v", module.name, err)
+				continue
+			}
+			log.Fatalf("load %s: %v", module.name, err)
 		}
 	}
 

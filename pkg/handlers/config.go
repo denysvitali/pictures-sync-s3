@@ -1,16 +1,23 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
+	"strings"
+	"time"
 
+	"github.com/denysvitali/pictures-sync-s3/pkg/settings"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 	"github.com/denysvitali/pictures-sync-s3/pkg/validation"
 )
+
+var tailscaleCommandContext = exec.CommandContext
 
 // HandleConfig handles rclone configuration
 func (ctx *Context) HandleConfig(w http.ResponseWriter, r *http.Request) {
@@ -158,11 +165,19 @@ func (ctx *Context) HandleSettings(w http.ResponseWriter, r *http.Request) {
 			Checkers               int     `json:"checkers"`
 			GooglePhotosEnabled    bool    `json:"google_photos_enabled"`
 			GooglePhotosRemoteName string  `json:"google_photos_remote_name"`
+			TailscaleAuthKey       string  `json:"tailscale_auth_key"`
 		}
 
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "Invalid JSON", http.StatusBadRequest)
 			return
+		}
+
+		if req.TailscaleAuthKey != "" {
+			if err := settings.ValidateTailscaleAuthKey(req.TailscaleAuthKey); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 		}
 
 		// Update settings
@@ -204,10 +219,47 @@ func (ctx *Context) HandleSettings(w http.ResponseWriter, r *http.Request) {
 		// Update sync manager with Google Photos settings
 		ctx.SyncMgr.SetGooglePhotos(req.GooglePhotosEnabled, req.GooglePhotosRemoteName)
 
+		if req.TailscaleAuthKey != "" {
+			if err := configureTailscale(req.TailscaleAuthKey); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			log.Println("Tailscale configured")
+		}
+
 		log.Println("Settings updated")
 		JSONResponse(w, map[string]any{"status": "ok"})
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+func configureTailscale(authKey string) error {
+	if err := settings.ValidateTailscaleAuthKey(authKey); err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	args := []string{
+		"up",
+		"--auth-key=" + authKey,
+		"--ssh",
+	}
+	if hostname, err := os.Hostname(); err == nil && strings.TrimSpace(hostname) != "" {
+		args = append(args, "--hostname="+strings.TrimSpace(hostname))
+	}
+
+	output, err := tailscaleCommandContext(ctx, "tailscale", args...).CombinedOutput()
+	if err != nil {
+		details := strings.ReplaceAll(strings.TrimSpace(string(output)), authKey, "[redacted]")
+		if details == "" {
+			details = err.Error()
+		}
+		return fmt.Errorf("failed to configure tailscale: %s", details)
+	}
+
+	return nil
 }

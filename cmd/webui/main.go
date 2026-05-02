@@ -27,6 +27,8 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/wifimanager"
 )
 
+const defaultAllowedOrigins = "*"
+
 // logConfiguredWiFiNetworks logs WiFi networks from both gokrazy and app config files
 func logConfiguredWiFiNetworks(wifiMgr *wifimanager.Manager) {
 	// Log networks from our app's config (/perm/extra-wifi.json)
@@ -99,6 +101,10 @@ func logAllowedOrigins(origins []string) {
 		return
 	}
 	log.Printf("Allowing browser UI origins: %v", strings.Join(origins, ", "))
+}
+
+func configuredAllowedOrigins() []string {
+	return parseAllowedOrigins(defaultAllowedOrigins + "," + os.Getenv("WEBUI_ALLOWED_ORIGINS"))
 }
 
 func main() {
@@ -203,7 +209,7 @@ func main() {
 		OTAMgr:        otaMgr,
 	}
 
-	allowedOrigins := parseAllowedOrigins(os.Getenv("WEBUI_ALLOWED_ORIGINS"))
+	allowedOrigins := configuredAllowedOrigins()
 	if len(allowedOrigins) > 0 {
 		logAllowedOrigins(allowedOrigins)
 		websocket.SetAllowedOrigins(allowedOrigins)

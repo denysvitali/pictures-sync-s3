@@ -111,13 +111,13 @@ func isPrivateIP(ip string) bool {
 
 	// Check private IP ranges (RFC 1918) and Tailscale CGNAT range
 	privateRanges := []string{
-		"10.0.0.0/8",       // 10.0.0.0 - 10.255.255.255
-		"172.16.0.0/12",    // 172.16.0.0 - 172.31.255.255 (FIXED: was accepting all 172.x)
-		"192.168.0.0/16",   // 192.168.0.0 - 192.168.255.255
-		"169.254.0.0/16",   // Link-local
-		"100.64.0.0/10",    // Tailscale/CGNAT range (100.64.0.0 - 100.127.255.255)
-		"fc00::/7",         // IPv6 Unique Local Addresses
-		"fe80::/10",        // IPv6 Link-local
+		"10.0.0.0/8",          // 10.0.0.0 - 10.255.255.255
+		"172.16.0.0/12",       // 172.16.0.0 - 172.31.255.255 (FIXED: was accepting all 172.x)
+		"192.168.0.0/16",      // 192.168.0.0 - 192.168.255.255
+		"169.254.0.0/16",      // Link-local
+		"100.64.0.0/10",       // Tailscale/CGNAT range (100.64.0.0 - 100.127.255.255)
+		"fc00::/7",            // IPv6 Unique Local Addresses
+		"fe80::/10",           // IPv6 Link-local
 		"fd7a:115c:a1e0::/48", // Tailscale IPv6 range
 	}
 
@@ -154,7 +154,7 @@ func checkOriginStrict(r *http.Request) bool {
 	if len(allowedOrigins) > 0 {
 		allowed := false
 		for _, allowedOrigin := range allowedOrigins {
-			if strings.EqualFold(u.Host, allowedOrigin) {
+			if allowedOrigin == "*" || strings.EqualFold(u.Host, allowedOrigin) {
 				allowed = true
 				break
 			}

@@ -301,6 +301,29 @@ func TestExpensiveOperationMiddleware(t *testing.T) {
 	}
 }
 
+func TestCORSMiddlewareAllowAll(t *testing.T) {
+	handler := CORSMiddleware([]string{"*"}, true)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodOptions, "https://192.168.10.124:8080/api/settings", nil)
+	req.Header.Set("Origin", "https://example.com")
+	req.Header.Set("Access-Control-Request-Method", "GET")
+
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("Expected preflight status 204, got %d", rr.Code)
+	}
+	if got := rr.Header().Get("Access-Control-Allow-Origin"); got != "https://example.com" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want %q", got, "https://example.com")
+	}
+	if got := rr.Header().Get("Access-Control-Allow-Credentials"); got != "true" {
+		t.Fatalf("Access-Control-Allow-Credentials = %q, want true", got)
+	}
+}
+
 // TestExtractIPFromHeaders tests IP extraction from various headers
 func TestExtractIPFromHeaders(t *testing.T) {
 	tests := []struct {

@@ -133,6 +133,34 @@ func TestValidateCheckers(t *testing.T) {
 	}
 }
 
+func TestValidateTailscaleAuthKey(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantError bool
+	}{
+		{"valid auth key", "tskey-auth-abc123", false},
+		{"empty auth key", "", true},
+		{"wrong prefix", "abc123", true},
+		{"leading whitespace", " tskey-auth-abc123", true},
+		{"trailing whitespace", "tskey-auth-abc123 ", true},
+		{"embedded space", "tskey-auth-abc 123", true},
+		{"newline", "tskey-auth-abc123\n", true},
+		{"tab", "tskey-auth-abc123\t", true},
+		{"null byte", "tskey-auth-abc123\x00", true},
+		{"too long", "tskey-auth-" + string(make([]byte, MaxTailscaleAuthKeyLength)), true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateTailscaleAuthKey(tt.input)
+			if (err != nil) != tt.wantError {
+				t.Errorf("ValidateTailscaleAuthKey(%q) error = %v, wantError %v", tt.input, err, tt.wantError)
+			}
+		})
+	}
+}
+
 func TestValidateGooglePhotos(t *testing.T) {
 	tests := []struct {
 		name       string
