@@ -1,9 +1,10 @@
 {
   "name": "photo-backup-station-react-ui",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "React frontend for photo-backup-station",
+  "description": "React frontend for Photo Backup Station",
   "scripts": {
-    "build": "echo 'No build step in repo; commit compiled bundle in webui-react/dist.'"
+    "build": "node -e \"console.log('ui source commit updates dist output manually or via external tooling')\"",
+    "sync:embedded": "node -e \"console.log('sync from webui-react/dist to pkg/webui/dist manually until build tooling is wired')\""
   }
 }

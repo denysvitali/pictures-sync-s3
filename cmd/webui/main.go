@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"net/url"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -58,6 +60,44 @@ func logConfiguredWiFiNetworks(wifiMgr *wifimanager.Manager) {
 	} else {
 		log.Printf("WiFi networks in %s: 0 (file does not exist)", gokrazyConfigPath)
 	}
+}
+
+func parseAllowedOrigins(raw string) []string {
+	origins := make(map[string]struct{})
+	for _, part := range strings.Split(raw, ",") {
+		normalized := strings.ToLower(strings.TrimSpace(part))
+		if normalized == "" {
+			continue
+		}
+
+		if strings.HasPrefix(normalized, "http://") || strings.HasPrefix(normalized, "https://") {
+			u, err := url.Parse(normalized)
+			if err != nil {
+				continue
+			}
+			normalized = u.Host
+		}
+
+		normalized = strings.TrimSuffix(normalized, "/")
+		if normalized != "" {
+			origins[normalized] = struct{}{}
+		}
+	}
+
+	items := make([]string, 0, len(origins))
+	for origin := range origins {
+		items = append(items, origin)
+	}
+	sort.Strings(items)
+	return items
+}
+
+func logAllowedOrigins(origins []string) {
+	if len(origins) == 0 {
+		log.Println("No web UI CORS/WS override origins configured")
+		return
+	}
+	log.Printf("Allowing browser UI origins: %v", strings.Join(origins, ", "))
 }
 
 func main() {
@@ -158,6 +198,12 @@ func main() {
 		SSRFValidator: ssrfValidator,
 	}
 
+	allowedOrigins := parseAllowedOrigins(os.Getenv("WEBUI_ALLOWED_ORIGINS"))
+	if len(allowedOrigins) > 0 {
+		logAllowedOrigins(allowedOrigins)
+		websocket.SetAllowedOrigins(allowedOrigins)
+	}
+
 	// Setup HTTP handlers
 	http.HandleFunc("/api/ws-token", handlers.HandleWSToken) // GET endpoint for WebSocket token
 	http.HandleFunc("/api/status", ctx.HandleStatus)
@@ -203,7 +249,9 @@ func main() {
 	// Wrap default mux with middleware chain: security headers -> basic auth
 	// Security headers are applied first so they're present on all responses (including auth failures)
 	handler := auth.SecurityHeadersMiddleware(
-		auth.BasicAuthMiddleware(authPassword, nil)(http.DefaultServeMux),
+		auth.CORSMiddleware(allowedOrigins, true)(
+			auth.BasicAuthMiddleware(authPassword, nil)(http.DefaultServeMux),
+		),
 	)
 
 	// Start server (HTTPS if certificates are available, HTTP for development)

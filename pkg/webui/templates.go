@@ -6,6 +6,7 @@ import (
 	"mime"
 	"net/http"
 	"path"
+	"path/filepath"
 	"strings"
 )
 
@@ -13,6 +14,11 @@ import (
 var assetsFS embed.FS
 
 func HandleSPA(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" && r.URL.Path != "/index.html" {
+		handleAssetOrIndex(w, r)
+		return
+	}
+
 	content, err := assetsFS.ReadFile("dist/index.html")
 	if err != nil {
 		http.Error(w, "SPA index not found", http.StatusInternalServerError)
@@ -24,16 +30,43 @@ func HandleSPA(w http.ResponseWriter, r *http.Request) {
 }
 
 func HandleStatic(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/legacy") {
+		http.NotFound(w, r)
+		return
+	}
 	if !strings.HasPrefix(r.URL.Path, "/static/") {
 		http.NotFound(w, r)
 		return
 	}
 
-	rel := strings.TrimPrefix(r.URL.Path, "/")
-	content, err := assetsFS.ReadFile(rel)
-	if err != nil {
-		http.NotFound(w, r)
+	handleAsset(w, r)
+}
+
+func handleAssetOrIndex(w http.ResponseWriter, r *http.Request) {
+	if handleAsset(w, r) {
 		return
+	}
+
+	content, err := assetsFS.ReadFile("dist/index.html")
+	if err != nil {
+		http.Error(w, "SPA index not found", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(content)
+}
+
+func handleAsset(w http.ResponseWriter, r *http.Request) bool {
+	rel := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+	if strings.HasPrefix(rel, "../") || rel == ".." || rel == "" {
+		http.NotFound(w, r)
+		return true
+	}
+
+	content, err := assetsFS.ReadFile("dist/" + filepath.ToSlash(rel))
+	if err != nil {
+		return false
 	}
 
 	if mimeType := mime.TypeByExtension(path.Ext(r.URL.Path)); mimeType != "" {
@@ -41,6 +74,7 @@ func HandleStatic(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "public, max-age=3600")
 	_, _ = io.Copy(w, strings.NewReader(string(content)))
+	return true
 }
 
 func HandleIndex(w http.ResponseWriter, r *http.Request)      { HandleSPA(w, r) }
