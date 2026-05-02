@@ -3,8 +3,9 @@
   "version": "2.0.0",
   "private": true,
   "description": "React frontend for Photo Backup Station",
+  "packageManager": "pnpm@10.33.2",
   "scripts": {
-    "build": "node -e \"console.log('ui source commit updates dist output manually or via external tooling')\"",
-    "sync:embedded": "node -e \"console.log('sync from webui-react/dist to pkg/webui/dist manually until build tooling is wired')\""
+    "build": "node ./scripts/build.js",
+    "sync:embedded": "node ./scripts/sync-embedded.js"
   }
 }
