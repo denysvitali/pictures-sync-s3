@@ -404,34 +404,38 @@ go test ./pkg/syncmanager
 
 ### CI - OTA image
 
-GitHub Actions builds a flashable Gokrazy image on every push to `master`, producing `photo-backup-rpi4b.img` as a workflow artifact. The same workflow also runs for version tags (`v*`) and preserves OTA release publishing behavior for tags with `photo-backup-ota.squashfs`.
+GitHub Actions builds a flashable Gokrazy image on every push to `master`, producing `photo-backup-rpi4b.img` as a workflow artifact. The same workflow also runs for version tags (`v*`) and publishes the flash image to GitHub Releases as a compressed `photo-backup-rpi4b.img.gz` asset to stay within the release asset size limit.
 
 Workflow:
 `.github/workflows/ota-image.yml`
 
 To flash a SD card for Raspberry Pi 4:
 
-1. Download `photo-backup-rpi4b.img` from the latest successful `master` workflow run.
-2. Insert the target SD card and identify it (for example `/dev/sdb`), then unmount any mounted partitions before flashing.
-3. Unmount any mounted partitions for the card (for example `/dev/sdb1`, `/dev/sdb2`).
-4. Flash and flush the image:
+1. Download `photo-backup-rpi4b.img.gz` from the latest successful `master` workflow run or release asset.
+2. Decompress it before flashing:
+   ```bash
+   gunzip photo-backup-rpi4b.img.gz
+   ```
+3. Insert the target SD card and identify it (for example `/dev/sdb`), then unmount any mounted partitions before flashing.
+4. Unmount any mounted partitions for the card (for example `/dev/sdb1`, `/dev/sdb2`).
+5. Flash and flush the image:
    ```bash
    sudo dd if=photo-backup-rpi4b.img of=/dev/sdX bs=4M status=progress conv=fsync
    ```
    Replace `/dev/sdX` with your actual SD card device.
-5. Remove the card safely:
+6. Remove the card safely:
    ```bash
    sync
    ```
-6. Verify the write completed:
+7. Verify the write completed:
    ```bash
    lsblk /dev/sdX
    ```
-7. Remove the card safely and insert into Raspberry Pi 4:
+8. Remove the card safely and insert into Raspberry Pi 4:
    ```bash
    sync
    ```
-8. Boot the device.
+9. Boot the device.
 
 Notes:
 - This image is a full `overwrite --full` Gokrazy image intended for initial provisioning on SD media.
