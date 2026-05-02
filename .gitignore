@@ -1,8 +1,9 @@
 # Binaries
 pictures-sync
-webui
 mock-webui
+/webui
 !cmd/mock-webui/
+!webui/
 *.exe
 *.exe~
 *.dll

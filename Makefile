@@ -47,9 +47,9 @@ build: ## Build all binaries
 	@CGO_ENABLED=0 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(WEBUI) ./cmd/webui
 	@echo "$(GREEN)Build complete!$(NC)"
 
-webui-sync-embedded: ## Sync webui-react/dist into the embedded pkg/webui/dist bundle
-	@mkdir -p pkg/webui/dist/static
-	@cp -rf webui-react/dist/* pkg/webui/dist/
+webui-sync-embedded: ## Build the embedded webui bundle (real React source)
+	@cd webui && pnpm install --frozen-lockfile || pnpm install
+	@cd webui && pnpm build
 
 build-all: ## Build for all platforms (linux amd64, arm64, armv7)
 	@echo "$(GREEN)Building for all platforms...$(NC)"
