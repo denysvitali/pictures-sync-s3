@@ -29,6 +29,12 @@ if [ -n "$WIFI_SSID" ]; then
     echo ""
 fi
 
+HOSTAPD_BINARY=${HOSTAPD_BINARY:-$(command -v hostapd || true)}
+if [ -z "$HOSTAPD_BINARY" ] || [ ! -x "$HOSTAPD_BINARY" ]; then
+    echo "Error: HOSTAPD_BINARY must point to an executable hostapd binary for the target architecture"
+    exit 1
+fi
+
 # Note: Remote name and path are now configured via web UI and persisted to /perm/pictures-sync/settings.json
 # No need to set environment variables for these
 
@@ -90,7 +96,8 @@ cat > "$CONFIG_FILE" <<EOF
     "tailscale.com/cmd/tailscaled",
     "tailscale.com/cmd/tailscale",
     "github.com/denysvitali/pictures-sync-s3/cmd/pictures-sync",
-    "github.com/denysvitali/pictures-sync-s3/cmd/webui"
+    "github.com/denysvitali/pictures-sync-s3/cmd/webui",
+    "github.com/denysvitali/pictures-sync-s3/cmd/provision-ap"
   ],
   "PackageConfig": {
 EOF
@@ -113,6 +120,14 @@ cat >> "$CONFIG_FILE" <<EOF
       "Environment": [
         "PORT=8080"
       ]
+    },
+    "github.com/denysvitali/pictures-sync-s3/cmd/provision-ap": {
+      "Environment": [
+        "HOSTAPD_PATH=/usr/bin/hostapd"
+      ],
+      "ExtraFilePaths": {
+        "/usr/bin/hostapd": "$HOSTAPD_BINARY"
+      }
     }
   }
 }
@@ -126,12 +141,10 @@ if [ -n "$WIFI_SSID" ]; then
     WIFI_FILE="$INSTANCE_DIR/wifi.json"
     echo "Creating WiFi configuration at: $WIFI_FILE"
     cat > "$WIFI_FILE" <<EOF
-[
-  {
-    "ssid": "$WIFI_SSID",
-    "psk": "$WIFI_PASSWORD"
-  }
-]
+{
+  "ssid": "$WIFI_SSID",
+  "psk": "$WIFI_PASSWORD"
+}
 EOF
     echo "WiFi configuration created!"
     echo "Note: Copy this file to /perm/wifi.json on the device after first boot"
@@ -151,6 +164,7 @@ echo ""
 echo "Configuration files:"
 echo "  - Config: $CONFIG_FILE"
 echo "  - Go module: $INSTANCE_DIR/go.mod (with replace directive for local code)"
+echo "  - hostapd: $HOSTAPD_BINARY"
 if [ -n "$WIFI_SSID" ]; then
     echo "  - WiFi: $WIFI_FILE (copy to device /perm/wifi.json)"
 fi

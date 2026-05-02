@@ -2,8 +2,8 @@ package wifimanager
 
 import (
 	"encoding/json"
-	"log"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/utils"
@@ -12,9 +12,7 @@ import (
 // WiFiConfigPath is the path to the WiFi configuration file.
 // It can be modified for testing purposes.
 var WiFiConfigPath = "/perm/extra-wifi.json"
-var FirstBootWiFiConfigPath = "/perm/wifi.json"
-var FirstBootWiFiSSID = "PhotoBackup-Setup"
-var FirstBootWiFiPassword = "photo-backup-setup"
+var GokrazyWiFiConfigPath = "/perm/wifi.json"
 
 // WiFiConfig represents the structure of the WiFi configuration file
 type WiFiConfig struct {
@@ -28,14 +26,16 @@ func (m *Manager) save() error {
 		Networks: m.networks,
 	}
 
-	return utils.SaveJSON(WiFiConfigPath, config, 0600)
+	if err := utils.SaveJSON(WiFiConfigPath, config, 0600); err != nil {
+		return err
+	}
+	return saveGokrazyWiFiConfig(m.networks)
 }
 
 // load reads the WiFi configuration from disk
 func (m *Manager) load() error {
 	var config WiFiConfig
 
-	// Load WiFi config from file
 	if err := utils.LoadJSON(WiFiConfigPath, &config, nil); err != nil {
 		return err
 	}
@@ -45,47 +45,21 @@ func (m *Manager) load() error {
 		m.networks = make([]Network, 0)
 	}
 
+	if len(m.networks) == 0 {
+		networks, err := loadWiFiNetworksFromFile(GokrazyWiFiConfigPath)
+		if err != nil {
+			return err
+		}
+		m.networks = networks
+	}
+
 	return nil
 }
 
-// EnsureFirstBootWiFiConfig creates a default AP-style Wi-Fi network only when no
-// configured Wi-Fi networks exist (both in /perm/wifi.json and /perm/extra-wifi.json).
-// This helps first-time setup by creating an immediate local way to connect.
+// EnsureFirstBootWiFiConfig is kept for compatibility with older tests/callers.
+// Hotspot provisioning is handled by cmd/provision-ap, not by seeding a fake
+// client network in /perm/wifi.json.
 func (m *Manager) EnsureFirstBootWiFiConfig() error {
-	hasGokrazyNetworks, err := hasConfiguredNetworks(FirstBootWiFiConfigPath)
-	if err != nil {
-		return err
-	}
-
-	hasAppNetworks, err := hasConfiguredNetworks(WiFiConfigPath)
-	if err != nil {
-		return err
-	}
-
-	if hasGokrazyNetworks || hasAppNetworks {
-		return nil
-	}
-
-	defaultSSID := strings.TrimSpace(os.Getenv("SETUP_WIFI_SSID"))
-	if defaultSSID == "" {
-		defaultSSID = FirstBootWiFiSSID
-	}
-
-	defaultPSK := strings.TrimSpace(os.Getenv("SETUP_WIFI_PSK"))
-	if defaultPSK == "" {
-		defaultPSK = FirstBootWiFiPassword
-	}
-
-	config := []Network{{
-		SSID: defaultSSID,
-		PSK:  defaultPSK,
-	}}
-
-	if err := utils.SaveJSON(FirstBootWiFiConfigPath, config, 0600); err != nil {
-		return err
-	}
-
-	log.Printf("No Wi-Fi networks found; seeded first-boot setup network %q in %s", defaultSSID, FirstBootWiFiConfigPath)
 	return nil
 }
 
@@ -97,7 +71,8 @@ func hasConfiguredNetworks(path string) (bool, error) {
 	return len(networks) > 0, nil
 }
 
-// loadWiFiNetworksFromFile reads a Wi-Fi config in array format.
+// loadWiFiNetworksFromFile reads either the app list format or gokrazy's
+// single-network /perm/wifi.json format.
 func loadWiFiNetworksFromFile(path string) ([]Network, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -107,10 +82,49 @@ func loadWiFiNetworksFromFile(path string) ([]Network, error) {
 		return nil, err
 	}
 
+	var config WiFiConfig
+	if err := json.Unmarshal(data, &config); err == nil && config.Networks != nil {
+		return filterConfiguredNetworks(config.Networks), nil
+	}
+
 	var networks []Network
-	if err := json.Unmarshal(data, &networks); err != nil {
+	if err := json.Unmarshal(data, &networks); err == nil {
+		return filterConfiguredNetworks(networks), nil
+	}
+
+	var network Network
+	if err := json.Unmarshal(data, &network); err != nil {
 		return nil, err
 	}
 
-	return networks, nil
+	return filterConfiguredNetworks([]Network{network}), nil
+}
+
+func saveGokrazyWiFiConfig(networks []Network) error {
+	parent := filepath.Dir(GokrazyWiFiConfigPath)
+	if parent == "/perm" {
+		if _, err := os.Stat(parent); os.IsNotExist(err) {
+			return nil
+		}
+	}
+
+	networks = filterConfiguredNetworks(networks)
+	if len(networks) == 0 {
+		if err := os.Remove(GokrazyWiFiConfigPath); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+	return utils.SaveJSON(GokrazyWiFiConfigPath, networks[0], 0600)
+}
+
+func filterConfiguredNetworks(networks []Network) []Network {
+	filtered := networks[:0]
+	for _, network := range networks {
+		network.SSID = strings.TrimSpace(network.SSID)
+		if network.SSID != "" {
+			filtered = append(filtered, network)
+		}
+	}
+	return filtered
 }

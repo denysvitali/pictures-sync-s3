@@ -160,6 +160,8 @@ Supporting packages:
 4. Build and write to SD card:
    ```bash
    # Insert SD card and identify device (e.g., /dev/sdb)
+   # HOSTAPD_BINARY must point to a target-compatible hostapd binary.
+   export HOSTAPD_BINARY=/path/to/hostapd
    gok -i <instance-name> overwrite --full /dev/sdX
    ```
 
@@ -172,21 +174,16 @@ Supporting packages:
 ### First-Time Setup
 
 1. **WiFi Configuration** (if not using Ethernet):
-   - On first boot with no configured networks, the device seeds a setup network:
-     ```json
-     [
-       {"ssid": "PhotoBackup-Setup", "psk": "photo-backup-setup"}
-     ]
-     ```
-     (`/perm/wifi.json` is expected to contain an array of network objects.)
-   - Override defaults with env vars:
+   - On first boot with no configured networks, the device starts a provisioning hotspot:
+     - SSID: `PhotoBackup-Setup`
+     - Password: `photo-backup-setup`
+     - Setup address: `http://192.168.44.1:8080`
+   - Override hotspot defaults with env vars:
      - `SETUP_WIFI_SSID`
      - `SETUP_WIFI_PSK`
-   - Or pre-seed `/perm/wifi.json` before first boot with your network:
+   - Or pre-seed `/perm/wifi.json` before first boot with your network. Gokrazy expects a single client network object:
      ```json
-     [
-       {"ssid": "YourNetwork", "psk": "YourPassword"}
-     ]
+     {"ssid": "YourNetwork", "psk": "YourPassword"}
      ```
 
 2. **Access the Web UI**:
@@ -312,7 +309,8 @@ region = auto
     └── sdcard/          # SD card mount point
         └── .pictures-sync-id  # Card ID file (created on card)
 
-/perm/wifi.json          # WiFi configurations (managed by gokrazy/wifi)
+/perm/wifi.json          # Active WiFi client profile (managed by gokrazy/wifi)
+/perm/extra-wifi.json    # Web UI list of saved WiFi networks
 ```
 
 **Note**: The `.pictures-sync-id` file is written to the root of each SD card and persists across insertions. If the card is reformatted, this file is lost and a new ID is generated.
@@ -323,7 +321,7 @@ All configuration changes made through the web UI are automatically persisted:
 
 - **Remote Name & Path**: Saved to `/perm/pictures-sync/settings.json`
 - **Rclone Configuration**: Saved to `/perm/pictures-sync/rclone.conf`
-- **WiFi Networks**: Saved to `/perm/wifi.json`
+- **WiFi Networks**: Saved to `/perm/extra-wifi.json`; the active network is mirrored to `/perm/wifi.json` for `github.com/gokrazy/wifi`
 
 Settings survive reboots and are automatically loaded on startup. No need to set environment variables or edit Gokrazy config files for runtime settings.
 
