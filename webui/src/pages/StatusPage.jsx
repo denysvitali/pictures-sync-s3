@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  Alert,
+  AlertRoot as Alert,
   AlertDescription,
   AlertIndicator,
   Badge,
   Button,
-  Card,
+  CardRoot as Card,
   CardBody,
   CardHeader,
   Flex,

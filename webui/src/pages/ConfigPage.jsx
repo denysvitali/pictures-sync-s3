@@ -1,17 +1,16 @@
 import { useEffect, useState } from 'react'
 import {
-  Alert,
+  AlertRoot as Alert,
   AlertDescription,
   AlertIndicator,
   Badge,
   Button,
-  Card,
+  CardRoot as Card,
   CardBody,
-  Checkbox,
   Heading,
   HStack,
   Input,
-  List,
+  ListRoot as List,
   ListItem,
   Spinner,
   Stack,
@@ -217,12 +216,15 @@ export function ConfigPage({ deviceUrl }) {
                       </VStack>
                     </WrapItem>
                   </Wrap>
-                  <Checkbox
-                    isChecked={googlePhotosEnabled}
-                    onChange={(event) => setGooglePhotosEnabled(event.target.checked)}
-                  >
-                    Enable Google Photos
-                  </Checkbox>
+                  <HStack as="label" spacing={2} color="gray.100">
+                    <Input
+                      type="checkbox"
+                      width="auto"
+                      checked={googlePhotosEnabled}
+                      onChange={(event) => setGooglePhotosEnabled(event.target.checked)}
+                    />
+                    <Text>Enable Google Photos</Text>
+                  </HStack>
                   <VStack align="start" spacing={1}>
                     <Text color="gray.200" fontSize="sm">
                       Google Photos remote

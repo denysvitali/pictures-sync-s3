@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import {
-  Alert,
+  AlertRoot as Alert,
   AlertDescription,
   AlertIndicator,
-  Card,
+  CardRoot as Card,
   CardBody,
   Heading,
   Spinner,
