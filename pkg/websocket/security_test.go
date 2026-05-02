@@ -158,11 +158,11 @@ func TestIsPrivateIP(t *testing.T) {
 		{"172.32.1.1", false},
 
 		// IPv6
-		{"::1", true},                     // loopback
-		{"fc00::1", true},                 // unique local
-		{"fe80::1", true},                 // link-local
-		{"fd7a:115c:a1e0::1", true},       // Tailscale IPv6
-		{"2001:4860:4860::8888", false},   // public (Google DNS)
+		{"::1", true},                   // loopback
+		{"fc00::1", true},               // unique local
+		{"fe80::1", true},               // link-local
+		{"fd7a:115c:a1e0::1", true},     // Tailscale IPv6
+		{"2001:4860:4860::8888", false}, // public (Google DNS)
 
 		// Invalid IPs
 		{"not-an-ip", false},
@@ -268,5 +268,19 @@ func TestAllowedOriginsConfiguration(t *testing.T) {
 	origins = GetAllowedOrigins()
 	if len(origins) != 0 {
 		t.Error("Origins should be cleared")
+	}
+}
+
+func TestCheckOriginStrict_AllowAllOrigins(t *testing.T) {
+	SetAllowedOrigins([]string{"*"})
+	defer SetAllowedOrigins([]string{})
+
+	req := httptest.NewRequest("GET", "/ws", nil)
+	req.Host = "192.168.10.124:8080"
+	req.RemoteAddr = "192.168.10.10:12345"
+	req.Header.Set("Origin", "https://example.com")
+
+	if !checkOriginStrict(req) {
+		t.Error("Expected wildcard origin configuration to allow any non-empty origin")
 	}
 }

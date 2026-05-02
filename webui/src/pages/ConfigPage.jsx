@@ -50,6 +50,7 @@ export function ConfigPage({ deviceUrl }) {
   const [checkers, setCheckers] = useState(8)
   const [googlePhotosEnabled, setGooglePhotosEnabled] = useState(false)
   const [googlePhotosRemoteName, setGooglePhotosRemoteName] = useState('')
+  const [tailscaleAuthKey, setTailscaleAuthKey] = useState('')
   const [breakglassKeys, setBreakglassKeys] = useState('')
   const [breakglassPath, setBreakglassPath] = useState('/perm/breakglass/authorized_keys')
   const [savingBreakglass, setSavingBreakglass] = useState(false)
@@ -102,8 +103,10 @@ export function ConfigPage({ deviceUrl }) {
         transfers: Number(transfers),
         checkers: Number(checkers),
         google_photos_enabled: Boolean(googlePhotosEnabled),
-        google_photos_remote_name: googlePhotosRemoteName
+        google_photos_remote_name: googlePhotosRemoteName,
+        tailscale_auth_key: tailscaleAuthKey
       })
+      setTailscaleAuthKey('')
       setMessage('Settings saved.')
       await load()
     } catch (err) {
@@ -287,6 +290,18 @@ export function ConfigPage({ deviceUrl }) {
                       value={googlePhotosRemoteName}
                       onChange={(event) => setGooglePhotosRemoteName(event.target.value)}
                       placeholder="gphotos"
+                    />
+                  </VStack>
+                  <VStack align="start" spacing={1}>
+                    <Text color="gray.200" fontSize="sm">
+                      Tailscale auth key
+                    </Text>
+                    <Input
+                      type="password"
+                      autoComplete="off"
+                      value={tailscaleAuthKey}
+                      onChange={(event) => setTailscaleAuthKey(event.target.value)}
+                      placeholder="tskey-auth-..."
                     />
                   </VStack>
                 </Stack>

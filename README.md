@@ -503,6 +503,14 @@ Required for `ota-release`:
    gok -i <instance-name> update              # Over-the-air update if device is already running
    ```
 
+   To install an already-built OTA root image:
+   ```bash
+   go run ./cmd/ota-upload \
+     -target http://gokrazy:<password>@<device-ip>/ \
+     -image photo-backup-rpi4b-root.squashfs.gz
+   ```
+   Use `-insecure` when connecting to a self-signed HTTPS gokrazy endpoint by IP address.
+
    The `replace` directive in `~/gokrazy/<instance-name>/go.mod` ensures your local changes are always used.
 
 ## Security Considerations
