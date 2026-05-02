@@ -573,3 +573,48 @@ func TestBasicAuthWithNilRateLimiter(t *testing.T) {
 		}
 	})
 }
+
+type mutablePasswordProvider struct {
+	password string
+}
+
+func (p *mutablePasswordProvider) CurrentPassword() string {
+	return p.password
+}
+
+func TestBasicAuthMiddlewareWithProviderUsesCurrentPassword(t *testing.T) {
+	provider := &mutablePasswordProvider{password: "old-password"}
+	middleware := BasicAuthMiddlewareWithProvider(provider, nil)
+	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.RemoteAddr = "192.168.1.203:12345"
+	req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("gokrazy:old-password")))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("old password should authenticate, got %d", rr.Code)
+	}
+
+	provider.password = "new-password"
+
+	req = httptest.NewRequest("GET", "/test", nil)
+	req.RemoteAddr = "192.168.1.203:12345"
+	req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("gokrazy:old-password")))
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("old password should fail after provider update, got %d", rr.Code)
+	}
+
+	req = httptest.NewRequest("GET", "/test", nil)
+	req.RemoteAddr = "192.168.1.203:12345"
+	req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("gokrazy:new-password")))
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("new password should authenticate, got %d", rr.Code)
+	}
+}

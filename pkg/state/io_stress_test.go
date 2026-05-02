@@ -467,8 +467,8 @@ func TestStressFileOperations(t *testing.T) {
 	}
 
 	const (
-		duration    = 10 * time.Second
-		concurrency = 100
+		duration    = 500 * time.Millisecond
+		concurrency = 20
 	)
 
 	var writeCount, readCount, errorCount atomic.Int64

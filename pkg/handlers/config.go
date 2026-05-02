@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/denysvitali/pictures-sync-s3/pkg/auth"
 	"github.com/denysvitali/pictures-sync-s3/pkg/settings"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 	"github.com/denysvitali/pictures-sync-s3/pkg/validation"
@@ -124,6 +126,42 @@ func (ctx *Context) HandleConfigTest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	JSONResponse(w, map[string]any{"success": true})
+}
+
+func (ctx *Context) HandlePasswordChange(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if ctx.PasswordMgr == nil {
+		http.Error(w, "Password manager not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	var req struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if err := ctx.PasswordMgr.ChangePassword(req.CurrentPassword, req.NewPassword); err != nil {
+		if errors.Is(err, auth.ErrCurrentPasswordInvalid) {
+			http.Error(w, err.Error(), http.StatusUnauthorized)
+			return
+		}
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "password file") || strings.Contains(err.Error(), "password directory") {
+			status = http.StatusInternalServerError
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+
+	logConfigChange(r, "password_changed", "Updated gokrazy UI password")
+	JSONResponse(w, map[string]any{"status": "ok"})
 }
 
 // logConfigChange logs rclone configuration changes with client information

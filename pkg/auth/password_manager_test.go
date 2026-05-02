@@ -1,0 +1,65 @@
+package auth
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestPasswordManagerChangePassword(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gokr-pw.txt")
+	if err := os.WriteFile(path, []byte("old-password\n"), 0600); err != nil {
+		t.Fatalf("write password file: %v", err)
+	}
+
+	manager, err := NewPasswordManager(path, "dev-password")
+	if err != nil {
+		t.Fatalf("NewPasswordManager() error = %v", err)
+	}
+
+	if got := manager.CurrentPassword(); got != "old-password" {
+		t.Fatalf("CurrentPassword() = %q, want old-password", got)
+	}
+	if err := manager.ChangePassword("wrong-password", "new-password"); err != ErrCurrentPasswordInvalid {
+		t.Fatalf("ChangePassword() error = %v, want ErrCurrentPasswordInvalid", err)
+	}
+	if err := manager.ChangePassword("old-password", "new-password"); err != nil {
+		t.Fatalf("ChangePassword() error = %v", err)
+	}
+	if got := manager.CurrentPassword(); got != "new-password" {
+		t.Fatalf("CurrentPassword() = %q, want new-password", got)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read password file: %v", err)
+	}
+	if string(data) != "new-password\n" {
+		t.Fatalf("password file = %q, want new-password newline", string(data))
+	}
+}
+
+func TestValidateGokrazyPassword(t *testing.T) {
+	tests := []struct {
+		name     string
+		password string
+		wantErr  bool
+	}{
+		{name: "valid", password: "photo-backup-2"},
+		{name: "too short", password: "short", wantErr: true},
+		{name: "leading whitespace", password: " photo-backup-2", wantErr: true},
+		{name: "newline", password: "photo\nbackup", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateGokrazyPassword(tt.password)
+			if tt.wantErr && err == nil {
+				t.Fatal("ValidateGokrazyPassword() expected error")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("ValidateGokrazyPassword() error = %v", err)
+			}
+		})
+	}
+}

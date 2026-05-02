@@ -82,15 +82,26 @@ select {
 }
 
 .hero-target,
+.hero-version,
 .target-value {
   color: #ffffff;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   overflow-wrap: anywhere;
 }
 
-.hero-target {
+.hero-target,
+.hero-version {
   margin-top: 4px;
   font-size: 0.9rem;
+}
+
+.version-label {
+  display: block;
+  margin-top: 12px;
+}
+
+.hero-version.unavailable {
+  color: #f7c9c9;
 }
 
 .endpoint-card,

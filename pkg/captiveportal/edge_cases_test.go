@@ -1,6 +1,7 @@
 package captiveportal
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -65,17 +66,6 @@ func TestEdgeCase_NetworkWithoutIPv4(t *testing.T) {
 
 // TestEdgeCase_AuthenticationTimeout tests handling of authentication timeout
 func TestEdgeCase_AuthenticationTimeout(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping timeout test in short mode")
-	}
-
-	// Create a test server that delays response beyond timeout
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(15 * time.Second) // Longer than authTimeout (10s)
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
 	getCurrentSSID := func() (string, error) {
 		return jinjiangSSID, nil
 	}
@@ -84,20 +74,10 @@ func TestEdgeCase_AuthenticationTimeout(t *testing.T) {
 	auth.getLocalIPMAC = func() (string, string, error) {
 		return "192.168.1.100", "aa:bb:cc:dd:ee:ff", nil
 	}
-
-	// Override the authenticator to use our test server
-	originalAuthFunc := auth.authenticators[jinjiangSSID]
-	defer func() { auth.authenticators[jinjiangSSID] = originalAuthFunc }()
+	auth.retryBackoff = func(attempt int) time.Duration { return 0 }
 
 	auth.authenticators[jinjiangSSID] = func(ip, mac string) error {
-		// This will timeout
-		client := &http.Client{Timeout: 2 * time.Second}
-		resp, err := client.Get(server.URL)
-		if err != nil {
-			return err
-		}
-		defer resp.Body.Close()
-		return nil
+		return context.DeadlineExceeded
 	}
 
 	auth.checkAndAuthenticate()
@@ -110,10 +90,6 @@ func TestEdgeCase_AuthenticationTimeout(t *testing.T) {
 
 // TestEdgeCase_AuthenticationRetry tests the retry logic with exponential backoff
 func TestEdgeCase_AuthenticationRetry(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping retry test in short mode")
-	}
-
 	attemptCount := 0
 
 	getCurrentSSID := func() (string, error) {
@@ -123,6 +99,12 @@ func TestEdgeCase_AuthenticationRetry(t *testing.T) {
 	auth := NewAuthenticator(getCurrentSSID)
 	auth.getLocalIPMAC = func() (string, string, error) {
 		return "192.168.1.100", "aa:bb:cc:dd:ee:ff", nil
+	}
+	var backoffs []time.Duration
+	auth.retryBackoff = func(attempt int) time.Duration {
+		backoff := time.Duration(attempt-1) * 2 * time.Second
+		backoffs = append(backoffs, backoff)
+		return 0
 	}
 
 	// Authenticator that fails twice then succeeds
@@ -134,9 +116,7 @@ func TestEdgeCase_AuthenticationRetry(t *testing.T) {
 		return nil
 	}
 
-	startTime := time.Now()
 	auth.checkAndAuthenticate()
-	duration := time.Since(startTime)
 
 	// Should have succeeded on third attempt
 	if attemptCount != 3 {
@@ -147,20 +127,19 @@ func TestEdgeCase_AuthenticationRetry(t *testing.T) {
 		t.Error("Authentication should have succeeded on retry")
 	}
 
-	// Should have taken at least 2s (first retry) + 4s (second retry) = 6s
-	// Due to exponential backoff: attempt 1 (0s) + attempt 2 (2s) + attempt 3 (4s)
-	minDuration := 6 * time.Second
-	if duration < minDuration {
-		t.Logf("Note: Duration %v is less than expected minimum %v (may be timing variance)", duration, minDuration)
+	expectedBackoffs := []time.Duration{2 * time.Second, 4 * time.Second}
+	if len(backoffs) != len(expectedBackoffs) {
+		t.Fatalf("Expected %d backoffs, got %d", len(expectedBackoffs), len(backoffs))
+	}
+	for i := range expectedBackoffs {
+		if backoffs[i] != expectedBackoffs[i] {
+			t.Errorf("Backoff %d: expected %v, got %v", i, expectedBackoffs[i], backoffs[i])
+		}
 	}
 }
 
 // TestEdgeCase_AuthenticationAllRetriesFail tests behavior when all retries fail
 func TestEdgeCase_AuthenticationAllRetriesFail(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping retry test in short mode")
-	}
-
 	attemptCount := 0
 
 	getCurrentSSID := func() (string, error) {
@@ -171,6 +150,7 @@ func TestEdgeCase_AuthenticationAllRetriesFail(t *testing.T) {
 	auth.getLocalIPMAC = func() (string, string, error) {
 		return "192.168.1.100", "aa:bb:cc:dd:ee:ff", nil
 	}
+	auth.retryBackoff = func(attempt int) time.Duration { return 0 }
 
 	// Authenticator that always fails
 	auth.authenticators[jinjiangSSID] = func(ip, mac string) error {
@@ -346,6 +326,16 @@ func TestEdgeCase_InvalidIPMACFormat(t *testing.T) {
 			auth.getLocalIPMAC = func() (string, string, error) {
 				return tc.ip, tc.mac, nil
 			}
+			auth.retryBackoff = func(attempt int) time.Duration { return 0 }
+			auth.authenticators[jinjiangSSID] = func(ip, mac string) error {
+				if net.ParseIP(ip) == nil {
+					return fmt.Errorf("invalid IP %q", ip)
+				}
+				if _, err := net.ParseMAC(mac); err != nil {
+					return err
+				}
+				return nil
+			}
 
 			// Should not panic even with invalid formats
 			auth.checkAndAuthenticate()
@@ -366,16 +356,16 @@ func TestEdgeCase_PortalHTTPErrors(t *testing.T) {
 		statusCode int
 		shouldFail bool
 	}{
-		{http.StatusOK, false},              // 200 - success
-		{http.StatusFound, false},           // 302 - redirect, treated as success
-		{http.StatusBadRequest, true},       // 400 - client error
-		{http.StatusUnauthorized, true},     // 401 - auth required
-		{http.StatusForbidden, true},        // 403 - forbidden
-		{http.StatusNotFound, true},         // 404 - not found
+		{http.StatusOK, false},                 // 200 - success
+		{http.StatusFound, false},              // 302 - redirect, treated as success
+		{http.StatusBadRequest, true},          // 400 - client error
+		{http.StatusUnauthorized, true},        // 401 - auth required
+		{http.StatusForbidden, true},           // 403 - forbidden
+		{http.StatusNotFound, true},            // 404 - not found
 		{http.StatusInternalServerError, true}, // 500 - server error
-		{http.StatusBadGateway, true},       // 502 - bad gateway
-		{http.StatusServiceUnavailable, true}, // 503 - service unavailable
-		{http.StatusGatewayTimeout, true},   // 504 - gateway timeout
+		{http.StatusBadGateway, true},          // 502 - bad gateway
+		{http.StatusServiceUnavailable, true},  // 503 - service unavailable
+		{http.StatusGatewayTimeout, true},      // 504 - gateway timeout
 	}
 
 	for _, tc := range testCases {
@@ -393,6 +383,7 @@ func TestEdgeCase_PortalHTTPErrors(t *testing.T) {
 			auth.getLocalIPMAC = func() (string, string, error) {
 				return "192.168.1.100", "aa:bb:cc:dd:ee:ff", nil
 			}
+			auth.retryBackoff = func(attempt int) time.Duration { return 0 }
 
 			// Override authenticator to use test server
 			originalAuthFunc := auth.authenticators[jinjiangSSID]

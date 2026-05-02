@@ -111,6 +111,7 @@ export async function apiRequest(path, options = {}) {
 }
 
 export const getStatus = (deviceUrl) => apiRequest('/api/status', { deviceUrl })
+export const getVersion = (deviceUrl) => apiRequest('/api/version', { deviceUrl })
 export const getHistory = (deviceUrl) => apiRequest('/api/history', { deviceUrl })
 export const getWifiStatus = (deviceUrl) => apiRequest('/api/wifi/status', { deviceUrl })
 export const getWifiNetworks = (deviceUrl) => apiRequest('/api/wifi/networks', { deviceUrl })
@@ -166,6 +167,15 @@ export const saveSettings = (deviceUrl, payload) =>
     deviceUrl,
     method: 'POST',
     body: payload
+  })
+export const changeGokrazyPassword = (deviceUrl, currentPassword, newPassword) =>
+  apiRequest('/api/auth/password', {
+    deviceUrl,
+    method: 'POST',
+    body: {
+      current_password: currentPassword,
+      new_password: newPassword
+    }
   })
 export const testConfig = (deviceUrl) =>
   apiRequest('/api/config/test', {

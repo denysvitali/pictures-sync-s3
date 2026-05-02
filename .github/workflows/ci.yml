@@ -123,7 +123,7 @@ jobs:
         run: |
           mkdir -p dist
           go build -v -trimpath \
-            -ldflags="-s -w -X main.version=${{ github.sha }} -X main.buildDate=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+            -ldflags="-s -w -X github.com/denysvitali/pictures-sync-s3/pkg/version.Version=${{ github.sha }} -X github.com/denysvitali/pictures-sync-s3/pkg/version.BuildDate=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
             -o dist/pictures-sync-${{ matrix.name }} \
             ./cmd/pictures-sync
 
@@ -135,7 +135,7 @@ jobs:
           CGO_ENABLED: 0
         run: |
           go build -v -trimpath \
-            -ldflags="-s -w -X main.version=${{ github.sha }} -X main.buildDate=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+            -ldflags="-s -w -X github.com/denysvitali/pictures-sync-s3/pkg/version.Version=${{ github.sha }} -X github.com/denysvitali/pictures-sync-s3/pkg/version.BuildDate=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
             -o dist/webui-${{ matrix.name }} \
             ./cmd/webui
 

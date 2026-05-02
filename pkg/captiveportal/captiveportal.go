@@ -32,10 +32,10 @@
 //
 // All authentication attempts are logged with the [CaptivePortal] prefix for easy filtering.
 // Logs include:
-//  - Network connection/disconnection events
-//  - Authentication attempts with IP/MAC addresses
-//  - HTTP request details and responses
-//  - Error conditions with troubleshooting hints
+//   - Network connection/disconnection events
+//   - Authentication attempts with IP/MAC addresses
+//   - HTTP request details and responses
+//   - Error conditions with troubleshooting hints
 package captiveportal
 
 import (
@@ -64,12 +64,13 @@ const (
 
 // Authenticator handles captive portal authentication
 type Authenticator struct {
-	lastSSID        string
-	lastAuthTime    time.Time
-	getCurrentSSID  func() (string, error)
-	getLocalIPMAC   func() (string, string, error)
-	stopChan        chan struct{}
-	authenticators  map[string]AuthFunc
+	lastSSID       string
+	lastAuthTime   time.Time
+	getCurrentSSID func() (string, error)
+	getLocalIPMAC  func() (string, string, error)
+	retryBackoff   func(attempt int) time.Duration
+	stopChan       chan struct{}
+	authenticators map[string]AuthFunc
 }
 
 // AuthFunc is a function that performs authentication for a specific network
@@ -80,7 +81,10 @@ func NewAuthenticator(getCurrentSSID func() (string, error)) *Authenticator {
 	return &Authenticator{
 		getCurrentSSID: getCurrentSSID,
 		getLocalIPMAC:  getLocalIPAndMAC,
-		stopChan:       make(chan struct{}),
+		retryBackoff: func(attempt int) time.Duration {
+			return time.Duration(attempt-1) * 2 * time.Second
+		},
+		stopChan: make(chan struct{}),
 		authenticators: map[string]AuthFunc{
 			jinjiangSSID: authenticateJinJiang,
 		},
@@ -185,9 +189,11 @@ func (a *Authenticator) checkAndAuthenticate() {
 	var authErr error
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		if attempt > 1 {
-			backoff := time.Duration(attempt-1) * 2 * time.Second
+			backoff := a.retryBackoff(attempt)
 			log.Printf("[CaptivePortal] Retry attempt %d/%d after %v backoff...", attempt, maxRetries, backoff)
-			time.Sleep(backoff)
+			if backoff > 0 {
+				time.Sleep(backoff)
+			}
 		}
 
 		authErr = authFunc(ip, mac)

@@ -6,13 +6,23 @@ import (
 	"encoding/base64"
 	"log"
 	"net"
-	"net/url"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/ratelimit"
 )
+
+type PasswordProvider interface {
+	CurrentPassword() string
+}
+
+type staticPasswordProvider string
+
+func (p staticPasswordProvider) CurrentPassword() string {
+	return string(p)
+}
 
 var (
 	csrfToken string
@@ -206,6 +216,11 @@ func ExpensiveOperationMiddleware(limiter *ratelimit.Limiter) func(http.HandlerF
 
 // BasicAuthMiddleware provides HTTP Basic Authentication with rate limiting
 func BasicAuthMiddleware(authPassword string, limiter *ratelimit.Limiter) func(http.Handler) http.Handler {
+	return BasicAuthMiddlewareWithProvider(staticPasswordProvider(authPassword), limiter)
+}
+
+// BasicAuthMiddlewareWithProvider provides HTTP Basic Authentication with rate limiting.
+func BasicAuthMiddlewareWithProvider(passwordProvider PasswordProvider, limiter *ratelimit.Limiter) func(http.Handler) http.Handler {
 	authConfig := ratelimit.AuthConfig()
 
 	return func(next http.Handler) http.Handler {
@@ -234,6 +249,10 @@ func BasicAuthMiddleware(authPassword string, limiter *ratelimit.Limiter) func(h
 			}
 
 			username, password, ok := r.BasicAuth()
+			authPassword := ""
+			if passwordProvider != nil {
+				authPassword = passwordProvider.CurrentPassword()
+			}
 
 			// Use constant-time comparison to prevent timing attacks
 			usernameMatch := subtle.ConstantTimeCompare([]byte(username), []byte("gokrazy")) == 1

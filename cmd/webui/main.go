@@ -113,19 +113,11 @@ func main() {
 
 	log.Println("Photo Backup Station WebUI - Starting...")
 
-	// Load password from gokrazy password file or use default for development
-	var authPassword string
-	passwordBytes, err := os.ReadFile("/etc/gokr-pw.txt")
+	passwordMgr, err := auth.NewPasswordManager(auth.DefaultGokrazyPasswordFile, "dev")
 	if err != nil {
-		log.Printf("Warning: Failed to read password file: %v", err)
+		log.Printf("Warning: Failed to initialize password manager: %v", err)
 		log.Println("Using default development password")
-		authPassword = "dev"
-	} else {
-		authPassword = strings.TrimSpace(string(passwordBytes))
-		if authPassword == "" {
-			log.Println("Password file is empty, using default development password")
-			authPassword = "dev"
-		}
+		passwordMgr, _ = auth.NewPasswordManager("", "dev")
 	}
 
 	// Get port from environment or default to 8080
@@ -207,6 +199,7 @@ func main() {
 		AppSettings:   appSettings,
 		SSRFValidator: ssrfValidator,
 		OTAMgr:        otaMgr,
+		PasswordMgr:   passwordMgr,
 	}
 
 	allowedOrigins := configuredAllowedOrigins()
@@ -217,10 +210,12 @@ func main() {
 
 	// Setup HTTP handlers
 	http.HandleFunc("/api/ws-token", handlers.HandleWSToken) // GET endpoint for WebSocket token
+	http.HandleFunc("/api/version", ctx.HandleVersion)
 	http.HandleFunc("/api/status", ctx.HandleStatus)
 	http.HandleFunc("/api/history", ctx.HandleHistory)
 	http.HandleFunc("/api/config", ctx.HandleConfig)
 	http.HandleFunc("/api/config/test", ctx.HandleConfigTest)
+	http.HandleFunc("/api/auth/password", ctx.HandlePasswordChange)
 	http.HandleFunc("/api/breakglass/authorized-keys", ctx.HandleBreakglassAuthorizedKeys)
 	http.HandleFunc("/api/settings", ctx.HandleSettings)
 	http.HandleFunc("/api/devices", ctx.HandleDevices)
@@ -264,7 +259,7 @@ func main() {
 	// Security headers are applied first so they're present on all responses (including auth failures)
 	handler := auth.SecurityHeadersMiddleware(
 		auth.CORSMiddleware(allowedOrigins, true)(
-			auth.BasicAuthMiddleware(authPassword, nil)(http.DefaultServeMux),
+			auth.BasicAuthMiddlewareWithProvider(passwordMgr, nil)(http.DefaultServeMux),
 		),
 	)
 

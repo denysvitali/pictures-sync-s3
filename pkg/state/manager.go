@@ -93,26 +93,19 @@ func (m *Manager) GetState() CurrentState {
 
 // SetStatus updates the current status
 func (m *Manager) SetStatus(status SyncStatus) error {
-	log.Printf("SetStatus: Attempting to set status to %s", status)
 	m.mu.Lock()
-	log.Printf("SetStatus: Lock acquired, setting status to %s", status)
 
 	m.currentState.Status = status
 
-	log.Printf("SetStatus: Calling save()")
 	if err := m.save(); err != nil {
-		log.Printf("SetStatus: Save failed: %v", err)
 		m.mu.Unlock()
 		return err
 	}
-	log.Printf("SetStatus: Save completed")
 
-	log.Printf("SetStatus: Calling notifyListeners()")
 	stateCopy := m.currentState
 	m.mu.Unlock()
 
 	m.notifyListenersAsync(stateCopy)
-	log.Printf("SetStatus: SetStatus completed successfully")
 	return nil
 }
 
