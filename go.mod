@@ -6,6 +6,7 @@ require (
 	github.com/beevik/ntp v1.5.0
 	github.com/disintegration/imaging v1.6.2
 	github.com/dsoprea/go-exif/v3 v3.0.1
+	github.com/gokrazy/updater v0.0.0-20250705135802-db129c40879c
 	github.com/gorilla/websocket v1.5.3
 	github.com/mdlayher/wifi v0.7.2
 	github.com/prometheus-community/pro-bing v0.8.0

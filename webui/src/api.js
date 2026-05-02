@@ -172,6 +172,12 @@ export const testConfig = (deviceUrl) =>
     deviceUrl,
     method: 'POST'
   })
+export const getOtaStatus = (deviceUrl) => apiRequest('/api/ota/status', { deviceUrl })
+export const installOta = (deviceUrl) =>
+  apiRequest('/api/ota/install', {
+    deviceUrl,
+    method: 'POST'
+  })
 
 export const getFileViewUrl = (deviceUrl, filePath) =>
   `${normalizeBaseUrl(deviceUrl)}/api/files/view?path=${encodeURIComponent(filePath || '')}`

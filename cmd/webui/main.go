@@ -16,6 +16,7 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/auth"
 	"github.com/denysvitali/pictures-sync-s3/pkg/events"
 	"github.com/denysvitali/pictures-sync-s3/pkg/handlers"
+	"github.com/denysvitali/pictures-sync-s3/pkg/ota"
 	"github.com/denysvitali/pictures-sync-s3/pkg/settings"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ssrf"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
@@ -189,6 +190,9 @@ func main() {
 	ssrfValidator := ssrf.NewValidator(10, time.Minute)
 	log.Println("SSRF protection enabled: 10 network diagnostic requests per minute per client")
 
+	// Initialize OTA manager
+	otaMgr := ota.NewManager()
+
 	// Create handler context
 	ctx := &handlers.Context{
 		StateMgr:      stateMgr,
@@ -196,6 +200,7 @@ func main() {
 		WiFiMgr:       wifiMgr,
 		AppSettings:   appSettings,
 		SSRFValidator: ssrfValidator,
+		OTAMgr:        otaMgr,
 	}
 
 	allowedOrigins := parseAllowedOrigins(os.Getenv("WEBUI_ALLOWED_ORIGINS"))
@@ -234,6 +239,8 @@ func main() {
 	http.HandleFunc("/api/network/dns-lookup", ctx.HandleDNSLookup)
 	http.HandleFunc("/api/network/ping", ctx.HandlePing)
 	http.HandleFunc("/api/network/diagnostics", ctx.HandleNetworkDiagnostics)
+	http.HandleFunc("/api/ota/status", ctx.HandleOTAStatus)
+	http.HandleFunc("/api/ota/install", ctx.HandleOTAInstall)
 	http.HandleFunc("/ws", websocket.HandleWebSocket(stateMgr, eventMgr))
 
 	// SPA route and static assets for React frontend

@@ -23,7 +23,9 @@ import {
 import {
   getBreakglassAuthorizedKeys,
   getConfig,
+  getOtaStatus,
   getSettings,
+  installOta,
   saveBreakglassAuthorizedKeys,
   saveSettings,
   testConfig
@@ -51,16 +53,19 @@ export function ConfigPage({ deviceUrl }) {
   const [breakglassKeys, setBreakglassKeys] = useState('')
   const [breakglassPath, setBreakglassPath] = useState('/perm/breakglass/authorized_keys')
   const [savingBreakglass, setSavingBreakglass] = useState(false)
+  const [otaStatus, setOtaStatus] = useState({ state: 'idle' })
+  const [installingOta, setInstallingOta] = useState(false)
 
   const load = async () => {
     if (!deviceUrl) return
     setLoading(true)
     setError('')
     try {
-      const [configResponse, settingsResponse, breakglassResponse] = await Promise.all([
+      const [configResponse, settingsResponse, breakglassResponse, otaResponse] = await Promise.all([
         getConfig(deviceUrl),
         getSettings(deviceUrl),
-        getBreakglassAuthorizedKeys(deviceUrl)
+        getBreakglassAuthorizedKeys(deviceUrl),
+        getOtaStatus(deviceUrl)
       ])
       setConfig(configResponse || { configured: false, remotes: [] })
       setRemoteName(settingsResponse?.remote_name || '')
@@ -72,6 +77,7 @@ export function ConfigPage({ deviceUrl }) {
       setGooglePhotosRemoteName(settingsResponse?.google_photos_remote_name || '')
       setBreakglassKeys(breakglassResponse?.authorized_keys || '')
       setBreakglassPath(breakglassResponse?.path || '/perm/breakglass/authorized_keys')
+      setOtaStatus(otaResponse || { state: 'idle' })
     } catch (err) {
       setError(err.message)
     } finally {
@@ -139,6 +145,23 @@ export function ConfigPage({ deviceUrl }) {
       setSavingBreakglass(false)
     }
   }
+
+  const onInstallOta = async () => {
+    setInstallingOta(true)
+    setMessage('')
+    setError('')
+    try {
+      const response = await installOta(deviceUrl)
+      setOtaStatus(response || { state: 'checking' })
+      setMessage('OTA installation started.')
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setInstallingOta(false)
+    }
+  }
+
+  const otaBusy = ['checking', 'downloading', 'installing'].includes(otaStatus?.state)
 
   return (
     <Card bg="whiteAlpha.50">
@@ -278,6 +301,40 @@ export function ConfigPage({ deviceUrl }) {
               </CardBody>
             </Card>
           </form>
+
+          <Card variant="outline" bg="whiteAlpha.100">
+            <CardBody>
+              <HStack justify="space-between" align="start">
+                <VStack align="start" spacing={1}>
+                  <Heading size="sm">System update</Heading>
+                  <Text fontSize="sm" color="gray.300">
+                    {otaStatus?.release ? `${otaStatus.release} · ${otaStatus.asset || 'OTA image'}` : 'Latest GitHub release'}
+                  </Text>
+                </VStack>
+                <Badge colorScheme={otaStatus?.state === 'failed' ? 'red' : otaBusy ? 'blue' : 'green'}>
+                  {otaStatus?.state || 'idle'}
+                </Badge>
+              </HStack>
+              {otaStatus?.message ? (
+                <Text mt={3} fontSize="sm" color="gray.200">
+                  {otaStatus.message}
+                </Text>
+              ) : null}
+              {otaStatus?.error ? (
+                <Text mt={3} fontSize="sm" color="red.200">
+                  {otaStatus.error}
+                </Text>
+              ) : null}
+              <HStack mt={4} spacing={2}>
+                <Button colorScheme="teal" onClick={onInstallOta} isLoading={installingOta || otaBusy}>
+                  Install latest OTA
+                </Button>
+                <Button variant="outline" onClick={load} isLoading={loading}>
+                  Refresh
+                </Button>
+              </HStack>
+            </CardBody>
+          </Card>
 
           <Card variant="outline" bg="whiteAlpha.100">
             <CardBody>

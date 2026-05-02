@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/captiveportal"
+	"github.com/denysvitali/pictures-sync-s3/pkg/ota"
 	"github.com/denysvitali/pictures-sync-s3/pkg/settings"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ssrf"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
@@ -37,6 +38,7 @@ type Context struct {
 	AppSettings   *settings.Settings
 	SSRFValidator *ssrf.Validator
 	CaptivePortal *captiveportal.Authenticator
+	OTAMgr        *ota.Manager
 }
 
 // JSONResponse writes a JSON response
