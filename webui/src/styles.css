@@ -1,5 +1,9 @@
 :root {
   color-scheme: dark;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  background: #101820;
 }
 
 *,
@@ -12,8 +16,264 @@ html,
 body {
   margin: 0;
   min-height: 100%;
+  background:
+    radial-gradient(circle at top left, rgba(24, 92, 99, 0.22), transparent 30rem),
+    linear-gradient(135deg, #101820 0%, #17212b 52%, #222b2f 100%);
 }
 
 #root {
   min-height: 100%;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+.app-shell {
+  min-height: 100vh;
+  color: #eef4f5;
+  padding: 28px 20px 48px;
+}
+
+.app-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.hero-panel,
+.endpoint-card,
+.nav-card,
+.notice-card {
+  border: 1px solid rgba(226, 236, 238, 0.14);
+  box-shadow: 0 18px 48px rgba(3, 10, 18, 0.24);
+}
+
+.hero-panel {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 28px;
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(18, 31, 42, 0.96), rgba(20, 57, 62, 0.88)),
+    repeating-linear-gradient(120deg, rgba(255, 255, 255, 0.04) 0 1px, transparent 1px 14px);
+}
+
+.hero-title {
+  letter-spacing: 0;
+}
+
+.hero-copy,
+.muted-text {
+  color: #b7c5c9;
+  margin-top: 8px;
+}
+
+.hero-status {
+  min-width: min(100%, 280px);
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(7, 18, 25, 0.38);
+}
+
+.hero-target,
+.target-value {
+  color: #ffffff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  overflow-wrap: anywhere;
+}
+
+.hero-target {
+  margin-top: 4px;
+  font-size: 0.9rem;
+}
+
+.endpoint-card,
+.nav-card {
+  background: rgba(16, 28, 38, 0.78);
+  backdrop-filter: blur(16px);
+}
+
+.endpoint-header {
+  padding-bottom: 10px;
+}
+
+.endpoint-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-top: 0;
+}
+
+.endpoint-form {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.field-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field-label {
+  color: #a8b6ba;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.endpoint-actions,
+.quick-targets,
+.nav-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.active-target {
+  display: grid;
+  gap: 5px;
+}
+
+.quick-targets {
+  margin-top: 0;
+}
+
+.mode-badge {
+  background: rgba(45, 212, 191, 0.13);
+  color: #9ff7ed;
+  border: 1px solid rgba(45, 212, 191, 0.32);
+}
+
+.nav-card {
+  padding: 6px;
+}
+
+.nav-tabs {
+  width: 100%;
+  border-bottom: 0;
+}
+
+.nav-tab {
+  min-height: 42px;
+  padding-inline: 14px;
+  border-radius: 7px;
+  color: #bdc8cc;
+}
+
+.nav-tab[data-selected] {
+  background: rgba(45, 212, 191, 0.14);
+  color: #ffffff;
+}
+
+.notice-card {
+  background: rgba(88, 61, 25, 0.55);
+  color: #ffe8bf;
+  border-color: rgba(245, 158, 11, 0.45);
+}
+
+.chakra-card__root {
+  border-radius: 8px;
+  color: #eef4f5;
+}
+
+.chakra-table__root {
+  overflow: hidden;
+  color: #eef4f5;
+}
+
+.chakra-card__root th,
+.chakra-card__root td,
+.chakra-card__root p,
+.chakra-card__root label,
+.chakra-card__root h2,
+.chakra-card__root h3 {
+  color: inherit;
+}
+
+.chakra-card__root thead th {
+  color: #a8b6ba;
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.chakra-card__root tbody td {
+  border-color: rgba(226, 236, 238, 0.09);
+}
+
+.chakra-card__root input,
+.chakra-card__root select {
+  color: #f8fbfb;
+  background: rgba(7, 18, 25, 0.5);
+  border-color: rgba(226, 236, 238, 0.28);
+}
+
+.chakra-card__root input::placeholder {
+  color: #7f8d91;
+}
+
+.chakra-card__root button {
+  color: #f8fbfb;
+}
+
+.chakra-card__root button:disabled,
+.chakra-card__root input:disabled {
+  color: #78868a;
+  border-color: rgba(226, 236, 238, 0.18);
+  opacity: 0.72;
+}
+
+.endpoint-card .chakra-button[data-variant="solid"],
+.chakra-card__root .chakra-button[data-variant="solid"] {
+  background: #182f32;
+}
+
+.endpoint-card .chakra-button[data-variant="solid"]:hover,
+.chakra-card__root .chakra-button[data-variant="solid"]:hover {
+  background: #21464a;
+}
+
+.chakra-badge {
+  color: inherit;
+}
+
+.notice-card .chakra-alert__root {
+  background: rgba(255, 245, 225, 0.1);
+  color: #ffe8bf;
+}
+
+@media (max-width: 760px) {
+  .app-shell {
+    padding: 16px 12px 32px;
+  }
+
+  .hero-panel {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 22px;
+  }
+
+  .endpoint-form {
+    grid-template-columns: 1fr;
+  }
+
+  .endpoint-actions > button,
+  .quick-targets > button {
+    flex: 1 1 150px;
+  }
+
+  .nav-tab {
+    flex: 1 1 120px;
+    justify-content: center;
+  }
 }
