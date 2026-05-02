@@ -31,6 +31,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+          cache: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -53,9 +54,20 @@ jobs:
             exit 1
           fi
 
+      - name: Cache gokrazy CLI
+        id: cache-gok
+        uses: actions/cache@v5
+        with:
+          path: ~/go/bin/gok
+          key: ${{ runner.os }}-gokrazy-gok-main-v1
+
       - name: Install gokrazy CLI
+        if: steps.cache-gok.outputs.cache-hit != 'true'
         run: |
           go install github.com/gokrazy/tools/cmd/gok@main
+
+      - name: Add Go bin to PATH
+        run: |
           echo "PATH=$PATH:$(go env GOPATH)/bin" >> "$GITHUB_ENV"
 
       - name: Build flashable Gokrazy image
