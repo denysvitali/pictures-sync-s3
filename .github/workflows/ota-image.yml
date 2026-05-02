@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   build-and-publish-flash-image:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     env:
       GOKRAZY_INSTANCE: photo-backup
@@ -60,7 +60,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/go/bin/gok
-          key: ${{ runner.os }}-gokrazy-gok-main-v1
+          key: ${{ runner.os }}-${{ runner.arch }}-gokrazy-gok-main-v1
 
       - name: Install gokrazy CLI
         if: steps.cache-gok.outputs.cache-hit != 'true'

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 
@@ -13,14 +14,29 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/wifimanager"
 )
 
+// SyncManager describes the sync operations used by HTTP handlers.
+type SyncManager interface {
+	IsRunning() bool
+	Cancel() error
+	Sync(sourcePath, cardID string, totalFiles int, totalBytes int64) error
+	SetRemote(remoteName, remotePath string)
+	SetGooglePhotos(enabled bool, remoteName string)
+	ListRemotes() ([]string, error)
+	TestConnection() error
+	ListCardIDs() ([]syncmanager.FileInfo, error)
+	ListFiles(path string) ([]syncmanager.FileInfo, error)
+	ListFilesPaginated(path string, page, pageSize int) (*syncmanager.FileListResult, error)
+	GetFile(path string, w io.Writer) error
+}
+
 // Context holds dependencies for all handlers
 type Context struct {
-	StateMgr       *state.Manager
-	SyncMgr        *syncmanager.Manager
-	WiFiMgr        wifimanager.WiFiManager
-	AppSettings    *settings.Settings
-	SSRFValidator  *ssrf.Validator
-	CaptivePortal  *captiveportal.Authenticator
+	StateMgr      *state.Manager
+	SyncMgr       SyncManager
+	WiFiMgr       wifimanager.WiFiManager
+	AppSettings   *settings.Settings
+	SSRFValidator *ssrf.Validator
+	CaptivePortal *captiveportal.Authenticator
 }
 
 // JSONResponse writes a JSON response

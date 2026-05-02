@@ -18,10 +18,6 @@ func BenchmarkProgressParsing(b *testing.B) {
 		`{"level":"info","stats":{"bytes":5242880,"checks":50,"deletes":0,"elapsedTime":5.2,"errors":0,"fatalError":false,"renames":0,"retryError":false,"transfers":25,"transferring":[{"name":"IMG_001.JPG","size":524288,"bytes":262144,"percentage":50}]},"time":"2024-01-01T10:00:05Z"}`,
 	}
 
-	m := &Manager{
-		stateMgr: &mockStateManager{},
-	}
-
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, line := range logLines {
@@ -115,10 +111,6 @@ func BenchmarkErrorClassification(b *testing.B) {
 
 // BenchmarkLogLineBuffer measures buffered log processing
 func BenchmarkLogLineBuffer(b *testing.B) {
-	m := &Manager{
-		stateMgr: &mockStateManager{},
-	}
-
 	// Simulate buffered output
 	buffer := bytes.NewBuffer(nil)
 	for i := 0; i < 100; i++ {

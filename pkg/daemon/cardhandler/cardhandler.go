@@ -12,7 +12,6 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/sdmonitor"
 	"github.com/denysvitali/pictures-sync-s3/pkg/settings"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
-	"github.com/denysvitali/pictures-sync-s3/pkg/syncmanager"
 )
 
 const (
@@ -30,18 +29,24 @@ const (
 type Handler struct {
 	monitor      *sdmonitor.Monitor
 	stateMgr     *state.Manager
-	syncMgr      *syncmanager.Manager
+	syncMgr      syncManager
 	settings     *settings.Settings
 	eventMgr     *events.Manager
 	syncStartMu  sync.Mutex // Protects syncStarting flag
 	syncStarting bool       // True when a sync operation is being initiated
 }
 
+type syncManager interface {
+	IsRunning() bool
+	Cancel() error
+	Sync(sourcePath, cardID string, totalFiles int, totalBytes int64) error
+}
+
 // NewHandler creates a new card handler
 func NewHandler(
 	monitor *sdmonitor.Monitor,
 	stateMgr *state.Manager,
-	syncMgr *syncmanager.Manager,
+	syncMgr syncManager,
 	settings *settings.Settings,
 	eventMgr *events.Manager,
 ) *Handler {

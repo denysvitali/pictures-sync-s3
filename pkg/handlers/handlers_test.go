@@ -3,17 +3,19 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
-	"time"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/captiveportal"
 	"github.com/denysvitali/pictures-sync-s3/pkg/settings"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ssrf"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
+	"github.com/denysvitali/pictures-sync-s3/pkg/syncmanager"
 	"github.com/denysvitali/pictures-sync-s3/pkg/wifimanager"
 )
 
@@ -22,37 +24,41 @@ type mockSyncManager struct {
 	isRunning    bool
 	cancelCalled bool
 	syncError    error
-	files        []string
-	cardIDs      []string
+	files        []syncmanager.FileInfo
+	cardIDs      []syncmanager.FileInfo
 }
 
-func (m *mockSyncManager) IsRunning() bool                                { return m.isRunning }
-func (m *mockSyncManager) Cancel() error                                  { m.cancelCalled = true; return nil }
-func (m *mockSyncManager) Sync(string, string, int, int64) error          { return m.syncError }
-func (m *mockSyncManager) SetGooglePhotos(bool, string)                   {}
-func (m *mockSyncManager) UpdateConfig(string, string, int, int)          {}
-func (m *mockSyncManager) ListFiles(path string) ([]string, error)        { return m.files, nil }
-func (m *mockSyncManager) ListCardIDs() ([]string, error)                 { return m.cardIDs, nil }
-func (m *mockSyncManager) GetFile(path string, w http.ResponseWriter) error { return nil }
-func (m *mockSyncManager) ListFilesPaginated(path string, page, pageSize int) (map[string]interface{}, error) {
-	return map[string]interface{}{
-		"files":       m.files,
-		"page":        page,
-		"page_size":   pageSize,
-		"total_pages": 1,
-		"total_files": len(m.files),
+func (m *mockSyncManager) IsRunning() bool                       { return m.isRunning }
+func (m *mockSyncManager) Cancel() error                         { m.cancelCalled = true; return nil }
+func (m *mockSyncManager) Sync(string, string, int, int64) error { return m.syncError }
+func (m *mockSyncManager) SetRemote(string, string)              {}
+func (m *mockSyncManager) SetGooglePhotos(bool, string)          {}
+func (m *mockSyncManager) ListRemotes() ([]string, error)        { return []string{"local"}, nil }
+func (m *mockSyncManager) TestConnection() error                 { return nil }
+func (m *mockSyncManager) ListFiles(path string) ([]syncmanager.FileInfo, error) {
+	return m.files, nil
+}
+func (m *mockSyncManager) ListCardIDs() ([]syncmanager.FileInfo, error) { return m.cardIDs, nil }
+func (m *mockSyncManager) GetFile(path string, w io.Writer) error       { return nil }
+func (m *mockSyncManager) ListFilesPaginated(path string, page, pageSize int) (*syncmanager.FileListResult, error) {
+	return &syncmanager.FileListResult{
+		Files:      m.files,
+		Page:       page,
+		PageSize:   pageSize,
+		TotalPages: 1,
+		Total:      len(m.files),
 	}, nil
 }
 
 // mockWiFiManager implements wifimanager.WiFiManager for testing
 type mockWiFiManager struct{}
 
-func (m *mockWiFiManager) GetNetworks() []wifimanager.Network             { return nil }
-func (m *mockWiFiManager) AddNetwork(ssid, password string) error        { return nil }
-func (m *mockWiFiManager) RemoveNetwork(ssid string) error                { return nil }
+func (m *mockWiFiManager) GetNetworks() []wifimanager.Network              { return nil }
+func (m *mockWiFiManager) AddNetwork(ssid, password string) error          { return nil }
+func (m *mockWiFiManager) RemoveNetwork(ssid string) error                 { return nil }
 func (m *mockWiFiManager) ReorderNetworks(ssids []string) error            { return nil }
 func (m *mockWiFiManager) ScanNetworks() ([]wifimanager.ScanResult, error) { return nil, nil }
-func (m *mockWiFiManager) ListNetworks() ([]wifimanager.Network, error) { return nil, nil }
+func (m *mockWiFiManager) ListNetworks() ([]wifimanager.Network, error)    { return nil, nil }
 func (m *mockWiFiManager) GetCurrentConnection() (*wifimanager.ConnectionInfo, error) {
 	return &wifimanager.ConnectionInfo{SSID: "TestNetwork", Signal: -40}, nil
 }
@@ -76,8 +82,14 @@ func setupTestContext(t *testing.T) (*Context, func()) {
 	}
 
 	mockSync := &mockSyncManager{
-		files:   []string{"file1.jpg", "file2.jpg"},
-		cardIDs: []string{"card-123", "card-456"},
+		files: []syncmanager.FileInfo{
+			{Name: "file1.jpg", Path: "file1.jpg"},
+			{Name: "file2.jpg", Path: "file2.jpg"},
+		},
+		cardIDs: []syncmanager.FileInfo{
+			{Name: "card-123", Path: "card-123", IsDir: true},
+			{Name: "card-456", Path: "card-456", IsDir: true},
+		},
 	}
 
 	ctx := &Context{
@@ -628,10 +640,11 @@ func BenchmarkHandleFilesPaginated(b *testing.B) {
 
 	// Create mock with many files
 	mockSync := &mockSyncManager{
-		files: make([]string, 1000),
+		files: make([]syncmanager.FileInfo, 1000),
 	}
 	for i := 0; i < 1000; i++ {
-		mockSync.files[i] = "file" + string(rune(i)) + ".jpg"
+		name := "file" + string(rune(i)) + ".jpg"
+		mockSync.files[i] = syncmanager.FileInfo{Name: name, Path: name}
 	}
 
 	ctx := &Context{
