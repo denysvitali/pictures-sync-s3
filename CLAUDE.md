@@ -38,7 +38,6 @@ A Gokrazy-based photo backup appliance for Raspberry Pi 4 that automatically syn
 # Build all services
 go build ./cmd/pictures-sync
 go build ./cmd/webui
-go build ./cmd/mock-webui
 
 # Run comprehensive tests
 go test ./...                              # All tests
@@ -49,7 +48,6 @@ go test -bench=. -benchmem ./...          # Performance benchmarks
 
 # Run services locally
 PORT=8080 ./webui                         # WebUI only (no hardware needed)
-PORT=8080 ./mock-webui                    # Mock backend for UI development
 
 # Performance and load testing
 cd tests/e2e && make test                 # End-to-end tests
@@ -87,8 +85,7 @@ gok -i photo-backup edit
    - Real-time WebSocket with authentication
    - gzip compression and optimized asset delivery
 
-3. **mock-webui** (`cmd/mock-webui/main.go`):
-   - Development server with simulated backend
+3. **webui** (`cmd/webui/main.go`):
    - E2E testing support
    - UI development without hardware
 
