@@ -71,10 +71,37 @@ jobs:
         run: |
           echo "PATH=$PATH:$(go env GOPATH)/bin" >> "$GITHUB_ENV"
 
+      - name: Cache static arm64 hostapd
+        id: cache-hostapd
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/dist/hostapd-arm64/hostapd
+          key: ${{ runner.os }}-${{ runner.arch }}-hostapd-arm64-${{ hashFiles('.github/scripts/build-hostapd-arm64.sh') }}
+
       - name: Build static arm64 hostapd
-        id: hostapd
+        if: steps.cache-hostapd.outputs.cache-hit != 'true'
         run: |
           bash .github/scripts/build-hostapd-arm64.sh
+
+      - name: Resolve static arm64 hostapd
+        id: hostapd
+        shell: bash
+        run: |
+          hostapd_binary="${{ github.workspace }}/dist/hostapd-arm64/hostapd"
+          if [ ! -x "$hostapd_binary" ]; then
+            echo "::error::static arm64 hostapd binary is missing or not executable: $hostapd_binary"
+            exit 1
+          fi
+          file "$hostapd_binary"
+          if ! file "$hostapd_binary" | grep -q 'ARM aarch64'; then
+            echo "::error::cached hostapd is not an arm64 binary"
+            exit 1
+          fi
+          if ! file "$hostapd_binary" | grep -q 'statically linked'; then
+            echo "::error::cached hostapd is not statically linked"
+            exit 1
+          fi
+          echo "hostapd_binary=$hostapd_binary" >> "$GITHUB_OUTPUT"
 
       - name: Build flashable Gokrazy image
         id: build
