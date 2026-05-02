@@ -16,7 +16,7 @@ permissions:
   pull-requests: write
 
 env:
-  GO_VERSION: '1.25'
+  GO_VERSION: '1.26'
 
 jobs:
   # Job 1: Go Vulnerability Scanning
