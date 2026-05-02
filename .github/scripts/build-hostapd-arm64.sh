@@ -7,19 +7,17 @@ HOSTAPD_SHA256="${HOSTAPD_SHA256:-2b3facb632fd4f65e32f4bf82a76b4b72c501f995a4f62
 OUTPUT_DIR="${OUTPUT_DIR:-$PWD/dist/hostapd-arm64}"
 BUILD_DIR="${BUILD_DIR:-$PWD/.hostapd-build}"
 
-sudo dpkg --add-architecture arm64
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
   ca-certificates \
   curl \
-  gcc-aarch64-linux-gnu \
-  libc6-dev-arm64-cross \
-  libnl-3-dev:arm64 \
-  libnl-genl-3-dev:arm64 \
-  libssl-dev:arm64 \
+  gcc \
+  libnl-3-dev \
+  libnl-genl-3-dev \
+  libssl-dev \
   make \
   pkg-config \
-  zlib1g-dev:arm64
+  zlib1g-dev
 
 rm -rf "$BUILD_DIR" "$OUTPUT_DIR"
 mkdir -p "$BUILD_DIR" "$OUTPUT_DIR"
@@ -43,10 +41,7 @@ CFLAGS += -Os
 LDFLAGS += -static
 EOF
 
-export PKG_CONFIG_LIBDIR="/usr/lib/aarch64-linux-gnu/pkgconfig"
-export PKG_CONFIG_SYSROOT_DIR="/"
-
-make -j"$(nproc)" CC=aarch64-linux-gnu-gcc hostapd
+make -j"$(nproc)" CC=gcc hostapd
 
 install -m 0755 hostapd "$OUTPUT_DIR/hostapd"
 file "$OUTPUT_DIR/hostapd"
@@ -63,4 +58,3 @@ fi
 
 echo "HOSTAPD_BINARY=$OUTPUT_DIR/hostapd" >> "${GITHUB_ENV:-/dev/null}"
 echo "hostapd_binary=$OUTPUT_DIR/hostapd" >> "${GITHUB_OUTPUT:-/dev/null}"
-

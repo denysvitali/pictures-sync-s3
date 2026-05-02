@@ -3,6 +3,7 @@ package cardhandler
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -10,7 +11,6 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/sdmonitor"
 	"github.com/denysvitali/pictures-sync-s3/pkg/settings"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
-	"github.com/denysvitali/pictures-sync-s3/pkg/syncmanager"
 )
 
 // setupTestEnvironment creates a test environment with all dependencies
@@ -42,13 +42,8 @@ func setupTestEnvironment(t *testing.T) (*Handler, *state.Manager, *testSyncMana
 		t.Fatalf("Failed to load settings: %v", err)
 	}
 
-	syncConfigPath := filepath.Join(tempDir, "rclone.conf")
-	if err := os.WriteFile(syncConfigPath, []byte{}, 0600); err != nil {
-		t.Fatalf("Failed to create sync config file: %v", err)
-	}
-
-	// Create sync manager (local backend so tests are deterministic)
-	syncMgr := syncmanager.NewManager(syncConfigPath, "local", tempDir, stateMgr, 4, 8)
+	// Create sync manager
+	syncMgr := &testSyncManager{}
 
 	// Create SD monitor
 	monitor := sdmonitor.NewMonitor(filepath.Join(tempDir, "mounts", "sdcard"))
@@ -59,31 +54,51 @@ func setupTestEnvironment(t *testing.T) (*Handler, *state.Manager, *testSyncMana
 	// Create handler
 	handler := NewHandler(monitor, stateMgr, syncMgr, appSettings, eventMgr)
 
-	return handler, stateMgr, &testSyncManager{manager: syncMgr}, tempDir
+	return handler, stateMgr, syncMgr, tempDir
 }
 
 // testSyncManager is a mock implementation of syncmanager.Manager
 type testSyncManager struct {
-	manager    *syncmanager.Manager
-	syncError  error
+	mu           sync.Mutex
+	isRunning    bool
+	cancelCalled bool
+	cancelFunc   func()
+	syncError    error
 }
 
 func (m *testSyncManager) setIsRunning(running bool) {
-	m.manager.mu.Lock()
-	m.manager.isRunning = running
-	m.manager.mu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.isRunning = running
+}
+
+func (m *testSyncManager) IsRunning() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.isRunning
 }
 
 func (m *testSyncManager) Cancel() error {
-	m.manager.mu.Lock()
-	if m.manager.cancelFunc == nil {
-		m.manager.mu.Unlock()
-		return nil
+	m.mu.Lock()
+	m.cancelCalled = true
+	cancelFunc := m.cancelFunc
+	m.mu.Unlock()
+	if cancelFunc != nil {
+		cancelFunc()
 	}
-	cancelFunc := m.manager.cancelFunc
-	m.manager.mu.Unlock()
-	cancelFunc()
 	return nil
+}
+
+func (m *testSyncManager) Sync(string, string, int, int64) error {
+	m.mu.Lock()
+	m.isRunning = true
+	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		m.isRunning = false
+		m.mu.Unlock()
+	}()
+	return m.syncError
 }
 
 // TestNewHandler verifies handler initialization
@@ -96,7 +111,7 @@ func TestNewHandler(t *testing.T) {
 	if handler.stateMgr != stateMgr {
 		t.Error("State manager not properly set")
 	}
-	if handler.syncMgr != mockSyncMgr.manager {
+	if handler.syncMgr != mockSyncMgr {
 		t.Error("Sync manager not properly set")
 	}
 	if handler.syncStarting {
@@ -149,7 +164,7 @@ func TestHandleInserted_BasicFlow(t *testing.T) {
 
 // TestHandleInserted_NoDCIM verifies handling of cards without DCIM
 func TestHandleInserted_NoDCIM(t *testing.T) {
-	handler, stateMgr, mockSyncMgr, tempDir := setupTestEnvironment(t)
+	handler, stateMgr, _, tempDir := setupTestEnvironment(t)
 
 	// Create mount point without DCIM
 	mountPath := filepath.Join(tempDir, "sdcard")
@@ -177,15 +192,15 @@ func TestHandleInserted_NoDCIM(t *testing.T) {
 	// Sync should not be called when DCIM folder is missing.
 
 	// Status should return to idle
-	state := stateMgr.GetState()
-	if state.Status != state.StatusIdle {
-		t.Errorf("Expected status idle, got %s", state.Status)
+	currentState := stateMgr.GetState()
+	if currentState.Status != state.StatusIdle {
+		t.Errorf("Expected status idle, got %s", currentState.Status)
 	}
 }
 
 // TestHandleInserted_NoPhotos verifies handling of empty DCIM
 func TestHandleInserted_NoPhotos(t *testing.T) {
-	handler, stateMgr, mockSyncMgr, tempDir := setupTestEnvironment(t)
+	handler, _, _, tempDir := setupTestEnvironment(t)
 
 	// Create DCIM but with no photos
 	mountPath := filepath.Join(tempDir, "sdcard")
@@ -271,11 +286,9 @@ func TestHandleRemoved_DuringSync(t *testing.T) {
 	// Simulate an active sync
 	mockSyncMgr.setIsRunning(true)
 	cancelCalled := false
-	mockSyncMgr.manager.mu.Lock()
-	mockSyncMgr.manager.cancelFunc = func() {
+	mockSyncMgr.cancelFunc = func() {
 		cancelCalled = true
 	}
-	mockSyncMgr.manager.mu.Unlock()
 	stateMgr.SetStatus(state.StatusSyncing)
 
 	event := sdmonitor.Event{
@@ -426,14 +439,10 @@ func BenchmarkHandleInserted(b *testing.B) {
 
 	stateMgr, _ := state.NewManager()
 	appSettings, _ := settings.Load()
-	syncConfigPath := filepath.Join(tempDir, "rclone.conf")
-	_ = os.WriteFile(syncConfigPath, []byte{}, 0600)
-	mockSyncMgr := &testSyncManager{
-		manager: syncmanager.NewManager(syncConfigPath, "local", tempDir, stateMgr, 4, 8),
-	}
+	mockSyncMgr := &testSyncManager{}
 	monitor := sdmonitor.NewMonitor(filepath.Join(tempDir, "mounts", "sdcard"))
 	eventMgr := events.NewManager()
-	handler := NewHandler(monitor, stateMgr, mockSyncMgr.manager, appSettings, eventMgr)
+	handler := NewHandler(monitor, stateMgr, mockSyncMgr, appSettings, eventMgr)
 
 	// Create test card
 	mountPath := filepath.Join(tempDir, "sdcard")
