@@ -17,7 +17,7 @@ jobs:
     timeout-minutes: 45
     env:
       GOKRAZY_INSTANCE: photo-backup
-      GOKRAZY_PARENT_DIR: ${{ runner.temp }}/gokrazy
+      GOKRAZY_PARENT_DIR: ${{ github.workspace }}/gokrazy
       IMAGE_NAME: photo-backup-rpi4b.img
     steps:
       - name: Checkout
@@ -38,7 +38,7 @@ jobs:
         env:
           GOKRAZY_INSTANCE: ${{ env.GOKRAZY_INSTANCE }}
           GOKRAZY_PARENT_DIR: ${{ env.GOKRAZY_PARENT_DIR }}
-          IMAGE_DIR: ${{ runner.temp }}/ota
+          IMAGE_DIR: ${{ github.workspace }}/ota
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
           GOKRAZY_IMAGE_MODE: full
         run: |
