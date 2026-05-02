@@ -10,6 +10,8 @@ import {
   Heading,
   HStack,
   Input,
+  NativeSelectField,
+  NativeSelectRoot,
   Spinner,
   Stack,
   TableBody,
@@ -188,17 +190,13 @@ export function WifiPage({ deviceUrl }) {
           </form>
 
           <HStack mt={3} spacing={2} wrap="wrap">
-            <Input
-              as="select"
-              size="sm"
-              width="180px"
-              value={sortBy}
-              onChange={(event) => setSortBy(event.target.value)}
-            >
-              <option value="signal">Signal</option>
-              <option value="name">Name</option>
-              <option value="security">Security</option>
-            </Input>
+            <NativeSelectRoot size="sm" width="180px">
+              <NativeSelectField value={sortBy} onChange={(event) => setSortBy(event.target.value)}>
+                <option value="signal">Signal</option>
+                <option value="name">Name</option>
+                <option value="security">Security</option>
+              </NativeSelectField>
+            </NativeSelectRoot>
             <Button size="sm" variant="outline" onClick={handleScan} isLoading={scanBusy}>
               Scan saved networks
             </Button>

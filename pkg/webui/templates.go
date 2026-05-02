@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-//go:embed dist/**/*
+//go:embed dist
 var assetsFS embed.FS
 
 func HandleSPA(w http.ResponseWriter, r *http.Request) {
