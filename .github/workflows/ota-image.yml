@@ -23,6 +23,7 @@ jobs:
       GOKRAZY_INSTANCE: photo-backup
       GOKRAZY_PARENT_DIR: ${{ github.workspace }}/gokrazy
       IMAGE_NAME: photo-backup-rpi4b.img
+      TARGET_STORAGE_BYTES: 8589934592
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -78,6 +79,7 @@ jobs:
           IMAGE_DIR: ${{ github.workspace }}/ota
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
           GOKRAZY_IMAGE_MODE: full
+          TARGET_STORAGE_BYTES: ${{ env.TARGET_STORAGE_BYTES }}
         run: |
           make ota
 

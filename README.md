@@ -439,6 +439,13 @@ Notes:
 
 Run the same locally with:
 ```bash
+GOKRAZY_IMAGE_MODE=full TARGET_STORAGE_BYTES=8589934592 make ota
+```
+
+`TARGET_STORAGE_BYTES` controls the size of the flash image when building a full SD-card image. Adjust it to match the target media size you want to provision.
+
+Or, if you only need the OTA squashfs image:
+```bash
 make ota
 ```
 
