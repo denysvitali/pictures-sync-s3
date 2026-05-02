@@ -9,12 +9,14 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gokrazy/updater"
 	"github.com/spf13/cobra"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/ota"
+	"github.com/denysvitali/pictures-sync-s3/pkg/utils"
 )
 
 func main() {
@@ -90,12 +92,16 @@ func run(ctx context.Context, opts options) error {
 	}
 
 	fmt.Fprintf(os.Stderr, "Uploading %s to %supdate/root...\n", opts.imagePath, baseURL)
-	if err := target.StreamTo(ctx, "root", gz); err != nil {
+	progress := newProgressReader(gz)
+	stopProgress := progress.report(ctx, os.Stderr, 2*time.Second)
+	if err := target.StreamTo(ctx, "root", progress); err != nil {
+		stopProgress()
 		if err == io.ErrUnexpectedEOF {
 			return fmt.Errorf("stream root image: truncated gzip input: %w", err)
 		}
 		return fmt.Errorf("stream root image: %w", err)
 	}
+	stopProgress()
 
 	if opts.testboot {
 		fmt.Fprintln(os.Stderr, "Marking new root for test boot...")
@@ -139,4 +145,71 @@ func envDefault(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+type progressReader struct {
+	reader io.Reader
+	bytes  atomic.Int64
+}
+
+func newProgressReader(reader io.Reader) *progressReader {
+	return &progressReader{reader: reader}
+}
+
+func (r *progressReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	if n > 0 {
+		r.bytes.Add(int64(n))
+	}
+	return n, err
+}
+
+func (r *progressReader) report(ctx context.Context, out io.Writer, interval time.Duration) func() {
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	start := time.Now()
+
+	print := func(final bool) {
+		transferred := r.bytes.Load()
+		elapsed := time.Since(start)
+		speed := 0.0
+		if elapsed > 0 {
+			speed = float64(transferred) / elapsed.Seconds()
+		}
+
+		if final {
+			fmt.Fprintf(out, "\rUploaded %s in %s (%s)\n", utils.FormatBytes(transferred), elapsed.Round(time.Second), utils.FormatSpeed(speed))
+			return
+		}
+		fmt.Fprintf(out, "\rUploaded %s (%s)", utils.FormatBytes(transferred), utils.FormatSpeed(speed))
+	}
+
+	go func() {
+		defer close(stopped)
+
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		print(false)
+		for {
+			select {
+			case <-ctx.Done():
+				print(true)
+				return
+			case <-done:
+				print(true)
+				return
+			case <-ticker.C:
+				print(false)
+			}
+		}
+	}()
+
+	var stoppedOnce atomic.Bool
+	return func() {
+		if stoppedOnce.CompareAndSwap(false, true) {
+			close(done)
+			<-stopped
+		}
+	}
 }
