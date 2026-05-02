@@ -6,6 +6,7 @@ GOKRAZY_INSTANCE="${GOKRAZY_INSTANCE:-photo-backup}"
 GOKRAZY_PARENT_DIR="${GOKRAZY_PARENT_DIR:-$HOME/.gokrazy/$GOKRAZY_INSTANCE}"
 IMAGE_DIR="${IMAGE_DIR:-$PWD/ota}"
 IMAGE_NAME="${IMAGE_NAME:-photo-backup-ota.squashfs}"
+GOKRAZY_IMAGE_MODE="${GOKRAZY_IMAGE_MODE:-ota}"
 IMAGE_PATH="${IMAGE_DIR}/${IMAGE_NAME}"
 
 mkdir -p "$GOKRAZY_PARENT_DIR"
@@ -52,7 +53,18 @@ cat > "$GOKRAZY_PARENT_DIR/$GOKRAZY_INSTANCE/config.json" <<EOF
 }
 EOF
 
-gok -i "$GOKRAZY_INSTANCE" overwrite --root "$IMAGE_PATH"
+case "$GOKRAZY_IMAGE_MODE" in
+  ota)
+    gok -i "$GOKRAZY_INSTANCE" overwrite --root "$IMAGE_PATH"
+    ;;
+  full)
+    gok -i "$GOKRAZY_INSTANCE" overwrite --full "$IMAGE_PATH"
+    ;;
+  *)
+    echo "Error: invalid GOKRAZY_IMAGE_MODE '$GOKRAZY_IMAGE_MODE' (expected 'ota' or 'full')"
+    exit 1
+    ;;
+esac
 
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
   echo "image_path=$IMAGE_PATH" >> "$GITHUB_OUTPUT"
