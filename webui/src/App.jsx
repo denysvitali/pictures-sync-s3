@@ -3,8 +3,32 @@ import { useEffect, useMemo, useState } from 'react'
 const TABS = ['status', 'wifi', 'history', 'gallery', 'config']
 const STORAGE_KEY = 'photo-backup-device-url'
 
+const defaultDeviceUrl = () => {
+  const saved = localStorage.getItem(STORAGE_KEY)
+  if (saved && !isHostedPagesUrl(saved)) {
+    return saved
+  }
+
+  const host = window.location.hostname.toLowerCase()
+  if (host.endsWith('.github.io') || host.endsWith('.github.com')) {
+    return ''
+  }
+
+  return `${window.location.origin}`
+}
+
+function isHostedPagesUrl(raw) {
+  try {
+    const url = new URL(raw)
+    const host = url.hostname.toLowerCase()
+    return host.endsWith('.github.io') || host.endsWith('.github.com')
+  } catch {
+    return false
+  }
+}
+
 function useDeviceUrl() {
-  const [deviceUrl, setDeviceUrlState] = useState(() => localStorage.getItem(STORAGE_KEY) || `${window.location.origin}`)
+  const [deviceUrl, setDeviceUrlState] = useState(defaultDeviceUrl)
 
   const setDeviceUrl = (value) => {
     const next = String(value || '').trim()
@@ -103,6 +127,9 @@ function ApiStatusPanel({ deviceUrl }) {
       <h2>Status</h2>
       {loading ? <p className="muted">Loading status...</p> : null}
       {error ? <p className="error">{error}</p> : null}
+      {!deviceUrl ? (
+        <p className="error">Set your device base URL (for example <code>http://192.168.1.10:8080</code>) to load live status.</p>
+      ) : null}
       <div className="row two-cols">
         <div className="stat">
           <h3>Current status</h3>
@@ -153,6 +180,7 @@ function ApiWifiPanel({ deviceUrl }) {
     <section className="card">
       <h2>Wi-Fi</h2>
       {loading ? <p className="muted">Loading Wi-Fi info...</p> : null}
+      {!deviceUrl ? <p className="error">Set your device base URL to load Wi-Fi data.</p> : null}
       {error ? <p className="error">{error}</p> : null}
       <div className="row two-cols">
         <div className="stat">
