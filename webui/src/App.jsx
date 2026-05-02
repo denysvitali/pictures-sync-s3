@@ -45,22 +45,22 @@ function DeviceSwitcher() {
   }
 
   return (
-    <Card border="1px solid" borderColor="whiteAlpha.300" bg="whiteAlpha.100">
-      <CardHeader>
-        <Flex align="center" justify="space-between" gap={4}>
-          <VStack align="start" spacing={1}>
+    <Card className="endpoint-card">
+      <CardHeader className="endpoint-header">
+        <Flex align="center" justify="space-between" gap={4} wrap="wrap">
+          <Box>
             <Heading size="md">Device endpoint</Heading>
-            <Text color="gray.300" fontSize="sm">
-              Point the control plane at your device API for live data.
+            <Text className="muted-text" fontSize="sm">
+              Connect this dashboard to the photo backup device API.
             </Text>
-          </VStack>
-          <Badge colorScheme="purple">Targeted API mode</Badge>
+          </Box>
+          <Badge className="mode-badge">Targeted API</Badge>
         </Flex>
       </CardHeader>
-      <CardBody pt={0}>
-        <HStack spacing={3} align="stretch">
-          <VStack align="stretch" spacing={1}>
-            <Text as="label" htmlFor="device-input" color="gray.200" fontSize="sm">
+      <CardBody className="endpoint-body">
+        <Box className="endpoint-form">
+          <Box className="field-stack">
+            <Text as="label" htmlFor="device-input" className="field-label">
               Base URL
             </Text>
             <Input
@@ -70,8 +70,8 @@ function DeviceSwitcher() {
               placeholder="http://192.168.1.10:8080"
               _focus={{ boxShadow: 'none', borderColor: 'teal.300' }}
             />
-          </VStack>
-          <VStack align="stretch" spacing={2}>
+          </Box>
+          <HStack className="endpoint-actions">
             <Button colorScheme="teal" onClick={save}>
               Save
             </Button>
@@ -81,15 +81,15 @@ function DeviceSwitcher() {
             <Button variant="ghost" onClick={clearDeviceUrl}>
               Clear
             </Button>
-          </VStack>
-        </HStack>
-        <Text mt={3} color="gray.300" fontSize="sm">
-          Active target:&nbsp;
-          <Box as="span" fontFamily="mono" color="white">
+          </HStack>
+        </Box>
+        <Box className="active-target">
+          <Text className="field-label">Active target</Text>
+          <Box as="span" className="target-value">
             {deviceUrl || '(not set)'}
           </Box>
-        </Text>
-        <HStack mt={3} spacing={2} wrap="wrap">
+        </Box>
+        <HStack className="quick-targets">
           {DEVICE_EXAMPLES.map((item) => (
             <Button size="sm" variant="outline" key={item} onClick={() => setDeviceUrl(item)}>
               {item}
@@ -103,7 +103,7 @@ function DeviceSwitcher() {
 
 function DeviceMissingNotice() {
   return (
-    <Card bg="yellow.900" color="yellow.100" border="1px solid" borderColor="yellow.500">
+    <Card className="notice-card">
       <CardBody>
         <Alert status="warning" variant="subtle">
           <AlertIndicator />
@@ -150,41 +150,35 @@ export default function App() {
   }, [])
 
   return (
-    <Box
-      minH="100vh"
-      bgGradient="linear(to-br, #020617, #020617 35%, #0b1630)"
-      color="gray.100"
-      px={{ base: 4, md: 6 }}
-      py={{ base: 4, md: 6 }}
-    >
+    <Box className="app-shell">
       <Container maxW="6xl">
-        <VStack align="stretch" spacing={4}>
-          <Card
-            bgGradient="linear(to-r, #111827, #1f2937)"
-            border="1px solid"
-            borderColor="whiteAlpha.300"
-          >
-            <CardBody>
-              <Heading size="lg" letterSpacing="wide">
+        <VStack align="stretch" className="app-stack">
+          <Box className="hero-panel">
+            <Box>
+              <Heading size="lg" className="hero-title">
                 Photo Backup Station
               </Heading>
-              <Text color="gray.300" mt={2}>
+              <Text className="hero-copy">
                 Remote status dashboard and sync configuration for your device.
               </Text>
-            </CardBody>
-          </Card>
+            </Box>
+            <Box className="hero-status">
+              <Text className="field-label">Current target</Text>
+              <Text className="hero-target">{deviceUrl || 'Not configured'}</Text>
+            </Box>
+          </Box>
 
           <DeviceSwitcher />
 
-          <Card bg="whiteAlpha.80" p={2} border="1px solid" borderColor="whiteAlpha.200">
+          <Card className="nav-card">
             <TabsRoot
               value={activeRoute.path}
               onValueChange={(event) => navigateRoute(event.value)}
               variant="line"
             >
-              <TabsList>
+              <TabsList className="nav-tabs">
                 {pageRegistry.map((route) => (
-                  <TabsTrigger key={route.path} value={route.path} _selected={{ color: 'white', borderColor: 'teal.300' }} gap={2}>
+                  <TabsTrigger key={route.path} value={route.path} className="nav-tab" _selected={{ color: 'white', borderColor: 'teal.300' }}>
                     <Text as="span">{route.icon}</Text>
                     <Text as="span">{quickRouteLabel(route)}</Text>
                   </TabsTrigger>
