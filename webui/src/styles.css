@@ -2,62 +2,18 @@
   color-scheme: dark;
 }
 
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 html,
-body,
-#root {
+body {
   margin: 0;
   min-height: 100%;
 }
 
-body {
-  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-  background: radial-gradient(circle at top left, #111827, #020617 45%, #010409);
-  color: #e5edf6;
-  line-height: 1.4;
-}
-
 #root {
-  width: min(1040px, calc(100% - 2rem));
-  margin: 0 auto;
-  padding: 1.5rem 0 2rem;
-}
-
-.app-shell {
-  display: grid;
-  gap: 1rem;
-}
-
-.hero-card {
-  border: 1px solid rgba(148, 163, 184, 0.3);
-  border-radius: 14px;
-  padding: 1rem 1.25rem;
-  background: linear-gradient(150deg, rgba(15, 23, 42, 0.92), rgba(7, 14, 29, 0.9));
-}
-
-.hero-card h1 {
-  margin: 0 0 0.25rem;
-  letter-spacing: 0.01em;
-}
-
-.panel-section {
-  margin-top: 0.1rem;
-}
-
-.api-json {
-  margin: 0;
-  border-radius: 0.6rem;
-  padding: 0.75rem;
-  background: #020617;
-  color: #dbeafe;
-  overflow: auto;
-  font-size: 0.85rem;
-  max-height: 320px;
-}
-
-.api-list .list-group-item {
-  color: #e2e8f0;
-}
-
-.text-primary {
-  color: #93c5fd !important;
+  min-height: 100%;
 }
