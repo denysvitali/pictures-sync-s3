@@ -8,7 +8,7 @@ on:
   push:
     branches: [main, master]
     paths:
-      - 'webui-react/dist/**'
+      - 'pkg/webui/dist/**'
       - '.github/workflows/deploy-webui.yml'
   workflow_dispatch:
 
@@ -34,7 +34,7 @@ jobs:
       - name: Upload pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: webui-react/dist
+          path: pkg/webui/dist
 
       - name: Deploy to GitHub Pages
         id: deployment
