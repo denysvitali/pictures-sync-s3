@@ -46,10 +46,14 @@ jobs:
           corepack enable
           pnpm install --frozen-lockfile || pnpm install
           pnpm build
+          if [ ! -d dist ] || [ -z "$(find dist -maxdepth 1 -mindepth 1 | head -n 1)" ]; then
+            echo "::error::webui-react/dist is missing or empty after pnpm build"
+            exit 1
+          fi
           cd ..
           rm -rf pkg/webui/dist/*
           mkdir -p pkg/webui/dist/static
-          cp -r webui-react/dist/. pkg/webui/dist/ || true
+          cp -r webui-react/dist/. pkg/webui/dist/
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v6
