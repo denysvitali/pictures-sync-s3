@@ -7,6 +7,7 @@ GOKRAZY_PARENT_DIR="${GOKRAZY_PARENT_DIR:-$HOME/.gokrazy/$GOKRAZY_INSTANCE}"
 IMAGE_DIR="${IMAGE_DIR:-$PWD/ota}"
 IMAGE_NAME="${IMAGE_NAME:-photo-backup-ota.squashfs}"
 GOKRAZY_IMAGE_MODE="${GOKRAZY_IMAGE_MODE:-ota}"
+TARGET_STORAGE_BYTES="${TARGET_STORAGE_BYTES:-}"
 IMAGE_PATH="${IMAGE_DIR}/${IMAGE_NAME}"
 
 mkdir -p "$GOKRAZY_PARENT_DIR"
@@ -57,7 +58,11 @@ case "$GOKRAZY_IMAGE_MODE" in
     gok -i "$GOKRAZY_INSTANCE" overwrite --root "$IMAGE_PATH"
     ;;
   full)
-    gok -i "$GOKRAZY_INSTANCE" overwrite --full "$IMAGE_PATH"
+    if [ -z "$TARGET_STORAGE_BYTES" ]; then
+      echo "Error: TARGET_STORAGE_BYTES is required when GOKRAZY_IMAGE_MODE=full"
+      exit 1
+    fi
+    gok -i "$GOKRAZY_INSTANCE" overwrite --full --target_storage_bytes "$TARGET_STORAGE_BYTES" "$IMAGE_PATH"
     ;;
   *)
     echo "Error: invalid GOKRAZY_IMAGE_MODE '$GOKRAZY_IMAGE_MODE' (expected 'ota' or 'full')"
