@@ -51,6 +51,8 @@ export function ConfigPage({ deviceUrl }) {
   const [googlePhotosEnabled, setGooglePhotosEnabled] = useState(false)
   const [googlePhotosRemoteName, setGooglePhotosRemoteName] = useState('')
   const [tailscaleAuthKey, setTailscaleAuthKey] = useState('')
+  const [tailscaleAuthKeyConfigured, setTailscaleAuthKeyConfigured] = useState(false)
+  const [tailscaleAuthKeyPath, setTailscaleAuthKeyPath] = useState('/perm/tailscale/auth_key')
   const [breakglassKeys, setBreakglassKeys] = useState('')
   const [breakglassPath, setBreakglassPath] = useState('/perm/breakglass/authorized_keys')
   const [savingBreakglass, setSavingBreakglass] = useState(false)
@@ -76,6 +78,8 @@ export function ConfigPage({ deviceUrl }) {
       setCheckers(toNumberOrDefault(settingsResponse?.checkers, 8))
       setGooglePhotosEnabled(Boolean(settingsResponse?.google_photos_enabled))
       setGooglePhotosRemoteName(settingsResponse?.google_photos_remote_name || '')
+      setTailscaleAuthKeyConfigured(Boolean(settingsResponse?.tailscale_auth_key_configured))
+      setTailscaleAuthKeyPath(settingsResponse?.tailscale_auth_key_path || '/perm/tailscale/auth_key')
       setBreakglassKeys(breakglassResponse?.authorized_keys || '')
       setBreakglassPath(breakglassResponse?.path || '/perm/breakglass/authorized_keys')
       setOtaStatus(otaResponse || { state: 'idle' })
@@ -293,9 +297,14 @@ export function ConfigPage({ deviceUrl }) {
                     />
                   </VStack>
                   <VStack align="start" spacing={1}>
-                    <Text color="gray.200" fontSize="sm">
-                      Tailscale auth key
-                    </Text>
+                    <HStack justify="space-between" width="100%">
+                      <Text color="gray.200" fontSize="sm">
+                        Tailscale auth key
+                      </Text>
+                      <Badge colorScheme={tailscaleAuthKeyConfigured ? 'green' : 'orange'}>
+                        {tailscaleAuthKeyConfigured ? 'configured' : 'not configured'}
+                      </Badge>
+                    </HStack>
                     <Input
                       type="password"
                       autoComplete="off"
@@ -303,6 +312,9 @@ export function ConfigPage({ deviceUrl }) {
                       onChange={(event) => setTailscaleAuthKey(event.target.value)}
                       placeholder="tskey-auth-..."
                     />
+                    <Text fontSize="xs" color="gray.400">
+                      Stored at {tailscaleAuthKeyPath}
+                    </Text>
                   </VStack>
                 </Stack>
                 <HStack mt={4} spacing={2}>

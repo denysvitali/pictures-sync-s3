@@ -18,6 +18,7 @@ type Manager struct {
 	Runner     ProcessRunner
 	Configurer InterfaceConfigurer
 	Connected  func(Config) bool
+	Reboot     func() error
 }
 
 // NewManager creates a Manager with production dependencies.
@@ -26,7 +27,8 @@ func NewManager(cfg Config) *Manager {
 		Config:     cfg,
 		Runner:     execRunner{},
 		Configurer: linuxInterfaceConfigurer{},
-		Connected:  interfaceHasUsableIPv4,
+		Connected:  hasUsableConnectivity,
+		Reboot:     rebootSystem,
 	}
 }
 
@@ -42,7 +44,10 @@ func (m *Manager) Run(ctx context.Context) error {
 		m.Configurer = linuxInterfaceConfigurer{}
 	}
 	if m.Connected == nil {
-		m.Connected = interfaceHasUsableIPv4
+		m.Connected = hasUsableConnectivity
+	}
+	if m.Reboot == nil {
+		m.Reboot = rebootSystem
 	}
 
 	initialHasConfig, err := HasConfiguredNetworks(m.Config.ClientConfigPath, m.Config.AppConfigPath)
@@ -120,10 +125,10 @@ func (m *Manager) Run(ctx context.Context) error {
 				continue
 			}
 			if hasConfig && !initialHasConfig {
-				log.Printf("provision-ap: Wi-Fi config saved; stopping hotspot")
+				log.Printf("provision-ap: Wi-Fi config saved; rebooting into client mode")
 				cancelServers()
 				wg.Wait()
-				return nil
+				return m.Reboot()
 			}
 		}
 	}
@@ -152,11 +157,23 @@ func waitForConnection(ctx context.Context, cfg Config, connected func(Config) b
 	}
 }
 
-func interfaceHasUsableIPv4(cfg Config) bool {
-	intf, err := net.InterfaceByName(cfg.Interface)
+func hasUsableConnectivity(cfg Config) bool {
+	interfaces, err := net.Interfaces()
 	if err != nil {
 		return false
 	}
+	for _, intf := range interfaces {
+		if intf.Flags&net.FlagUp == 0 || intf.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		if interfaceHasUsableIPv4(intf, cfg) {
+			return true
+		}
+	}
+	return false
+}
+
+func interfaceHasUsableIPv4(intf net.Interface, cfg Config) bool {
 	addrs, err := intf.Addrs()
 	if err != nil {
 		return false
@@ -170,7 +187,7 @@ func interfaceHasUsableIPv4(cfg Config) bool {
 		if ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
 			continue
 		}
-		if cfg.APIP != nil && ip.Equal(cfg.APIP) {
+		if intf.Name == cfg.Interface && cfg.APIP != nil && ip.Equal(cfg.APIP) {
 			continue
 		}
 		return true
