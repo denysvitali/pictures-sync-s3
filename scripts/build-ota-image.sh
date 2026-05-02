@@ -42,7 +42,8 @@ cat > "$GOKRAZY_PARENT_DIR/$GOKRAZY_INSTANCE/config.json" <<EOF
   "Update": {
     "HTTPPort": "80",
     "HTTPSPort": "443",
-    "UseTLS": "self-signed"
+    "UseTLS": "self-signed",
+    "HTTPPassword": "photo-backup"
   },
   "Packages": [
     "github.com/gokrazy/fbstatus",
