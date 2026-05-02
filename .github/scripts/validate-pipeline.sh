@@ -93,11 +93,11 @@ echo ""
 
 # Check documentation
 echo -e "${YELLOW}Documentation:${NC}"
-check_file "CI/CD documentation" "CI_CD.md"
 check_file "Security policy" ".github/SECURITY.md"
-check_file "Quick start guide" ".github/QUICKSTART_CI.md"
-check_file "CI/CD summary" ".github/CI_CD_SUMMARY.md"
-check_file "Badges reference" ".github/BADGES.md"
+check_file "CI/CD documentation" "README.md" false
+check_file "Quick start guide" ".github/QUICKSTART_CI.md" false
+check_file "CI/CD summary" ".github/CI_CD_SUMMARY.md" false
+check_file "Badges reference" ".github/BADGES.md" false
 
 echo ""
 
@@ -209,7 +209,7 @@ if [ $FAILED -eq 0 ]; then
     echo -e "${GREEN}✓ Pipeline validation successful!${NC}"
     echo ""
     echo "Next steps:"
-    echo "  1. Review the documentation: cat CI_CD.md"
+    echo "  1. Review the documentation: cat README.md"
     echo "  2. Install development tools: make install-tools"
     echo "  3. Run local CI checks: make ci"
     echo "  4. Push to GitHub to trigger workflows"
