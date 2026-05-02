@@ -74,6 +74,7 @@ gok -i "$INSTANCE_NAME" add github.com/gokrazy/serial-busybox
 gok -i "$INSTANCE_NAME" add github.com/gokrazy/breakglass
 gok -i "$INSTANCE_NAME" add tailscale.com/cmd/tailscaled
 gok -i "$INSTANCE_NAME" add tailscale.com/cmd/tailscale
+gok -i "$INSTANCE_NAME" add ./cmd/wifi-init
 
 echo "Public packages added successfully!"
 echo "Note: Private packages will be added via config.json"
@@ -99,6 +100,7 @@ cat > "$CONFIG_FILE" <<EOF
     "github.com/gokrazy/breakglass",
     "tailscale.com/cmd/tailscaled",
     "tailscale.com/cmd/tailscale",
+    "github.com/denysvitali/pictures-sync-s3/cmd/wifi-init",
     "github.com/denysvitali/pictures-sync-s3/cmd/pictures-sync",
     "github.com/denysvitali/pictures-sync-s3/cmd/webui",
     "github.com/denysvitali/pictures-sync-s3/cmd/provision-ap"

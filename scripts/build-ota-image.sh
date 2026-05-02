@@ -34,6 +34,7 @@ gok -i "$GOKRAZY_INSTANCE" add github.com/gokrazy/serial-busybox
 gok -i "$GOKRAZY_INSTANCE" add github.com/gokrazy/breakglass
 gok -i "$GOKRAZY_INSTANCE" add tailscale.com/cmd/tailscaled
 gok -i "$GOKRAZY_INSTANCE" add tailscale.com/cmd/tailscale
+gok -i "$GOKRAZY_INSTANCE" add ./cmd/wifi-init
 gok -i "$GOKRAZY_INSTANCE" add ./cmd/pictures-sync
 gok -i "$GOKRAZY_INSTANCE" add ./cmd/webui
 gok -i "$GOKRAZY_INSTANCE" add ./cmd/provision-ap
@@ -55,6 +56,7 @@ cat > "$GOKRAZY_PARENT_DIR/$GOKRAZY_INSTANCE/config.json" <<EOF
     "github.com/gokrazy/breakglass",
     "tailscale.com/cmd/tailscaled",
     "tailscale.com/cmd/tailscale",
+    "github.com/denysvitali/pictures-sync-s3/cmd/wifi-init",
     "github.com/denysvitali/pictures-sync-s3/cmd/pictures-sync",
     "github.com/denysvitali/pictures-sync-s3/cmd/webui",
     "github.com/denysvitali/pictures-sync-s3/cmd/provision-ap"
