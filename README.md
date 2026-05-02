@@ -399,6 +399,26 @@ GitHub Actions builds a flashable Gokrazy image on every push to `master`, produ
 Workflow:
 `.github/workflows/ota-image.yml`
 
+To flash a SD card for Raspberry Pi 4:
+
+1. Download `photo-backup-rpi4b.img` from the latest successful `master` workflow run.
+2. Insert the target SD card and identify it (for example `/dev/sdb`).
+3. Unmount any mounted partitions for the card (for example `/dev/sdb1`, `/dev/sdb2`).
+4. Flash and flush the image:
+   ```bash
+   sudo dd if=photo-backup-rpi4b.img of=/dev/sdX bs=4M status=progress conv=fsync
+   ```
+   Replace `/dev/sdX` with your actual SD card device.
+5. Remove the card safely:
+   ```bash
+   sync
+   ```
+6. Insert into Raspberry Pi 4 and boot.
+
+Notes:
+- This image is a full `overwrite --full` Gokrazy image intended for initial provisioning on SD media.
+- Double-check the device path before running `dd` (it will destroy the selected disk).
+
 Run the same locally with:
 ```bash
 make ota
