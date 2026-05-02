@@ -52,8 +52,6 @@ gokrazy/
 # Build artifacts
 dist/
 build/
-!webui-react/dist/
-!webui-react/dist/**
 
 # Coverage reports
 coverage/
