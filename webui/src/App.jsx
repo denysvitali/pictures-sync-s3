@@ -23,6 +23,7 @@ import {
   VStack
 } from '@chakra-ui/react'
 import { useDeviceUrl } from './DeviceContext'
+import { getVersion } from './api'
 import { navigateRoute, parseHashRoute, pageByPath, pageRegistry } from './routes'
 
 const DEVICE_EXAMPLES = ['http://192.168.1.10:8080', 'http://localhost:8080']
@@ -135,8 +136,22 @@ function RouteRenderer({ route, deviceUrl }) {
   return <PageComponent deviceUrl={deviceUrl} />
 }
 
+function formatVersion(versionInfo) {
+  if (!versionInfo) return 'Unknown'
+  const rawVersion = versionInfo.version || 'dev'
+  const version = /^[a-f0-9]{40}$/i.test(rawVersion) ? rawVersion.slice(0, 7) : rawVersion
+  const commit = versionInfo.commit ? versionInfo.commit.slice(0, 7) : ''
+  const suffix = versionInfo.dirty ? ' dirty' : ''
+  if (commit && commit !== version && commit !== rawVersion) {
+    return `${version} (${commit}${suffix})`
+  }
+  return `${version}${suffix}`
+}
+
 export default function App() {
   const [activeRoutePath, setActiveRoutePath] = useState(parseHashRoute())
+  const [versionInfo, setVersionInfo] = useState(null)
+  const [versionError, setVersionError] = useState('')
   const { deviceUrl } = useDeviceUrl()
 
   const activeRoute = useMemo(() => pageByPath(activeRoutePath), [activeRoutePath])
@@ -148,6 +163,36 @@ export default function App() {
     window.addEventListener('hashchange', onHashChange)
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    if (!deviceUrl) {
+      setVersionInfo(null)
+      setVersionError('')
+      return () => {
+        cancelled = true
+      }
+    }
+
+    getVersion(deviceUrl)
+      .then((data) => {
+        if (!cancelled) {
+          setVersionInfo(data)
+          setVersionError('')
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setVersionInfo(null)
+          setVersionError(error.message || 'Version unavailable')
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [deviceUrl])
 
   return (
     <Box className="app-shell">
@@ -165,6 +210,10 @@ export default function App() {
             <Box className="hero-status">
               <Text className="field-label">Current target</Text>
               <Text className="hero-target">{deviceUrl || 'Not configured'}</Text>
+              <Text className="field-label version-label">Running version</Text>
+              <Text className={versionError ? 'hero-version unavailable' : 'hero-version'}>
+                {versionError ? 'Unavailable' : formatVersion(versionInfo)}
+              </Text>
             </Box>
           </Box>
 

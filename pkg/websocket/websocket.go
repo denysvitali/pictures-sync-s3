@@ -43,7 +43,7 @@ func (c *ConnectionRateLimiter) GetLimiter(ip string) *rate.Limiter {
 		// Double-check after acquiring write lock
 		limiter, exists = c.limiters[ip]
 		if !exists {
-			limiter = rate.NewLimiter(rate.Every(12*time.Second), 2) // 5 per minute, burst 2
+			limiter = rate.NewLimiter(connectionRateLimit, connectionRateBurst) // 5 per minute, burst 2
 			c.limiters[ip] = limiter
 		}
 		c.mu.Unlock()
@@ -81,8 +81,11 @@ var (
 	wsTokenMutex        sync.RWMutex
 	connRateLimiter     *ConnectionRateLimiter
 	connRateLimiterOnce sync.Once
+	connectionRateLimit = rate.Every(12 * time.Second)
+	connectionRateBurst = 2
 	allowedOrigins      = []string{} // Configurable whitelist (empty = use private IP validation)
 	allowedOriginsMutex sync.RWMutex
+	authReadTimeout     = 5 * time.Second
 	upgrader            = websocket.Upgrader{
 		CheckOrigin: checkOriginStrict,
 	}
@@ -363,8 +366,8 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager) http.Han
 		}
 		defer conn.Close()
 
-		// Set a deadline for receiving the auth token (5 seconds)
-		conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		// Set a deadline for receiving the auth token.
+		conn.SetReadDeadline(time.Now().Add(authReadTimeout))
 
 		// First message MUST be the auth token
 		var authMsg struct {

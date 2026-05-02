@@ -101,6 +101,52 @@ func TestLatestReleaseRejectsFlashOnlyAsset(t *testing.T) {
 	}
 }
 
+func TestShouldSkipUpdateTLSVerify(t *testing.T) {
+	tests := []struct {
+		name   string
+		rawURL string
+		want   bool
+	}{
+		{name: "https localhost", rawURL: "https://localhost/update/", want: true},
+		{name: "https localhost with dot", rawURL: "https://localhost./update/", want: true},
+		{name: "https ipv4 loopback", rawURL: "https://127.0.0.1/update/", want: true},
+		{name: "https ipv6 loopback", rawURL: "https://[::1]/update/", want: true},
+		{name: "https loopback with auth and port", rawURL: "https://gokrazy:pass@127.0.0.1:443/update/", want: true},
+		{name: "http loopback", rawURL: "http://127.0.0.1/update/", want: false},
+		{name: "https remote ip", rawURL: "https://192.168.1.50/update/", want: false},
+		{name: "https remote host", rawURL: "https://photo-backup.local/update/", want: false},
+		{name: "invalid", rawURL: "://", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldSkipUpdateTLSVerify(tt.rawURL); got != tt.want {
+				t.Fatalf("shouldSkipUpdateTLSVerify(%q) = %v, want %v", tt.rawURL, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGokrazyUpdateClientSkipsTLSVerifyOnlyForHTTPSLoopback(t *testing.T) {
+	client := gokrazyUpdateClient("https://127.0.0.1/update/", time.Minute)
+	if !transportSkipsTLSVerify(client.Transport) {
+		t.Fatal("loopback HTTPS client should skip TLS verification")
+	}
+
+	client = gokrazyUpdateClient("https://photo-backup.local/update/", time.Minute)
+	if transportSkipsTLSVerify(client.Transport) {
+		t.Fatal("remote HTTPS client should not skip TLS verification")
+	}
+}
+
+func transportSkipsTLSVerify(transport http.RoundTripper) bool {
+	t, ok := transport.(*http.Transport)
+	if !ok || t.TLSClientConfig == nil {
+		return false
+	}
+	return t.TLSClientConfig.InsecureSkipVerify
+}
+
 func jsonResponse(body []byte) *http.Response {
 	return &http.Response{
 		StatusCode: http.StatusOK,

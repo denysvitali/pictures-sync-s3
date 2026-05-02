@@ -3,10 +3,12 @@ package ota
 import (
 	"compress/gzip"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -117,7 +119,7 @@ func NewManager() *Manager {
 		AssetName:  envDefault("OTA_RELEASE_ASSET", DefaultAssetName),
 		APIURL:     envDefault("OTA_GITHUB_API_URL", DefaultGitHubAPIURL),
 		HTTPClient: httpClient,
-		Installer:  GokrazyInstaller{BaseURL: updateURL, HTTPClient: httpClient},
+		Installer:  GokrazyInstaller{BaseURL: updateURL, HTTPClient: gokrazyUpdateClient(updateURL, 30*time.Minute)},
 		status:     Status{State: "idle"},
 	}
 }
@@ -292,7 +294,8 @@ func (m *Manager) installer() Installer {
 	if m.Installer != nil {
 		return m.Installer
 	}
-	return GokrazyInstaller{BaseURL: defaultUpdateURLFromPassword(), HTTPClient: m.client()}
+	updateURL := defaultUpdateURLFromPassword()
+	return GokrazyInstaller{BaseURL: updateURL, HTTPClient: gokrazyUpdateClient(updateURL, 30*time.Minute)}
 }
 
 func (m *Manager) owner() string {
@@ -329,6 +332,37 @@ func valueDefault(value, fallback string) string {
 		return fallback
 	}
 	return strings.TrimSpace(value)
+}
+
+func gokrazyUpdateClient(rawURL string, timeout time.Duration) *http.Client {
+	client := &http.Client{Timeout: timeout}
+	if !shouldSkipUpdateTLSVerify(rawURL) {
+		return client
+	}
+	client.Transport = &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // Loopback-only gokrazy updater uses self-signed TLS.
+	}
+	return client
+}
+
+func shouldSkipUpdateTLSVerify(rawURL string) bool {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || u.Scheme != "https" {
+		return false
+	}
+	return isLoopbackHost(u.Hostname())
+}
+
+func isLoopbackHost(host string) bool {
+	host = strings.TrimSpace(strings.TrimSuffix(host, "."))
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
+		host = parsedHost
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func defaultUpdateURLFromPassword() string {

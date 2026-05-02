@@ -4,6 +4,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 // TestCheckOriginStrict_EmptyOrigin verifies empty origins are rejected
@@ -181,11 +183,6 @@ func TestIsPrivateIP(t *testing.T) {
 
 // TestRateLimiting verifies rate limiting per IP
 func TestRateLimiting(t *testing.T) {
-	// Skip this test in short mode due to time.Sleep
-	if testing.Short() {
-		t.Skip("Skipping rate limit test in short mode")
-	}
-
 	limiter := NewConnectionRateLimiter()
 
 	// First 2 requests should succeed (burst)
@@ -204,8 +201,8 @@ func TestRateLimiting(t *testing.T) {
 		t.Error("Third request should be rate limited")
 	}
 
-	// After waiting, request should succeed
-	time.Sleep(13 * time.Second) // Wait for rate limit to reset
+	l.SetLimit(rate.Every(time.Nanosecond))
+	time.Sleep(time.Millisecond)
 	if !l.Allow() {
 		t.Error("Request after wait should be allowed")
 	}

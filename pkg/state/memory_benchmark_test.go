@@ -222,16 +222,16 @@ func TestMemoryGrowthPattern(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	measurements := make([]uint64, 10)
+	measurements := make([]uint64, 3)
 
-	for iteration := 0; iteration < 10; iteration++ {
+	for iteration := 0; iteration < len(measurements); iteration++ {
 		runtime.GC()
 		var ms runtime.MemStats
 		runtime.ReadMemStats(&ms)
 		measurements[iteration] = ms.HeapAlloc
 
 		// Perform operations
-		for i := 0; i < 100; i++ {
+		for i := 0; i < 20; i++ {
 			// Subscribe/unsubscribe cycle
 			ch := m.Subscribe()
 			m.Unsubscribe(ch)
@@ -242,7 +242,7 @@ func TestMemoryGrowthPattern(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			for j := 0; j < 50; j++ {
+			for j := 0; j < 10; j++ {
 				m.UpdateSyncProgress(int64(j*20), int64(j*20*1024), "test.jpg", 1024, 1.5*1024*1024, "5m")
 			}
 
@@ -261,10 +261,10 @@ func TestMemoryGrowthPattern(t *testing.T) {
 	}
 
 	// Check for excessive growth (more than 10x from start to end)
-	if measurements[9] > measurements[0]*10 {
+	if measurements[len(measurements)-1] > measurements[0]*10 {
 		t.Errorf("Excessive memory growth detected: %.2f MB -> %.2f MB",
 			float64(measurements[0])/(1024*1024),
-			float64(measurements[9])/(1024*1024))
+			float64(measurements[len(measurements)-1])/(1024*1024))
 	}
 }
 

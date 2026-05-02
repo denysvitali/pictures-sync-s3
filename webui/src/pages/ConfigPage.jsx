@@ -21,6 +21,7 @@ import {
   WrapItem
 } from '@chakra-ui/react'
 import {
+  changeGokrazyPassword,
   getBreakglassAuthorizedKeys,
   getConfig,
   getOtaStatus,
@@ -53,6 +54,10 @@ export function ConfigPage({ deviceUrl }) {
   const [tailscaleAuthKey, setTailscaleAuthKey] = useState('')
   const [tailscaleAuthKeyConfigured, setTailscaleAuthKeyConfigured] = useState(false)
   const [tailscaleAuthKeyPath, setTailscaleAuthKeyPath] = useState('/perm/tailscale/auth_key')
+  const [currentGokrazyPassword, setCurrentGokrazyPassword] = useState('')
+  const [newGokrazyPassword, setNewGokrazyPassword] = useState('')
+  const [confirmGokrazyPassword, setConfirmGokrazyPassword] = useState('')
+  const [savingGokrazyPassword, setSavingGokrazyPassword] = useState(false)
   const [breakglassKeys, setBreakglassKeys] = useState('')
   const [breakglassPath, setBreakglassPath] = useState('/perm/breakglass/authorized_keys')
   const [savingBreakglass, setSavingBreakglass] = useState(false)
@@ -150,6 +155,27 @@ export function ConfigPage({ deviceUrl }) {
       setError(err.message)
     } finally {
       setSavingBreakglass(false)
+    }
+  }
+
+  const onChangeGokrazyPassword = async (event) => {
+    event.preventDefault()
+    setSavingGokrazyPassword(true)
+    setMessage('')
+    setError('')
+    try {
+      if (newGokrazyPassword !== confirmGokrazyPassword) {
+        throw new Error('New passwords do not match.')
+      }
+      await changeGokrazyPassword(deviceUrl, currentGokrazyPassword, newGokrazyPassword)
+      setCurrentGokrazyPassword('')
+      setNewGokrazyPassword('')
+      setConfirmGokrazyPassword('')
+      setMessage('Gokrazy UI password changed.')
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSavingGokrazyPassword(false)
     }
   }
 
@@ -323,6 +349,56 @@ export function ConfigPage({ deviceUrl }) {
                   </Button>
                   <Button type="button" onClick={onTest} isLoading={testing} variant="outline">
                     Test connection
+                  </Button>
+                </HStack>
+              </CardBody>
+            </Card>
+          </form>
+
+          <form onSubmit={onChangeGokrazyPassword}>
+            <Card variant="outline" bg="whiteAlpha.100">
+              <CardBody>
+                <Heading size="sm" mb={3}>
+                  Gokrazy UI password
+                </Heading>
+                <Stack spacing={3}>
+                  <VStack align="start" spacing={1}>
+                    <Text color="gray.200" fontSize="sm">
+                      Current password
+                    </Text>
+                    <Input
+                      type="password"
+                      autoComplete="current-password"
+                      value={currentGokrazyPassword}
+                      onChange={(event) => setCurrentGokrazyPassword(event.target.value)}
+                    />
+                  </VStack>
+                  <VStack align="start" spacing={1}>
+                    <Text color="gray.200" fontSize="sm">
+                      New password
+                    </Text>
+                    <Input
+                      type="password"
+                      autoComplete="new-password"
+                      value={newGokrazyPassword}
+                      onChange={(event) => setNewGokrazyPassword(event.target.value)}
+                    />
+                  </VStack>
+                  <VStack align="start" spacing={1}>
+                    <Text color="gray.200" fontSize="sm">
+                      Confirm new password
+                    </Text>
+                    <Input
+                      type="password"
+                      autoComplete="new-password"
+                      value={confirmGokrazyPassword}
+                      onChange={(event) => setConfirmGokrazyPassword(event.target.value)}
+                    />
+                  </VStack>
+                </Stack>
+                <HStack mt={4} spacing={2}>
+                  <Button type="submit" colorScheme="teal" isLoading={savingGokrazyPassword}>
+                    Change password
                   </Button>
                 </HStack>
               </CardBody>

@@ -16,6 +16,7 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/ssrf"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 	"github.com/denysvitali/pictures-sync-s3/pkg/syncmanager"
+	"github.com/denysvitali/pictures-sync-s3/pkg/version"
 	"github.com/denysvitali/pictures-sync-s3/pkg/wifimanager"
 )
 
@@ -147,6 +148,55 @@ func TestHandleStatus_WrongMethod(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	ctx.HandleStatus(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("Expected status 405, got %d", w.Code)
+	}
+}
+
+func TestHandleVersion_GET(t *testing.T) {
+	ctx, cleanup := setupTestContext(t)
+	defer cleanup()
+
+	oldVersion := version.Version
+	oldBuildDate := version.BuildDate
+	version.Version = "test-version"
+	version.BuildDate = "2026-05-03T00:00:00Z"
+	defer func() {
+		version.Version = oldVersion
+		version.BuildDate = oldBuildDate
+	}()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/version", nil)
+	w := httptest.NewRecorder()
+
+	ctx.HandleVersion(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+
+	var response version.Info
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if response.Version != "test-version" {
+		t.Errorf("Expected version test-version, got %q", response.Version)
+	}
+	if response.BuildDate != "2026-05-03T00:00:00Z" {
+		t.Errorf("Expected build date to be preserved, got %q", response.BuildDate)
+	}
+}
+
+func TestHandleVersion_WrongMethod(t *testing.T) {
+	ctx, cleanup := setupTestContext(t)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/version", nil)
+	w := httptest.NewRecorder()
+
+	ctx.HandleVersion(w, req)
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("Expected status 405, got %d", w.Code)

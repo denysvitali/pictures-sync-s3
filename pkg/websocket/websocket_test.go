@@ -5,13 +5,31 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/events"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 	"github.com/gorilla/websocket"
+	"golang.org/x/time/rate"
 )
+
+func resetWebSocketTestState(t *testing.T) {
+	t.Helper()
+	connRateLimiter = NewConnectionRateLimiter()
+	connRateLimiterOnce = sync.Once{}
+	connectionRateLimit = rate.Inf
+	connectionRateBurst = 1000
+	authReadTimeout = 5 * time.Second
+	t.Cleanup(func() {
+		connRateLimiter = nil
+		connRateLimiterOnce = sync.Once{}
+		connectionRateLimit = rate.Every(12 * time.Second)
+		connectionRateBurst = 2
+		authReadTimeout = 5 * time.Second
+	})
+}
 
 // Helper function to create a dialer with proper headers
 func createTestDialer() (*websocket.Dialer, http.Header) {
@@ -23,6 +41,7 @@ func createTestDialer() (*websocket.Dialer, http.Header) {
 
 // TestWebSocketAuthentication tests the WebSocket authentication flow
 func TestWebSocketAuthentication(t *testing.T) {
+	resetWebSocketTestState(t)
 	// Create test server
 	stateMgr, err := state.NewManager()
 	if err != nil {
@@ -72,8 +91,6 @@ func TestWebSocketAuthentication(t *testing.T) {
 	})
 
 	t.Run("authentication with invalid token", func(t *testing.T) {
-		time.Sleep(13 * time.Second) // Avoid rate limit - wait for bucket to refill
-
 		dialer, headers := createTestDialer()
 		conn, _, err := dialer.Dial(wsURL, headers)
 		if err != nil {
@@ -103,7 +120,7 @@ func TestWebSocketAuthentication(t *testing.T) {
 	})
 
 	t.Run("authentication timeout", func(t *testing.T) {
-		time.Sleep(13 * time.Second) // Avoid rate limit - wait for bucket to refill
+		authReadTimeout = 10 * time.Millisecond
 
 		dialer, headers := createTestDialer()
 		conn, _, err := dialer.Dial(wsURL, headers)
@@ -112,20 +129,16 @@ func TestWebSocketAuthentication(t *testing.T) {
 		}
 		defer conn.Close()
 
-		// Don't send auth message, wait for timeout
-		time.Sleep(6 * time.Second)
-
 		// Try to read - should get error or connection close
 		var response map[string]interface{}
+		conn.SetReadDeadline(time.Now().Add(time.Second))
 		err = conn.ReadJSON(&response)
-		if err == nil {
-			t.Error("Expected error or connection close, but read succeeded")
+		if err == nil && response["type"] != "error" {
+			t.Errorf("Expected error response or connection close, got %v", response["type"])
 		}
 	})
 
 	t.Run("token reuse prevention", func(t *testing.T) {
-		time.Sleep(19 * time.Second) // Avoid rate limit - wait for bucket to refill (6s auth timeout + 13s)
-
 		token := CreateWSToken()
 
 		// First connection - should succeed
@@ -569,6 +582,7 @@ func TestWebSocketCleanup(t *testing.T) {
 
 // TestWebSocketConcurrency tests concurrent WebSocket operations
 func TestWebSocketConcurrency(t *testing.T) {
+	resetWebSocketTestState(t)
 	stateMgr, err := state.NewManager()
 	if err != nil {
 		t.Fatalf("Failed to create state manager: %v", err)
@@ -581,8 +595,6 @@ func TestWebSocketConcurrency(t *testing.T) {
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
 
 	t.Run("multiple concurrent connections", func(t *testing.T) {
-		time.Sleep(15 * time.Second) // Wait for rate limit to reset from previous tests
-
 		numClients := 10
 		done := make(chan bool, numClients)
 
@@ -642,7 +654,7 @@ func TestWebSocketMessageValidation(t *testing.T) {
 
 	t.Run("malformed messages", func(t *testing.T) {
 		time.Sleep(500 * time.Millisecond) // Avoid rate limit
-		_ = CreateWSToken() // Create but don't use yet
+		_ = CreateWSToken()                // Create but don't use yet
 
 		dialer, headers := createTestDialer()
 		conn, _, err := dialer.Dial(wsURL, headers)

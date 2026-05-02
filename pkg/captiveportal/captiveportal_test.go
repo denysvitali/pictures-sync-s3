@@ -68,6 +68,7 @@ func TestCheckAndAuthenticate_RecentAuth(t *testing.T) {
 	}
 
 	auth := NewAuthenticator(getCurrentSSID)
+	auth.lastSSID = jinjiangSSID
 	auth.lastAuthTime = time.Now().Add(-1 * time.Minute) // Recent auth
 	auth.authenticators[jinjiangSSID] = func(ip, mac string) error {
 		authenticated = true

@@ -6,12 +6,14 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/denysvitali/pictures-sync-s3/pkg/auth"
 	"github.com/denysvitali/pictures-sync-s3/pkg/captiveportal"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ota"
 	"github.com/denysvitali/pictures-sync-s3/pkg/settings"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ssrf"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 	"github.com/denysvitali/pictures-sync-s3/pkg/syncmanager"
+	"github.com/denysvitali/pictures-sync-s3/pkg/version"
 	"github.com/denysvitali/pictures-sync-s3/pkg/wifimanager"
 )
 
@@ -39,6 +41,11 @@ type Context struct {
 	SSRFValidator *ssrf.Validator
 	CaptivePortal *captiveportal.Authenticator
 	OTAMgr        *ota.Manager
+	PasswordMgr   *auth.PasswordManager
+}
+
+func (ctx *Context) VersionInfo() version.Info {
+	return version.Get()
 }
 
 // JSONResponse writes a JSON response
