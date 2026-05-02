@@ -412,7 +412,7 @@ Workflow:
 To flash a SD card for Raspberry Pi 4:
 
 1. Download `photo-backup-rpi4b.img` from the latest successful `master` workflow run.
-2. Insert the target SD card and identify it (for example `/dev/sdb`).
+2. Insert the target SD card and identify it (for example `/dev/sdb`), then unmount any mounted partitions before flashing.
 3. Unmount any mounted partitions for the card (for example `/dev/sdb1`, `/dev/sdb2`).
 4. Flash and flush the image:
    ```bash
@@ -423,7 +423,15 @@ To flash a SD card for Raspberry Pi 4:
    ```bash
    sync
    ```
-6. Insert into Raspberry Pi 4 and boot.
+6. Verify the write completed:
+   ```bash
+   lsblk /dev/sdX
+   ```
+7. Remove the card safely and insert into Raspberry Pi 4:
+   ```bash
+   sync
+   ```
+8. Boot the device.
 
 Notes:
 - This image is a full `overwrite --full` Gokrazy image intended for initial provisioning on SD media.

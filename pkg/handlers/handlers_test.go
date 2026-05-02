@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"time"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -46,15 +47,14 @@ func (m *mockSyncManager) ListFilesPaginated(path string, page, pageSize int) (m
 // mockWiFiManager implements wifimanager.WiFiManager for testing
 type mockWiFiManager struct{}
 
-func (m *mockWiFiManager) GetCurrentSSID() (string, error)              { return "TestNetwork", nil }
-func (m *mockWiFiManager) Scan() ([]wifimanager.Network, error)        { return nil, nil }
-func (m *mockWiFiManager) Connect(ssid, password string) error         { return nil }
-func (m *mockWiFiManager) Disconnect() error                           { return nil }
-func (m *mockWiFiManager) AddNetwork(ssid, password, security string) error { return nil }
-func (m *mockWiFiManager) RemoveNetwork(ssid string) error             { return nil }
+func (m *mockWiFiManager) GetNetworks() []wifimanager.Network             { return nil }
+func (m *mockWiFiManager) AddNetwork(ssid, password string) error        { return nil }
+func (m *mockWiFiManager) RemoveNetwork(ssid string) error                { return nil }
+func (m *mockWiFiManager) ReorderNetworks(ssids []string) error            { return nil }
+func (m *mockWiFiManager) ScanNetworks() ([]wifimanager.ScanResult, error) { return nil, nil }
 func (m *mockWiFiManager) ListNetworks() ([]wifimanager.Network, error) { return nil, nil }
-func (m *mockWiFiManager) GetStatus() (wifimanager.Status, error) {
-	return wifimanager.Status{Connected: true, SSID: "TestNetwork"}, nil
+func (m *mockWiFiManager) GetCurrentConnection() (*wifimanager.ConnectionInfo, error) {
+	return &wifimanager.ConnectionInfo{SSID: "TestNetwork", Signal: -40}, nil
 }
 
 // setupTestContext creates a test context with mock dependencies
@@ -85,7 +85,7 @@ func setupTestContext(t *testing.T) (*Context, func()) {
 		SyncMgr:       mockSync,
 		WiFiMgr:       &mockWiFiManager{},
 		AppSettings:   appSettings,
-		SSRFValidator: ssrf.NewValidator(),
+		SSRFValidator: ssrf.NewValidator(100, time.Minute),
 		CaptivePortal: captiveportal.NewAuthenticator(func() (string, error) {
 			return "TestNetwork", nil
 		}),

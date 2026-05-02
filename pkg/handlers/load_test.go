@@ -592,7 +592,7 @@ func BenchmarkSettingsOperations(b *testing.B) {
 			settingsPath := fmt.Sprintf("%s/settings-%d.json", tmpDir, i)
 			b.StartTimer()
 
-			s, err := settings.NewSettings(settingsPath)
+			s, err := settings.LoadFrom(settingsPath)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -600,30 +600,29 @@ func BenchmarkSettingsOperations(b *testing.B) {
 		}
 	})
 
-	b.Run("get_remote", func(b *testing.B) {
-		s, err := settings.NewSettings(tmpDir + "/settings.json")
+b.Run("get_remote", func(b *testing.B) {
+		s, err := settings.LoadFrom(tmpDir + "/settings.json")
 		if err != nil {
 			b.Fatal(err)
 		}
 
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			name, path := s.GetRemote()
+			name, path := s.GetRemoteName(), s.GetRemotePath()
 			_, _ = name, path
 		}
 	})
 
 	b.Run("set_remote", func(b *testing.B) {
-		s, err := settings.NewSettings(tmpDir + "/settings.json")
+		s, err := settings.LoadFrom(tmpDir + "/settings.json")
 		if err != nil {
 			b.Fatal(err)
 		}
 
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			if err := s.SetRemote("b2", "/photos"); err != nil {
-				b.Fatal(err)
-			}
+			s.RemoteName = "b2"
+			s.RemotePath = "/photos"
 		}
 	})
 }
