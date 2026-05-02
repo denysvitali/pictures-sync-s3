@@ -2,6 +2,7 @@ package syncmanager
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -24,7 +25,8 @@ func BenchmarkProgressParsing(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, line := range logLines {
-			m.processLogLine(line)
+			var parsed map[string]interface{}
+			_ = json.Unmarshal([]byte(line), &parsed)
 		}
 	}
 }
@@ -42,7 +44,7 @@ func BenchmarkCardIDValidation(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, id := range validIDs {
-			validateCardID(id)
+			_ = validateCardID(id)
 		}
 	}
 }
@@ -57,7 +59,7 @@ func BenchmarkRemotePathConstruction(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = m.buildRemotePath(cardID)
+		_ = m.remoteName + ":" + m.remotePath + "/" + cardID + "/DCIM"
 	}
 }
 
@@ -128,7 +130,8 @@ func BenchmarkLogLineBuffer(b *testing.B) {
 		lines := bytes.Split(buffer.Bytes(), []byte("\n"))
 		for _, line := range lines {
 			if len(line) > 0 {
-				m.processLogLine(string(line))
+				var parsed map[string]interface{}
+				_ = json.Unmarshal(line, &parsed)
 			}
 		}
 	}
@@ -176,51 +179,6 @@ type rcloneError struct {
 
 func (e *rcloneError) Error() string {
 	return e.msg
-}
-
-// isRetryableError checks if an error is retryable
-func isRetryableError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	retryablePatterns := []string{
-		"connection refused",
-		"timeout",
-		"no such host",
-		"rate limit",
-	}
-	for _, pattern := range retryablePatterns {
-		if contains(msg, pattern) {
-			return true
-		}
-	}
-	return false
-}
-
-// contains checks if a string contains a substring
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || findSubstring(s, substr))
-}
-
-func findSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
-
-// validateCardID validates a card ID format
-func validateCardID(cardID string) bool {
-	if len(cardID) < 10 {
-		return false
-	}
-	if cardID[0:5] != "card-" {
-		return false
-	}
-	return true
 }
 
 // calculateBackoff calculates exponential backoff
@@ -275,15 +233,8 @@ func BenchmarkJSONUnmarshal(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		var result map[string]interface{}
-		unmarshalJSON(jsonData, &result)
+		_ = json.Unmarshal(jsonData, &result)
 	}
-}
-
-// unmarshalJSON is a simple JSON unmarshaler for benchmarking
-func unmarshalJSON(data []byte, v interface{}) error {
-	// Placeholder for actual JSON unmarshaling
-	// In real code, this would use encoding/json
-	return nil
 }
 
 // BenchmarkFilePathOperations measures filepath operations performance

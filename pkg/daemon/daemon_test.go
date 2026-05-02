@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -141,7 +142,7 @@ func TestDNSCheck_ValidatesConnectivity(t *testing.T) {
 
 	// This should succeed on systems with internet connectivity
 	// but won't fail the test if offline
-	_, err := (&context.Context{}).Value(ctx)
+	_, err := net.DefaultResolver.LookupHost(ctx, "localhost")
 	if err != nil {
 		t.Logf("DNS check might fail in isolated environments: %v", err)
 	}
