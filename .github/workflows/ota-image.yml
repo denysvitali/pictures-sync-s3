@@ -3,7 +3,7 @@ name: ota-image
 on:
   push:
     branches:
-      - main
+      - master
     tags:
       - "v*"
   workflow_dispatch:
@@ -12,13 +12,13 @@ permissions:
   contents: write
 
 jobs:
-  build-and-publish-ota:
+  build-and-publish-flash-image:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
       GOKRAZY_INSTANCE: photo-backup
       GOKRAZY_PARENT_DIR: ${{ runner.temp }}/gokrazy
-      IMAGE_NAME: photo-backup-ota.squashfs
+      IMAGE_NAME: photo-backup-rpi4b.img
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,20 +33,21 @@ jobs:
           go install github.com/gokrazy/tools/cmd/gok@main
           echo "PATH=$PATH:$(go env GOPATH)/bin" >> "$GITHUB_ENV"
 
-      - name: Build OTA image
+      - name: Build flashable Gokrazy image
         id: build
         env:
           GOKRAZY_INSTANCE: ${{ env.GOKRAZY_INSTANCE }}
           GOKRAZY_PARENT_DIR: ${{ env.GOKRAZY_PARENT_DIR }}
           IMAGE_DIR: ${{ runner.temp }}/ota
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          GOKRAZY_IMAGE_MODE: full
         run: |
           make ota
 
       - name: Keep build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pictures-sync-ota
+          name: pictures-sync-ota-flash-image
           path: ${{ steps.build.outputs.image_path }}
           if-no-files-found: error
 

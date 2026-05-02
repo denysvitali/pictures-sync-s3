@@ -394,7 +394,7 @@ go test ./pkg/syncmanager
 
 ### CI - OTA image
 
-GitHub Actions builds a Gokrazy image on every push to `main` and `v*` tags, and publishes `photo-backup-ota.squashfs` as a GitHub release asset on version tags (`v*`).
+GitHub Actions builds a flashable Gokrazy image on every push to `master`, producing `photo-backup-rpi4b.img` as a workflow artifact. The same workflow also runs for version tags (`v*`) and preserves OTA release publishing behavior for tags with `photo-backup-ota.squashfs`.
 
 Workflow:
 `.github/workflows/ota-image.yml`
