@@ -26,7 +26,6 @@ function isHostedPagesUrl(raw) {
     return false
   }
 }
-
 function useDeviceUrl() {
   const [deviceUrl, setDeviceUrlState] = useState(defaultDeviceUrl)
 
