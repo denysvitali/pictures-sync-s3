@@ -9,6 +9,15 @@ IMAGE_NAME="${IMAGE_NAME:-photo-backup-ota.squashfs}"
 GOKRAZY_IMAGE_MODE="${GOKRAZY_IMAGE_MODE:-ota}"
 TARGET_STORAGE_BYTES="${TARGET_STORAGE_BYTES:-}"
 IMAGE_PATH="${IMAGE_DIR}/${IMAGE_NAME}"
+HOSTAPD_BINARY="${HOSTAPD_BINARY:-}"
+
+if [ -z "$HOSTAPD_BINARY" ]; then
+  HOSTAPD_BINARY="$(command -v hostapd || true)"
+fi
+if [ -z "$HOSTAPD_BINARY" ] || [ ! -x "$HOSTAPD_BINARY" ]; then
+  echo "Error: HOSTAPD_BINARY must point to an executable hostapd binary for the target architecture"
+  exit 1
+fi
 
 mkdir -p "$GOKRAZY_PARENT_DIR"
 mkdir -p "$IMAGE_DIR"
@@ -25,6 +34,7 @@ gok -i "$GOKRAZY_INSTANCE" add tailscale.com/cmd/tailscaled
 gok -i "$GOKRAZY_INSTANCE" add tailscale.com/cmd/tailscale
 gok -i "$GOKRAZY_INSTANCE" add ./cmd/pictures-sync
 gok -i "$GOKRAZY_INSTANCE" add ./cmd/webui
+gok -i "$GOKRAZY_INSTANCE" add ./cmd/provision-ap
 
 cat > "$GOKRAZY_PARENT_DIR/$GOKRAZY_INSTANCE/config.json" <<EOF
 {
@@ -41,13 +51,22 @@ cat > "$GOKRAZY_PARENT_DIR/$GOKRAZY_INSTANCE/config.json" <<EOF
     "tailscale.com/cmd/tailscaled",
     "tailscale.com/cmd/tailscale",
     "github.com/denysvitali/pictures-sync-s3/cmd/pictures-sync",
-    "github.com/denysvitali/pictures-sync-s3/cmd/webui"
+    "github.com/denysvitali/pictures-sync-s3/cmd/webui",
+    "github.com/denysvitali/pictures-sync-s3/cmd/provision-ap"
   ],
   "PackageConfig": {
     "github.com/denysvitali/pictures-sync-s3/cmd/webui": {
       "Environment": [
         "PORT=8080"
       ]
+    },
+    "github.com/denysvitali/pictures-sync-s3/cmd/provision-ap": {
+      "Environment": [
+        "HOSTAPD_PATH=/usr/bin/hostapd"
+      ],
+      "ExtraFilePaths": {
+        "/usr/bin/hostapd": "$HOSTAPD_BINARY"
+      }
     }
   }
 }

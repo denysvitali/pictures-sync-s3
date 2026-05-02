@@ -21,6 +21,7 @@ LDFLAGS := -s -w -X main.version=$(VERSION) -X main.buildDate=$(BUILD_DATE)
 # Binary names
 PICTURES_SYNC := pictures-sync
 WEBUI := webui
+PROVISION_AP := provision-ap
 
 # Output directories
 DIST_DIR := dist
@@ -45,6 +46,8 @@ build: ## Build all binaries
 	@CGO_ENABLED=0 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(PICTURES_SYNC) ./cmd/pictures-sync
 	@echo "$(GREEN)Building $(WEBUI)...$(NC)"
 	@CGO_ENABLED=0 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(WEBUI) ./cmd/webui
+	@echo "$(GREEN)Building $(PROVISION_AP)...$(NC)"
+	@CGO_ENABLED=0 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(PROVISION_AP) ./cmd/provision-ap
 	@echo "$(GREEN)Build complete!$(NC)"
 
 webui-sync-embedded: ## Build the embedded webui bundle (real React source)
@@ -57,12 +60,15 @@ build-all: ## Build for all platforms (linux amd64, arm64, armv7)
 	@echo "Building linux/amd64..."
 	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/$(PICTURES_SYNC)-linux-amd64 ./cmd/pictures-sync
 	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/$(WEBUI)-linux-amd64 ./cmd/webui
+	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/$(PROVISION_AP)-linux-amd64 ./cmd/provision-ap
 	@echo "Building linux/arm64..."
 	@CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/$(PICTURES_SYNC)-linux-arm64 ./cmd/pictures-sync
 	@CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/$(WEBUI)-linux-arm64 ./cmd/webui
+	@CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/$(PROVISION_AP)-linux-arm64 ./cmd/provision-ap
 	@echo "Building linux/armv7..."
 	@CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/$(PICTURES_SYNC)-linux-armv7 ./cmd/pictures-sync
 	@CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/$(WEBUI)-linux-armv7 ./cmd/webui
+	@CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/$(PROVISION_AP)-linux-armv7 ./cmd/provision-ap
 	@echo "$(GREEN)All builds complete!$(NC)"
 	@ls -lh $(DIST_DIR)/
 
@@ -73,6 +79,7 @@ run-webui: ## Run webui locally (port 8080)
 clean: ## Clean build artifacts
 	@echo "$(YELLOW)Cleaning build artifacts...$(NC)"
 	@rm -f $(PICTURES_SYNC) $(WEBUI)
+	@rm -f $(PROVISION_AP)
 	@rm -rf $(DIST_DIR)
 	@rm -rf $(COVERAGE_DIR)
 	@rm -f coverage.out coverage.html coverage.txt
@@ -265,6 +272,7 @@ info: ## Display project information
 	@echo "$(BLUE)Binaries:$(NC)"
 	@echo "  pictures-sync: $(PICTURES_SYNC)"
 	@echo "  webui: $(WEBUI)"
+	@echo "  provision-ap: $(PROVISION_AP)"
 	@echo ""
 	@echo "$(BLUE)Directories:$(NC)"
 	@echo "  Distribution: $(DIST_DIR)"

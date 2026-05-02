@@ -84,12 +84,12 @@ func (m *Manager) AddNetwork(ssid, password string) error {
 		}
 	}
 
-	// Add new network
+	// Add new network as the active gokrazy client profile.
 	network := Network{
 		SSID: ssid,
 		PSK:  password,
 	}
-	m.networks = append(m.networks, network)
+	m.networks = append([]Network{network}, m.networks...)
 
 	return m.save()
 }
