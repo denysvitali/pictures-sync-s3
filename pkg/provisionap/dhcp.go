@@ -32,7 +32,7 @@ func newDHCPServer(cfg Config) *dhcpServer {
 }
 
 func (s *dhcpServer) Serve(ctx context.Context) error {
-	conn, err := listenUDPWithBroadcast(ctx, ":67")
+	conn, err := listenUDPWithBroadcast(ctx, s.cfg.Interface, ":67")
 	if err != nil {
 		return err
 	}
@@ -176,7 +176,7 @@ func uint32ToIP(value uint32) net.IP {
 	return net.IPv4(byte(value>>24), byte(value>>16), byte(value>>8), byte(value))
 }
 
-func listenUDPWithBroadcast(ctx context.Context, addr string) (*net.UDPConn, error) {
+func listenUDPWithBroadcast(ctx context.Context, interfaceName, addr string) (*net.UDPConn, error) {
 	var lc net.ListenConfig
 	lc.Control = func(network, address string, c syscall.RawConn) error {
 		var ctrlErr error
@@ -185,7 +185,13 @@ func listenUDPWithBroadcast(ctx context.Context, addr string) (*net.UDPConn, err
 				ctrlErr = err
 				return
 			}
-			ctrlErr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_BROADCAST, 1)
+			if err := syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_BROADCAST, 1); err != nil {
+				ctrlErr = err
+				return
+			}
+			if interfaceName != "" {
+				ctrlErr = syscall.SetsockoptString(int(fd), syscall.SOL_SOCKET, syscall.SO_BINDTODEVICE, interfaceName)
+			}
 		}); err != nil {
 			return err
 		}

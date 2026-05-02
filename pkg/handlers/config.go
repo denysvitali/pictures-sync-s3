@@ -154,7 +154,14 @@ func formatErrors(errors []error) []string {
 func (ctx *Context) HandleSettings(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		JSONResponse(w, ctx.AppSettings.ToJSON())
+		response := ctx.AppSettings.ToJSON()
+		tailscaleConfigured, err := settings.HasTailscaleAuthKey()
+		if err != nil {
+			log.Printf("Failed to read Tailscale auth key status: %v", err)
+		}
+		response["tailscale_auth_key_configured"] = tailscaleConfigured
+		response["tailscale_auth_key_path"] = settings.TailscaleAuthKeyFile
+		JSONResponse(w, response)
 
 	case http.MethodPost:
 		var req struct {
@@ -238,6 +245,9 @@ func (ctx *Context) HandleSettings(w http.ResponseWriter, r *http.Request) {
 func configureTailscale(authKey string) error {
 	if err := settings.ValidateTailscaleAuthKey(authKey); err != nil {
 		return err
+	}
+	if err := settings.SaveTailscaleAuthKey(authKey); err != nil {
+		return fmt.Errorf("failed to store tailscale auth key: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
