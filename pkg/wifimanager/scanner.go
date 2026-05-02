@@ -261,16 +261,15 @@ func (m *Manager) GetCurrentSSID() (string, error) {
 // getCurrentNetworkFromConfig tries to read the current network from gokrazy config
 func (m *Manager) getCurrentNetworkFromConfig() string {
 	// Try to read gokrazy's wifi.json
-	type GokrazyWiFi struct {
-		SSID string `json:"ssid"`
-		PSK  string `json:"psk,omitempty"`
-	}
-
 	data, err := os.ReadFile("/perm/wifi.json")
 	if err == nil {
-		var config GokrazyWiFi
-		if json.Unmarshal(data, &config) == nil && config.SSID != "" {
-			return config.SSID
+		var networks []struct {
+			SSID string `json:"ssid"`
+			PSK  string `json:"psk,omitempty"`
+		}
+
+		if err := json.Unmarshal(data, &networks); err == nil && len(networks) > 0 {
+			return networks[0].SSID
 		}
 	}
 

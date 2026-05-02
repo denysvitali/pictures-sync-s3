@@ -172,8 +172,17 @@ Supporting packages:
 ### First-Time Setup
 
 1. **WiFi Configuration** (if not using Ethernet):
-   - Connect to the Raspberry Pi via Ethernet initially, or:
-   - Create `/perm/wifi.json` on the SD card before first boot:
+   - On first boot with no configured networks, the device seeds a setup network:
+     ```json
+     [
+       {"ssid": "PhotoBackup-Setup", "psk": "photo-backup-setup"}
+     ]
+     ```
+     (`/perm/wifi.json` is expected to contain an array of network objects.)
+   - Override defaults with env vars:
+     - `SETUP_WIFI_SSID`
+     - `SETUP_WIFI_PSK`
+   - Or pre-seed `/perm/wifi.json` before first boot with your network:
      ```json
      [
        {"ssid": "YourNetwork", "psk": "YourPassword"}
@@ -382,6 +391,27 @@ go test ./...
 go test ./pkg/state
 go test ./pkg/syncmanager
 ```
+
+### CI - OTA image
+
+GitHub Actions builds a Gokrazy image on every push to `main` and `v*` tags, and publishes `photo-backup-ota.squashfs` as a GitHub release asset on version tags (`v*`).
+
+Workflow:
+`.github/workflows/ota-image.yml`
+
+Run the same locally with:
+```bash
+make ota
+```
+
+Or build + publish a release in one command (with GitHub token and repository context):
+```bash
+GITHUB_REPOSITORY=<owner>/<repo> GH_TOKEN=<token> TAG_NAME=v1.2.3 make ota-release
+```
+Required for `ota-release`:
+- `GH_TOKEN` (or `GITHUB_TOKEN`)
+- `GITHUB_REPOSITORY` (for example `owner/repo`)
+- `TAG_NAME` (or run from a checked-out tag)
 
 ### Making Changes
 

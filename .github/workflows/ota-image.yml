@@ -1,0 +1,61 @@
+name: ota-image
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-publish-ota:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GOKRAZY_INSTANCE: photo-backup
+      GOKRAZY_PARENT_DIR: ${{ runner.temp }}/gokrazy
+      IMAGE_NAME: photo-backup-ota.squashfs
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install gokrazy CLI
+        run: |
+          go install github.com/gokrazy/tools/cmd/gok@main
+          echo "PATH=$PATH:$(go env GOPATH)/bin" >> "$GITHUB_ENV"
+
+      - name: Build OTA image
+        id: build
+        env:
+          GOKRAZY_INSTANCE: ${{ env.GOKRAZY_INSTANCE }}
+          GOKRAZY_PARENT_DIR: ${{ env.GOKRAZY_PARENT_DIR }}
+          IMAGE_DIR: ${{ runner.temp }}/ota
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+        run: |
+          make ota
+
+      - name: Keep build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pictures-sync-ota
+          path: ${{ steps.build.outputs.image_path }}
+          if-no-files-found: error
+
+      - name: Publish OTA release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "Photo Sync OTA ${{ github.ref_name }}"
+          generate_release_notes: true
+          files: |
+            ${{ steps.build.outputs.image_path }}

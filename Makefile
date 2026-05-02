@@ -274,3 +274,37 @@ list-targets: ## List all make targets
 all: clean install-tools build test lint security ## Build and test everything
 
 .PHONY: all
+
+##@ CI/CD
+
+ota:
+	@./scripts/build-ota-image.sh
+
+ota-release:
+	@if [ -z "$${GH_TOKEN}" ] && [ -z "$${GITHUB_TOKEN}" ]; then \
+		echo "Error: set GH_TOKEN (or GITHUB_TOKEN in CI) before running ota-release"; \
+		exit 1; \
+	fi
+	@if ! command -v gh >/dev/null 2>&1; then \
+		echo "Error: GitHub CLI (gh) is required for ota-release"; \
+		exit 1; \
+	fi
+	@if [ -z "$${GITHUB_REPOSITORY}" ]; then \
+		echo "Error: set GITHUB_REPOSITORY (for example owner/repo) before running ota-release"; \
+		exit 1; \
+	fi
+	@TAG_NAME=$${TAG_NAME:-$$(git describe --tags --exact-match --abbrev=0 2>/dev/null || true)}; \
+	if [ -z "$${TAG_NAME}" ]; then \
+		echo "Error: set TAG_NAME or run from an exact tag checkout"; \
+		exit 1; \
+	fi; \
+	IMAGE_NAME=$${IMAGE_NAME:-photo-backup-ota.squashfs}; \
+	IMAGE_PATH=$${IMAGE_DIR:-$$(pwd)/ota}/$${IMAGE_NAME}; \
+	./scripts/build-ota-image.sh; \
+	echo "Uploading $$IMAGE_PATH to GitHub release $$TAG_NAME"; \
+	if ! gh release view $$TAG_NAME --repo $$GITHUB_REPOSITORY >/dev/null 2>&1; then \
+		gh release create $$TAG_NAME --repo $$GITHUB_REPOSITORY --title "Photo Sync OTA $$TAG_NAME" --notes "Automated OTA image for $$TAG_NAME"; \
+	fi; \
+	gh release upload $$TAG_NAME $$IMAGE_PATH --repo $$GITHUB_REPOSITORY --clobber
+
+.PHONY: ota ota-release

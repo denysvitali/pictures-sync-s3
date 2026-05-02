@@ -2,6 +2,7 @@ package wifimanager
 
 import (
 	"fmt"
+	"log"
 	"sync"
 )
 
@@ -37,6 +38,11 @@ func NewManager() (*Manager, error) {
 	if err := m.load(); err != nil {
 		// If loading fails, start with empty config
 		return m, nil
+	}
+
+	// Ensure first-boot fallback AP-style network exists when no networks are configured.
+	if err := m.EnsureFirstBootWiFiConfig(); err != nil {
+		log.Printf("warning: failed to prepare first-boot Wi-Fi config: %v", err)
 	}
 
 	return m, nil
