@@ -1,0 +1,9 @@
+{
+  "name": "photo-backup-station-react-ui",
+  "version": "1.0.0",
+  "private": true,
+  "description": "React frontend for photo-backup-station",
+  "scripts": {
+    "build": "echo 'No build step in repo; commit compiled bundle in webui-react/dist.'"
+  }
+}
