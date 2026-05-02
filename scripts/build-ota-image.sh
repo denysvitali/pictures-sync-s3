@@ -62,7 +62,11 @@ case "$GOKRAZY_IMAGE_MODE" in
       echo "Error: TARGET_STORAGE_BYTES is required when GOKRAZY_IMAGE_MODE=full"
       exit 1
     fi
-    gok -i "$GOKRAZY_INSTANCE" overwrite --full --target_storage_bytes "$TARGET_STORAGE_BYTES" "$IMAGE_PATH"
+    gok -i "$GOKRAZY_INSTANCE" overwrite --full="$IMAGE_PATH" --target_storage_bytes="$TARGET_STORAGE_BYTES"
+    if [ ! -s "$IMAGE_PATH" ]; then
+      echo "Error: expected full image at $IMAGE_PATH, but the file was not created"
+      exit 1
+    fi
     ;;
   *)
     echo "Error: invalid GOKRAZY_IMAGE_MODE '$GOKRAZY_IMAGE_MODE' (expected 'ota' or 'full')"
