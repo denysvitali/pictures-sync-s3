@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
-	"net/url"
 	"sort"
 	"strings"
 	"syscall"
@@ -210,6 +210,7 @@ func main() {
 	http.HandleFunc("/api/history", ctx.HandleHistory)
 	http.HandleFunc("/api/config", ctx.HandleConfig)
 	http.HandleFunc("/api/config/test", ctx.HandleConfigTest)
+	http.HandleFunc("/api/breakglass/authorized-keys", ctx.HandleBreakglassAuthorizedKeys)
 	http.HandleFunc("/api/settings", ctx.HandleSettings)
 	http.HandleFunc("/api/devices", ctx.HandleDevices)
 	http.HandleFunc("/api/devices/select", ctx.HandleDeviceSelect)

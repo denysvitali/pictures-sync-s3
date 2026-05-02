@@ -30,6 +30,8 @@ gok -i "$GOKRAZY_INSTANCE" new
 gok -i "$GOKRAZY_INSTANCE" add github.com/gokrazy/fbstatus
 gok -i "$GOKRAZY_INSTANCE" add github.com/gokrazy/mkfs
 gok -i "$GOKRAZY_INSTANCE" add github.com/gokrazy/wifi
+gok -i "$GOKRAZY_INSTANCE" add github.com/gokrazy/serial-busybox
+gok -i "$GOKRAZY_INSTANCE" add github.com/gokrazy/breakglass
 gok -i "$GOKRAZY_INSTANCE" add tailscale.com/cmd/tailscaled
 gok -i "$GOKRAZY_INSTANCE" add tailscale.com/cmd/tailscale
 gok -i "$GOKRAZY_INSTANCE" add ./cmd/pictures-sync
@@ -49,6 +51,8 @@ cat > "$GOKRAZY_PARENT_DIR/$GOKRAZY_INSTANCE/config.json" <<EOF
     "github.com/gokrazy/fbstatus",
     "github.com/gokrazy/mkfs",
     "github.com/gokrazy/wifi",
+    "github.com/gokrazy/serial-busybox",
+    "github.com/gokrazy/breakglass",
     "tailscale.com/cmd/tailscaled",
     "tailscale.com/cmd/tailscale",
     "github.com/denysvitali/pictures-sync-s3/cmd/pictures-sync",
@@ -56,6 +60,11 @@ cat > "$GOKRAZY_PARENT_DIR/$GOKRAZY_INSTANCE/config.json" <<EOF
     "github.com/denysvitali/pictures-sync-s3/cmd/provision-ap"
   ],
   "PackageConfig": {
+    "github.com/gokrazy/breakglass": {
+      "CommandLineFlags": [
+        "-authorized_keys=/perm/breakglass/authorized_keys"
+      ]
+    },
     "github.com/denysvitali/pictures-sync-s3/cmd/webui": {
       "Environment": [
         "PORT=8080"

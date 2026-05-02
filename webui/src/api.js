@@ -152,6 +152,14 @@ export const getFilesPaginated = (deviceUrl, { path = '', page = 1, pageSize = 5
     }
   })
 export const getConfig = (deviceUrl) => apiRequest('/api/config', { deviceUrl })
+export const getBreakglassAuthorizedKeys = (deviceUrl) =>
+  apiRequest('/api/breakglass/authorized-keys', { deviceUrl })
+export const saveBreakglassAuthorizedKeys = (deviceUrl, authorizedKeys) =>
+  apiRequest('/api/breakglass/authorized-keys', {
+    deviceUrl,
+    method: 'POST',
+    body: { authorized_keys: authorizedKeys }
+  })
 export const getSettings = (deviceUrl) => apiRequest('/api/settings', { deviceUrl })
 export const saveSettings = (deviceUrl, payload) =>
   apiRequest('/api/settings', {
