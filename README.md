@@ -129,12 +129,19 @@ Supporting packages:
        "github.com/gokrazy/fbstatus",
        "github.com/gokrazy/mkfs",
        "github.com/gokrazy/wifi",
+       "github.com/gokrazy/serial-busybox",
+       "github.com/gokrazy/breakglass",
        "tailscale.com/cmd/tailscaled",
        "tailscale.com/cmd/tailscale",
        "github.com/denysvitali/pictures-sync-s3/cmd/pictures-sync",
        "github.com/denysvitali/pictures-sync-s3/cmd/webui"
      ],
      "PackageConfig": {
+       "github.com/gokrazy/breakglass": {
+         "CommandLineFlags": [
+           "-authorized_keys=/perm/breakglass/authorized_keys"
+         ]
+       },
        "tailscale.com/cmd/tailscale": {
          "CommandLineFlags": [
            "up",
@@ -168,6 +175,27 @@ Supporting packages:
    The `gok` tool will use the `go.mod` with the replace directive from `~/gokrazy/<instance-name>/` to build your local code.
 
 5. Boot the Raspberry Pi with the new SD card
+
+### Emergency SSH Access
+
+The generated Gokrazy configuration includes `github.com/gokrazy/breakglass`
+and `github.com/gokrazy/serial-busybox` for emergency/debugging access.
+Breakglass reads authorized keys from `/perm/breakglass/authorized_keys`, so
+one shared image can be provisioned with per-device keys after first boot.
+Install the host-side wrapper with:
+
+```bash
+go install github.com/gokrazy/breakglass/cmd/breakglass@latest
+```
+
+Start breakglass from the Gokrazy web interface, then open a shell with:
+
+```bash
+breakglass <instance-name>
+```
+
+Breakglass is intended for emergency access and is not started automatically
+on boot.
 
 ## Configuration
 
@@ -480,6 +508,7 @@ Required for `ota-release`:
 - Rclone configuration contains sensitive credentials - stored in `/perm` (persistent partition)
 - WiFi passwords stored in `/perm/wifi.json` with 0600 permissions
 - Tailscale provides secure remote access without exposing ports
+- Breakglass provides emergency SSH/SCP access when explicitly started from the Gokrazy web interface
 - SD cards are mounted read-only to prevent accidental modifications
 
 ## Performance

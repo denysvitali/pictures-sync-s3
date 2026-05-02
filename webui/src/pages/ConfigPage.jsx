@@ -15,10 +15,19 @@ import {
   Spinner,
   Stack,
   Text,
+  Textarea,
+  VStack,
   Wrap,
   WrapItem
 } from '@chakra-ui/react'
-import { getConfig, getSettings, saveSettings, testConfig } from '../api'
+import {
+  getBreakglassAuthorizedKeys,
+  getConfig,
+  getSettings,
+  saveBreakglassAuthorizedKeys,
+  saveSettings,
+  testConfig
+} from '../api'
 
 function toNumberOrDefault(value, fallback) {
   const parsed = Number(value)
@@ -39,15 +48,19 @@ export function ConfigPage({ deviceUrl }) {
   const [checkers, setCheckers] = useState(8)
   const [googlePhotosEnabled, setGooglePhotosEnabled] = useState(false)
   const [googlePhotosRemoteName, setGooglePhotosRemoteName] = useState('')
+  const [breakglassKeys, setBreakglassKeys] = useState('')
+  const [breakglassPath, setBreakglassPath] = useState('/perm/breakglass/authorized_keys')
+  const [savingBreakglass, setSavingBreakglass] = useState(false)
 
   const load = async () => {
     if (!deviceUrl) return
     setLoading(true)
     setError('')
     try {
-      const [configResponse, settingsResponse] = await Promise.all([
+      const [configResponse, settingsResponse, breakglassResponse] = await Promise.all([
         getConfig(deviceUrl),
-        getSettings(deviceUrl)
+        getSettings(deviceUrl),
+        getBreakglassAuthorizedKeys(deviceUrl)
       ])
       setConfig(configResponse || { configured: false, remotes: [] })
       setRemoteName(settingsResponse?.remote_name || '')
@@ -57,6 +70,8 @@ export function ConfigPage({ deviceUrl }) {
       setCheckers(toNumberOrDefault(settingsResponse?.checkers, 8))
       setGooglePhotosEnabled(Boolean(settingsResponse?.google_photos_enabled))
       setGooglePhotosRemoteName(settingsResponse?.google_photos_remote_name || '')
+      setBreakglassKeys(breakglassResponse?.authorized_keys || '')
+      setBreakglassPath(breakglassResponse?.path || '/perm/breakglass/authorized_keys')
     } catch (err) {
       setError(err.message)
     } finally {
@@ -107,6 +122,21 @@ export function ConfigPage({ deviceUrl }) {
       setError(err.message)
     } finally {
       setTesting(false)
+    }
+  }
+
+  const onSaveBreakglass = async () => {
+    setSavingBreakglass(true)
+    setMessage('')
+    setError('')
+    try {
+      const response = await saveBreakglassAuthorizedKeys(deviceUrl, breakglassKeys)
+      setMessage(`Breakglass keys saved to ${response?.path || breakglassPath}.`)
+      await load()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSavingBreakglass(false)
     }
   }
 
@@ -248,6 +278,33 @@ export function ConfigPage({ deviceUrl }) {
               </CardBody>
             </Card>
           </form>
+
+          <Card variant="outline" bg="whiteAlpha.100">
+            <CardBody>
+              <HStack justify="space-between">
+                <Heading size="sm">Breakglass SSH keys</Heading>
+                <Badge colorScheme={breakglassKeys.trim() ? 'green' : 'orange'}>
+                  {breakglassKeys.trim() ? 'configured' : 'not configured'}
+                </Badge>
+              </HStack>
+              <Text mt={2} fontSize="sm" color="gray.300">
+                {breakglassPath}
+              </Text>
+              <Textarea
+                mt={3}
+                minH="160px"
+                fontFamily="mono"
+                value={breakglassKeys}
+                onChange={(event) => setBreakglassKeys(event.target.value)}
+                placeholder="ssh-ed25519 AAAA..."
+              />
+              <HStack mt={4} spacing={2}>
+                <Button colorScheme="teal" onClick={onSaveBreakglass} isLoading={savingBreakglass}>
+                  Save keys
+                </Button>
+              </HStack>
+            </CardBody>
+          </Card>
         </Stack>
       </CardBody>
     </Card>

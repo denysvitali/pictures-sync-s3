@@ -70,6 +70,8 @@ echo "Adding public packages..."
 gok -i "$INSTANCE_NAME" add github.com/gokrazy/fbstatus
 gok -i "$INSTANCE_NAME" add github.com/gokrazy/mkfs
 gok -i "$INSTANCE_NAME" add github.com/gokrazy/wifi
+gok -i "$INSTANCE_NAME" add github.com/gokrazy/serial-busybox
+gok -i "$INSTANCE_NAME" add github.com/gokrazy/breakglass
 gok -i "$INSTANCE_NAME" add tailscale.com/cmd/tailscaled
 gok -i "$INSTANCE_NAME" add tailscale.com/cmd/tailscale
 
@@ -93,6 +95,8 @@ cat > "$CONFIG_FILE" <<EOF
     "github.com/gokrazy/fbstatus",
     "github.com/gokrazy/mkfs",
     "github.com/gokrazy/wifi",
+    "github.com/gokrazy/serial-busybox",
+    "github.com/gokrazy/breakglass",
     "tailscale.com/cmd/tailscaled",
     "tailscale.com/cmd/tailscale",
     "github.com/denysvitali/pictures-sync-s3/cmd/pictures-sync",
@@ -100,6 +104,11 @@ cat > "$CONFIG_FILE" <<EOF
     "github.com/denysvitali/pictures-sync-s3/cmd/provision-ap"
   ],
   "PackageConfig": {
+    "github.com/gokrazy/breakglass": {
+      "CommandLineFlags": [
+        "-authorized_keys=/perm/breakglass/authorized_keys"
+      ]
+    },
 EOF
 
 if [ -n "$TAILSCALE_KEY" ]; then
