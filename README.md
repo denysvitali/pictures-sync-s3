@@ -193,6 +193,16 @@ Supporting packages:
    - Local network: `https://photo-backup.local:443` or `http://photo-backup.local:8080`
    - Via Tailscale: `https://photo-backup:443` (after Tailscale connects)
    - Accept the self-signed certificate warning
+   - Hosted React UI: point your browser at the GitHub Pages build and set the device URL in the UI
+
+4. **Hosted UI connection configuration**:
+   - Set `WEBUI_ALLOWED_ORIGINS` in the device environment when exposing the on-device API to GitHub Pages.
+   - Example:
+     ```
+     WEBUI_ALLOWED_ORIGINS=https://<your-org>.github.io
+     ```
+   - Optional port included (example for local dev): `https://<your-org>.github.io:8080`.
+   - Leave empty to keep API accessible only from same-origin requests.
 
 3. **Configure Cloud Storage**:
    - Navigate to the "Configuration" tab

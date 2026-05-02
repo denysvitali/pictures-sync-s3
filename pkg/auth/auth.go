@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"log"
 	"net"
+	"net/url"
 	"net/http"
 	"strings"
 	"sync"
@@ -267,6 +268,97 @@ func BasicAuthMiddleware(authPassword string, limiter *ratelimit.Limiter) func(h
 			// Limit request body size to prevent DoS (10MB max)
 			r.Body = http.MaxBytesReader(w, r.Body, 10*1024*1024)
 
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// CORSMiddleware configures CORS for browser-hosted UIs.
+// It allows credentials and only permits explicitly configured origins.
+// When no allowed origins are configured, CORS is not applied.
+func CORSMiddleware(allowedOrigins []string, allowCredentials bool) func(http.Handler) http.Handler {
+	origins := make(map[string]struct{}, len(allowedOrigins))
+	for _, origin := range allowedOrigins {
+		normalized := strings.TrimSpace(strings.ToLower(origin))
+		if normalized == "" {
+			continue
+		}
+
+		// Accept plain hosts while also accepting full URLs.
+		if strings.HasPrefix(normalized, "http://") || strings.HasPrefix(normalized, "https://") {
+			u, err := url.Parse(normalized)
+			if err != nil {
+				continue
+			}
+			normalized = u.Host
+		}
+
+		if normalized == "*" {
+			origins = make(map[string]struct{}, 1)
+			origins["*"] = struct{}{}
+			break
+		}
+
+		origins[normalized] = struct{}{}
+	}
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if len(origins) == 0 {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			origin := r.Header.Get("Origin")
+			if origin == "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			u, err := url.Parse(origin)
+			if err != nil {
+				if r.Method == http.MethodOptions {
+					w.WriteHeader(http.StatusForbidden)
+					return
+				}
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			normalizedOriginHost := strings.ToLower(u.Host)
+
+			// Always allow the same host as the API endpoint.
+			if normalizedOriginHost == strings.ToLower(r.Host) {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			_, allowAll := origins["*"]
+			_, allowed := origins[normalizedOriginHost]
+			if !allowAll && !allowed {
+				if r.Method == http.MethodOptions {
+					w.WriteHeader(http.StatusForbidden)
+					return
+				}
+
+				http.Error(w, "CORS origin not allowed", http.StatusForbidden)
+				return
+			}
+
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+			if allowCredentials {
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+			}
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-CSRF-Token")
+
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+
+			// Continue with actual request.
 			next.ServeHTTP(w, r)
 		})
 	}
