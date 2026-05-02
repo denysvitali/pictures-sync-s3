@@ -1,16 +1,15 @@
 import { useEffect, useState } from 'react'
 import {
-  Alert,
+  AlertRoot as Alert,
   AlertDescription,
   AlertIndicator,
   Badge,
   Button,
-  Card,
+  CardRoot as Card,
   CardBody,
   Heading,
   HStack,
   Input,
-  Select,
   Spinner,
   Stack,
   TableBody,
@@ -189,11 +188,17 @@ export function WifiPage({ deviceUrl }) {
           </form>
 
           <HStack mt={3} spacing={2} wrap="wrap">
-            <Select size="sm" width="180px" value={sortBy} onChange={(event) => setSortBy(event.target.value)}>
+            <Input
+              as="select"
+              size="sm"
+              width="180px"
+              value={sortBy}
+              onChange={(event) => setSortBy(event.target.value)}
+            >
               <option value="signal">Signal</option>
               <option value="name">Name</option>
               <option value="security">Security</option>
-            </Select>
+            </Input>
             <Button size="sm" variant="outline" onClick={handleScan} isLoading={scanBusy}>
               Scan saved networks
             </Button>

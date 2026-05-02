@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  Alert,
+  AlertRoot as Alert,
   AlertDescription,
   AlertIndicator,
   Box,
-  Breadcrumb,
+  BreadcrumbRoot as Breadcrumb,
   BreadcrumbItem,
   BreadcrumbLink,
   Button,
   ButtonGroup,
-  Card,
+  CardRoot as Card,
   CardBody,
   Flex,
   Heading,
