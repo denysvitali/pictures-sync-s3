@@ -437,6 +437,7 @@ To flash a SD card for Raspberry Pi 4:
 
 Notes:
 - This image is a full `overwrite --full` Gokrazy image intended for initial provisioning on SD media.
+- The initial Gokrazy/web UI credentials are `gokrazy` / `photo-backup`; change the password after first boot.
 - Double-check the device path before running `dd` (it will destroy the selected disk).
 
 Run the same locally with:
