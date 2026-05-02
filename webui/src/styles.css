@@ -1,0 +1,45 @@
+:root { color-scheme: dark; }
+body {
+  margin: 0;
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  background: linear-gradient(145deg, #030712 0%, #0b1220 100%);
+  color: #e5edf6;
+}
+
+#root { max-width: 980px; margin: 0 auto; padding: 24px; }
+
+.app-shell { display: grid; gap: 16px; }
+.app-header { display: flex; justify-content: space-between; gap: 16px; align-items: baseline; }
+.card, .control-card { background: rgba(14, 23, 40, 0.75); border-radius: 12px; padding: 14px; border: 1px solid rgba(138, 176, 255, .12); }
+.row { display: grid; grid-template-columns: 1fr; gap: 12px; }
+.two-cols { grid-template-columns: 1fr 1fr; }
+.stat { border: 1px dashed rgba(138, 176, 255, .18); border-radius: 10px; padding: 10px; }
+.tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.tabs button {
+  border: 1px solid rgba(138, 176, 255, .3);
+  background: #0f172a;
+  color: #e2ebff;
+  padding: 8px 12px;
+  border-radius: 999px;
+}
+.tabs .active { background: #1e293b; box-shadow: 0 0 0 2px rgba(96, 165, 250, .35) inset; }
+.actions { display: flex; justify-content: flex-end; }
+button { cursor: pointer; }
+input {
+  flex: 1;
+  min-width: 320px;
+  padding: 10px;
+  background: #0b1220;
+  color: #d6e4ff;
+  border: 1px solid rgba(138, 176, 255, .3);
+  border-radius: 8px;
+}
+pre {
+  overflow: auto;
+  background: #020617;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, .25);
+}
+.muted { color: #9fb5d4; }
+.error { color: #fda4af; }
