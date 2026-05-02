@@ -116,12 +116,32 @@ jobs:
         run: |
           make ota
 
+      - name: Build gokrazy root OTA image
+        id: build-root
+        env:
+          GOKRAZY_INSTANCE: ${{ env.GOKRAZY_INSTANCE }}
+          GOKRAZY_PARENT_DIR: ${{ env.GOKRAZY_PARENT_DIR }}
+          IMAGE_DIR: ${{ github.workspace }}/ota
+          IMAGE_NAME: photo-backup-rpi4b-root.squashfs
+          GOKRAZY_IMAGE_MODE: ota
+          HOSTAPD_BINARY: ${{ steps.hostapd.outputs.hostapd_binary }}
+        run: |
+          make ota
+
       - name: Compress flash image for release
         id: compress
         shell: bash
         run: |
           compressed_path="${{ steps.build.outputs.image_path }}.gz"
           gzip -9 -c "${{ steps.build.outputs.image_path }}" > "$compressed_path"
+          echo "compressed_path=$compressed_path" >> "$GITHUB_OUTPUT"
+
+      - name: Compress root OTA image for release
+        id: compress-root
+        shell: bash
+        run: |
+          compressed_path="${{ steps.build-root.outputs.image_path }}.gz"
+          gzip -9 -c "${{ steps.build-root.outputs.image_path }}" > "$compressed_path"
           echo "compressed_path=$compressed_path" >> "$GITHUB_OUTPUT"
 
       - name: Keep build artifact
@@ -131,6 +151,8 @@ jobs:
           path: |
             ${{ steps.build.outputs.image_path }}
             ${{ steps.compress.outputs.compressed_path }}
+            ${{ steps.build-root.outputs.image_path }}
+            ${{ steps.compress-root.outputs.compressed_path }}
           if-no-files-found: error
 
       - name: Compute release tag
@@ -157,3 +179,4 @@ jobs:
           generate_release_notes: true
           files: |
             ${{ steps.compress.outputs.compressed_path }}
+            ${{ steps.compress-root.outputs.compressed_path }}

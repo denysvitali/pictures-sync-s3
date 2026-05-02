@@ -432,6 +432,8 @@ go test ./pkg/syncmanager
 
 GitHub Actions builds a flashable Gokrazy image on every push to `master`, producing `photo-backup-rpi4b.img` as a workflow artifact. The same workflow also runs for version tags (`v*`) and publishes the flash image to GitHub Releases as a compressed `photo-backup-rpi4b.img.gz` asset to stay within the release asset size limit.
 
+The workflow also publishes `photo-backup-rpi4b-root.squashfs.gz`, which is the gokrazy-compatible OTA root image used by the web UI updater. The updater checks GitHub Releases by publish time, downloads the newest matching root image, streams it to the inactive gokrazy root partition, switches partitions, and requests a reboot.
+
 Workflow:
 `.github/workflows/ota-image.yml`
 
@@ -465,6 +467,7 @@ To flash a SD card for Raspberry Pi 4:
 
 Notes:
 - This image is a full `overwrite --full` Gokrazy image intended for initial provisioning on SD media.
+- Use the web UI configuration page for in-place OTA updates. The full `photo-backup-rpi4b.img.gz` asset is not written onto a running device.
 - The initial Gokrazy/web UI credentials are `gokrazy` / `photo-backup`; change the password after first boot.
 - Double-check the device path before running `dd` (it will destroy the selected disk).
 
