@@ -85,7 +85,7 @@ echo ""
 # Check configuration files
 echo -e "${YELLOW}Configuration Files:${NC}"
 check_file "golangci-lint config" ".golangci.yml"
-check_file "Dependabot config" ".github/dependabot.yml"
+check_file "Renovate config" "renovate.json"
 check_file "Gitleaks ignore" ".gitleaksignore"
 check_file "Makefile" "Makefile"
 
@@ -187,7 +187,7 @@ echo -e "${YELLOW}Best Practices:${NC}"
 check "CI has timeout" "grep -q 'timeout-minutes:' .github/workflows/ci.yml" warning
 check "Workflows use cache" "grep -q 'cache:' .github/workflows/ci.yml" warning
 check "Security has SARIF upload" "grep -q 'upload-sarif' .github/workflows/security.yml" warning
-check "Dependabot weekly schedule" "grep -q 'weekly' .github/dependabot.yml" warning
+check "Renovate config exists" "test -f renovate.json" warning
 
 echo ""
 

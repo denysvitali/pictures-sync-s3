@@ -1,0 +1,19 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:base"],
+  "timezone": "UTC",
+  "dependencyDashboard": true,
+  "labels": [
+    "dependencies"
+  ],
+  "commitMessagePrefix": "chore:",
+  "postUpdateOptions": ["gomodTidy"],
+  "packageRules": [
+    {
+      "groupName": "all dependencies",
+      "matchManagers": ["gomod", "github-actions"],
+      "matchUpdateTypes": ["major", "minor", "patch"],
+      "groupSlug": "all-dependencies"
+    }
+  ]
+}

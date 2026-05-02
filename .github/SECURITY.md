@@ -66,7 +66,7 @@ This project implements several security measures:
 - All PRs require security scan passage
 - Critical security findings block merges
 - Regular security audits of dependencies
-- Automated Dependabot security updates
+- Automated Renovate dependency updates
 
 ## Security Features
 
@@ -115,7 +115,8 @@ Security updates are released as soon as possible after a vulnerability is confi
 ### How to Stay Updated
 
 1. **Watch this repository** for security advisories
-2. **Enable Dependabot alerts** on your fork
+2. **Enable GitHub security alerts** on your fork
+   - Dependency update PRs are now handled by Renovate.
 3. **Subscribe to releases** for update notifications
 4. **Follow security tab** for disclosed vulnerabilities
 
