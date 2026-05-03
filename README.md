@@ -134,7 +134,8 @@ Supporting packages:
        "tailscale.com/cmd/tailscaled",
        "tailscale.com/cmd/tailscale",
        "github.com/denysvitali/pictures-sync-s3/cmd/pictures-sync",
-       "github.com/denysvitali/pictures-sync-s3/cmd/webui"
+       "github.com/denysvitali/pictures-sync-s3/cmd/webui",
+       "github.com/denysvitali/pictures-sync-s3/cmd/tailscale-init"
      ],
      "PackageConfig": {
        "github.com/gokrazy/breakglass": {
@@ -142,12 +143,13 @@ Supporting packages:
            "-authorized_keys=/perm/breakglass/authorized_keys"
          ]
        },
-       "tailscale.com/cmd/tailscale": {
-         "CommandLineFlags": [
-           "up",
-           "--auth-key=YOUR_TAILSCALE_AUTH_KEY",
-           "--hostname=photo-backup",
-           "--ssh"
+       "tailscale.com/cmd/tailscale": {},
+       "github.com/denysvitali/pictures-sync-s3/cmd/tailscale-init": {
+         "CommandLineFlags": [],
+         "Environment": [
+           "TS_AUTH_KEY_PATH=/perm/tailscale/authkey",
+           "TS_HOSTNAME=photo-backup",
+           "TS_TAILSCALE_UP_ARGS=--ssh"
          ]
        },
        "github.com/denysvitali/pictures-sync-s3/cmd/webui": {
@@ -162,7 +164,7 @@ Supporting packages:
 4. Get a Tailscale auth key:
    - Visit https://login.tailscale.com/admin/settings/keys
    - Generate a new auth key (disable key expiry for persistent access)
-   - Replace `YOUR_TAILSCALE_AUTH_KEY` in config.json
+   - Copy it to `/perm/tailscale/authkey` before first boot or during provisioning.
 
 4. Build and write to SD card:
    ```bash
