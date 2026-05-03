@@ -21,7 +21,8 @@ fi
 read -p "Enter instance name (default: photo-backup): " INSTANCE_NAME
 INSTANCE_NAME=${INSTANCE_NAME:-photo-backup}
 
-read -p "Enter Tailscale auth key (or press Enter to skip): " TAILSCALE_KEY
+read -p "Enter Tailscale auth key file path (default: /perm/tailscale/authkey): " TAILSCALE_AUTHKEY_PATH
+TAILSCALE_AUTHKEY_PATH=${TAILSCALE_AUTHKEY_PATH:-/perm/tailscale/authkey}
 
 read -p "Enter WiFi SSID (or press Enter to skip): " WIFI_SSID
 if [ -n "$WIFI_SSID" ]; then
@@ -75,6 +76,7 @@ gok -i "$INSTANCE_NAME" add github.com/gokrazy/breakglass
 gok -i "$INSTANCE_NAME" add tailscale.com/cmd/tailscaled
 gok -i "$INSTANCE_NAME" add tailscale.com/cmd/tailscale
 gok -i "$INSTANCE_NAME" add ./cmd/wifi-init
+gok -i "$INSTANCE_NAME" add ./cmd/tailscale-init
 
 echo "Public packages added successfully!"
 echo "Note: Private packages will be added via config.json"
@@ -103,7 +105,8 @@ cat > "$CONFIG_FILE" <<EOF
     "github.com/denysvitali/pictures-sync-s3/cmd/wifi-init",
     "github.com/denysvitali/pictures-sync-s3/cmd/pictures-sync",
     "github.com/denysvitali/pictures-sync-s3/cmd/webui",
-    "github.com/denysvitali/pictures-sync-s3/cmd/provision-ap"
+    "github.com/denysvitali/pictures-sync-s3/cmd/provision-ap",
+    "github.com/denysvitali/pictures-sync-s3/cmd/tailscale-init"
   ],
   "PackageConfig": {
     "github.com/gokrazy/breakglass": {
@@ -113,18 +116,16 @@ cat > "$CONFIG_FILE" <<EOF
     },
 EOF
 
-if [ -n "$TAILSCALE_KEY" ]; then
 cat >> "$CONFIG_FILE" <<EOF
-    "tailscale.com/cmd/tailscale": {
-      "CommandLineFlags": [
-        "up",
-        "--auth-key=$TAILSCALE_KEY",
-        "--hostname=$INSTANCE_NAME",
-        "--ssh"
+    "tailscale.com/cmd/tailscale": {},
+    "github.com/denysvitali/pictures-sync-s3/cmd/tailscale-init": {
+      "Environment": [
+        "TS_AUTH_KEY_PATH=$TAILSCALE_AUTHKEY_PATH",
+        "TS_HOSTNAME=$INSTANCE_NAME",
+        "TS_TAILSCALE_UP_ARGS=--ssh"
       ]
     },
 EOF
-fi
 
 cat >> "$CONFIG_FILE" <<EOF
     "github.com/denysvitali/pictures-sync-s3/cmd/webui": {
