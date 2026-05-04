@@ -1,68 +1,46 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useState, useCallback } from 'react'
 
-const STORAGE_KEY = 'photo-backup-device-url'
+const DeviceContext = createContext(null)
 
-const defaultDeviceUrl = () => {
-  if (typeof window === 'undefined') return ''
+function getInitialDeviceUrl() {
+  const params = new URLSearchParams(window.location.search)
+  const fromUrl = params.get('device')
+  if (fromUrl) return fromUrl
 
-  const saved = window.localStorage.getItem(STORAGE_KEY)
-  if (saved && !isHostedPagesUrl(saved)) {
-    return saved
-  }
-
-  const host = window.location.hostname.toLowerCase()
-  if (host.endsWith('.github.io') || host.endsWith('.github.com')) {
+  try {
+    return localStorage.getItem('deviceUrl') || ''
+  } catch {
     return ''
   }
-
-  return `${window.location.origin}`
 }
 
-export function isHostedPagesUrl(raw) {
-  try {
-    const url = new URL(raw)
-    const host = url.hostname.toLowerCase()
-    return host.endsWith('.github.io') || host.endsWith('.github.com')
-  } catch {
-    return false
-  }
-}
+export function DeviceProvider({ children }) {
+  const [deviceUrl, setDeviceUrlRaw] = useState(getInitialDeviceUrl)
 
-const DeviceUrlContext = createContext({
-  deviceUrl: '',
-  setDeviceUrl: () => {},
-  clearDeviceUrl: () => {}
-})
-
-export function DeviceUrlProvider({ children }) {
-  const [deviceUrl, setDeviceUrlState] = useState(defaultDeviceUrl)
-
-  useEffect(() => {
-    setDeviceUrlState(defaultDeviceUrl())
+  const setDeviceUrl = useCallback((url) => {
+    const normalized = String(url || '').trim().replace(/\/$/, '')
+    setDeviceUrlRaw(normalized)
+    try {
+      if (normalized) {
+        localStorage.setItem('deviceUrl', normalized)
+      } else {
+        localStorage.removeItem('deviceUrl')
+      }
+    } catch {}
   }, [])
 
-  const setDeviceUrl = (value) => {
-    const next = String(value || '').trim()
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(STORAGE_KEY, next)
-    }
-    setDeviceUrlState(next)
-  }
-
-  const clearDeviceUrl = () => {
-    if (typeof window !== 'undefined') {
-      window.localStorage.removeItem(STORAGE_KEY)
-    }
-    setDeviceUrlState('')
-  }
+  const isLocalhost = window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1'
 
   return (
-    <DeviceUrlContext.Provider value={{ deviceUrl, setDeviceUrl, clearDeviceUrl }}>
+    <DeviceContext.Provider value={{ deviceUrl, setDeviceUrl, isLocalhost }}>
       {children}
-    </DeviceUrlContext.Provider>
+    </DeviceContext.Provider>
   )
 }
 
-export function useDeviceUrl() {
-  return useContext(DeviceUrlContext)
+export function useDevice() {
+  const ctx = useContext(DeviceContext)
+  if (!ctx) throw new Error('useDevice must be used within DeviceProvider')
+  return ctx
 }

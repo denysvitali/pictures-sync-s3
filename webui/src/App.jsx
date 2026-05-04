@@ -1,320 +1,109 @@
-import { useEffect, useMemo, useState } from 'react'
-import {
-  Alert,
-  AlertDescription,
-  AlertIndicator,
-  AlertTitle,
-  Badge,
-  Box,
-  Button,
-  Card,
-  CardBody,
-  CardHeader,
-  Container,
-  Flex,
-  Heading,
-  HStack,
-  IconButton,
-  Input,
-  SimpleGrid,
-  TabsList,
-  TabsRoot,
-  TabsTrigger,
-  Text,
-  VStack,
-} from '@chakra-ui/react'
-import { useDeviceUrl, isHostedPagesUrl } from './DeviceContext'
-import { useColorMode } from './ColorMode'
-import { getVersion } from './api'
-import { navigateRoute, parseHashRoute, pageByPath, pageRegistry } from './routes'
+import { useState, useEffect, Suspense } from 'react'
+import { useDevice } from './DeviceContext.jsx'
+import { routes, getCurrentRoute } from './routes.js'
+import { ToastProvider } from './components/Toast.jsx'
+import { DeviceSwitcher } from './components/DeviceSwitcher.jsx'
+import { Icon } from './components/Icons.jsx'
+import { PageLoader } from './components/LoadingSpinner.jsx'
 
-// Icon components using SVG
-const SunIcon = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="12" cy="12" r="5"/>
-    <line x1="12" y1="1" x2="12" y2="3"/>
-    <line x1="12" y1="21" x2="12" y2="23"/>
-    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
-    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
-    <line x1="1" y1="12" x2="3" y2="12"/>
-    <line x1="21" y1="12" x2="23" y2="12"/>
-    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
-    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
-  </svg>
-)
-
-const MoonIcon = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-  </svg>
-)
-
-const DEVICE_EXAMPLES = ['http://192.168.1.10:8080', 'http://localhost:8080']
-const quickRouteLabel = (route) => route.label || route.path
-
-function DeviceSwitcher() {
-  const { deviceUrl, setDeviceUrl, clearDeviceUrl } = useDeviceUrl()
-  const [rawValue, setRawValue] = useState(deviceUrl)
-
-  useEffect(() => {
-    setRawValue(deviceUrl)
-  }, [deviceUrl])
-
-  const save = () => {
-    setDeviceUrl(rawValue)
-  }
-
-  const useCurrentHost = () => {
-    setDeviceUrl(window.location.origin)
-  }
-
+function BottomNav({ current, onNavigate }) {
   return (
-    <Card variant="panel">
-      <CardHeader>
-        <Flex align="center" justify="space-between" gap={4} wrap="wrap">
-          <Box>
-            <Heading size="md">Device connection</Heading>
-            <Text color="fg.muted" fontSize="sm">
-              Tell this interface which backup device to control.
-            </Text>
-          </Box>
-          <Badge bg="accent.muted" color="accent">Live</Badge>
-        </Flex>
-      </CardHeader>
-      <CardBody>
-        <VStack align="stretch" gap={3}>
-          <Box>
-            <Text as="label" htmlFor="device-input" fontSize="sm" fontWeight="medium" color="fg.muted" mb={1} display="block">
-              Device address
-            </Text>
-            <Input
-              id="device-input"
-              value={rawValue}
-              onChange={(event) => setRawValue(event.target.value)}
-              placeholder="http://192.168.1.10"
-            />
-          </Box>
-          <HStack gap={2} wrap="wrap">
-            <Button size="lg" variant="brand" onClick={save}>Connect</Button>
-            <Button variant="outline" onClick={useCurrentHost}>Use this page</Button>
-            <Button variant="ghost" onClick={clearDeviceUrl}>Disconnect</Button>
-          </HStack>
-        </VStack>
-        
-        <Box mt={4} pt={4} borderTopWidth="1px" borderColor="border.subtle">
-          <Text fontSize="sm" fontWeight="medium" color="fg.muted" mb={1}>Connected device</Text>
-          <Text fontFamily="mono" fontSize="sm" color="fg.default">
-            {deviceUrl || '(not set)'}
-          </Text>
-        </Box>
-
-        <details mt={3} style={{ cursor: 'pointer' }}>
-          <summary style={{ color: 'var(--chakra-colors-fg-subtle)', fontSize: '0.82rem', fontWeight: 600 }}>
-            Advanced connection details
-          </summary>
-          <Box mt={3}>
-            <Text fontSize="sm" color="fg.muted" mb={2}>Shortcuts:</Text>
-            <HStack gap={2} wrap="wrap">
-              {DEVICE_EXAMPLES.map((item) => (
-                <Button size="sm" variant="outline" key={item} onClick={() => setDeviceUrl(item)}>
-                  {item}
-                </Button>
-              ))}
-            </HStack>
-          </Box>
-        </details>
-      </CardBody>
-    </Card>
+    <nav className="fixed bottom-0 inset-x-0 z-40 glass border-t border-surface-700/50 safe-area-bottom">
+      <div className="flex items-center justify-around max-w-lg mx-auto">
+        {routes.map((route) => {
+          const active = current === route.id
+          return (
+            <button
+              key={route.id}
+              onClick={() => onNavigate(route)}
+              className={`
+                flex flex-col items-center gap-0.5 py-2 px-3 min-w-0 transition-colors
+                ${active ? 'text-brand-400' : 'text-surface-500 hover:text-surface-300'}
+              `}
+            >
+              <Icon name={route.icon} className="w-5 h-5" />
+              <span className="text-[10px] font-medium">{route.label}</span>
+            </button>
+          )
+        })}
+      </div>
+    </nav>
   )
 }
 
-function DeviceMissingNotice() {
+function Header({ title, subtitle }) {
   return (
-    <Card variant="panel" bg="warningBg">
-      <CardBody>
-        <Alert status="warning" variant="subtle">
-          <AlertIndicator />
-          <Box>
-            <AlertTitle>No device URL configured.</AlertTitle>
-            <AlertDescription>
-              You are likely browsing static UI assets. Set a reachable device URL (for example
-              <Box as="span" fontFamily="mono" mx={1}>
-                http://192.168.1.10:8080
-              </Box>
-              or
-              <Box as="span" fontFamily="mono" mx={1}>
-                http://localhost:8080
-              </Box>
-              to load live API data.
-            </AlertDescription>
-          </Box>
-        </Alert>
-      </CardBody>
-    </Card>
+    <header className="sticky top-0 z-30 glass border-b border-surface-700/50 safe-area-top">
+      <div className="max-w-5xl mx-auto px-4 py-3">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-brand-600/20 flex items-center justify-center">
+            <span className="text-lg">📸</span>
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-base font-bold text-surface-50 truncate">{title}</h1>
+            {subtitle && (
+              <p className="text-xs text-surface-400 truncate">{subtitle}</p>
+            )}
+          </div>
+        </div>
+      </div>
+    </header>
   )
-}
-
-function RouteRenderer({ route, deviceUrl }) {
-  const PageComponent = route?.component
-  if (!PageComponent) {
-    return null
-  }
-  return <PageComponent deviceUrl={deviceUrl} />
-}
-
-function formatVersion(versionInfo) {
-  if (!versionInfo) return 'Unknown'
-  const rawVersion = versionInfo.version || 'dev'
-  const version = /^[a-f0-9]{40}$/i.test(rawVersion) ? rawVersion.slice(0, 7) : rawVersion
-  const commit = versionInfo.commit ? versionInfo.commit.slice(0, 7) : ''
-  const suffix = versionInfo.dirty ? ' dirty' : ''
-  if (commit && commit !== version && commit !== rawVersion) {
-    return `${version} (${commit}${suffix})`
-  }
-  return `${version}${suffix}`
 }
 
 export default function App() {
-  const [activeRoutePath, setActiveRoutePath] = useState(parseHashRoute())
-  const [versionInfo, setVersionInfo] = useState(null)
-  const [versionError, setVersionError] = useState('')
-  const { deviceUrl } = useDeviceUrl()
-  const { colorMode, toggleColorMode } = useColorMode()
-
-  const isHostedPages = isHostedPagesUrl(window.location.origin)
-
-  const activeRoute = useMemo(() => pageByPath(activeRoutePath), [activeRoutePath])
+  const { deviceUrl } = useDevice()
+  const [current, setCurrent] = useState(() => getCurrentRoute().id)
 
   useEffect(() => {
     const onHashChange = () => {
-      setActiveRoutePath(parseHashRoute())
+      setCurrent(getCurrentRoute().id)
     }
     window.addEventListener('hashchange', onHashChange)
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
 
-  useEffect(() => {
-    let cancelled = false
+  const navigate = (route) => {
+    window.location.hash = route.path.replace('#', '')
+  }
 
-    if (!deviceUrl) {
-      setVersionInfo(null)
-      setVersionError('')
-      return () => {
-        cancelled = true
-      }
-    }
+  const currentRoute = routes.find((r) => r.id === current) || routes[0]
+  const PageComponent = currentRoute.Component
 
-    getVersion(deviceUrl)
-      .then((data) => {
-        if (!cancelled) {
-          setVersionInfo(data)
-          setVersionError('')
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setVersionInfo(null)
-          setVersionError(error.message || 'Version unavailable')
-        }
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [deviceUrl])
+  const titles = {
+    status: 'Overview',
+    wifi: 'Wi-Fi',
+    history: 'Sync History',
+    gallery: 'Gallery',
+    config: 'Settings',
+  }
 
   return (
-    <Box minH="100vh" py={6} px={4}>
-      <Container maxW="6xl">
-        <VStack align="stretch" gap={4}>
-          {/* Hero Panel with Theme Toggle */}
-          <Card variant="panel">
-            <CardBody>
-              <Flex justify="space-between" align="center" gap={4} wrap="wrap">
-                <Box>
-                  <Heading size="lg" lineHeight="1.2">
-                    Photo Backup Station
-                  </Heading>
-                  <Text color="fg.muted" mt={2}>
-                    Keep your camera backups running and tuned.
-                  </Text>
-                </Box>
-                
-                <HStack gap={4}>
-                  <Box textAlign="right" display={{ base: 'none', md: 'block' }}>
-                    <Text fontSize="sm" color="fg.muted">Connected device</Text>
-                    <Text fontFamily="mono" fontSize="sm" color="fg.default">
-                      {deviceUrl || 'Not connected'}
-                    </Text>
-                    <Text fontSize="sm" color="fg.muted" mt={1}>Software</Text>
-                    <Text 
-                      fontFamily="mono" 
-                      fontSize="sm" 
-                      color={versionError ? 'danger' : 'fg.default'}
-                    >
-                      {versionError ? 'Unavailable' : formatVersion(versionInfo)}
-                    </Text>
-                  </Box>
-                  
-                  <IconButton
-                    aria-label={`Switch to ${colorMode === 'dark' ? 'light' : 'dark'} mode`}
-                    onClick={toggleColorMode}
-                    variant="ghost"
-                    size="lg"
-                    color="fg.muted"
-                    _hover={{ bg: 'panelSoft', color: 'fg.default' }}
-                  >
-                    {colorMode === 'dark' ? <SunIcon /> : <MoonIcon />}
-                  </IconButton>
-                </HStack>
-              </Flex>
-            </CardBody>
-          </Card>
+    <ToastProvider>
+      <div className="min-h-screen bg-surface-950 pb-20">
+        <DeviceSwitcher />
+        <Header title="Photo Backup Station" subtitle={titles[current]} />
 
-          {isHostedPages && <DeviceSwitcher />}
+        <main className="max-w-5xl mx-auto px-4 py-4">
+          {!deviceUrl ? (
+            <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-4">
+              <div className="w-16 h-16 rounded-2xl bg-brand-600/10 flex items-center justify-center mb-4">
+                <Icon name="cloud" className="w-8 h-8 text-brand-400" />
+              </div>
+              <h2 className="text-lg font-semibold text-surface-200 mb-2">No Device Connected</h2>
+              <p className="text-sm text-surface-400 max-w-xs">
+                Enter your Photo Backup Station's address above to get started.
+              </p>
+            </div>
+          ) : (
+            <Suspense fallback={<PageLoader />}>
+              <PageComponent />
+            </Suspense>
+          )}
+        </main>
 
-          <Card variant="panel" p={2}>
-            <TabsRoot
-              value={activeRoute.path}
-              onValueChange={(event) => navigateRoute(event.value)}
-              variant="line"
-            >
-              <TabsList display="grid" gridTemplateColumns={{ base: 'repeat(2, 1fr)', md: 'repeat(5, 1fr)' }} gap={2} borderBottom="none">
-                {pageRegistry.map((route) => (
-                  <TabsTrigger 
-                    key={route.path} 
-                    value={route.path}
-                    justifyContent="center"
-                    minH="48px"
-                    borderRadius="l2"
-                    borderWidth="1px"
-                    borderColor="border.subtle"
-                    color="fg.muted"
-                    _selected={{ 
-                      bg: 'accent.muted', 
-                      borderColor: 'accent',
-                      color: 'accent',
-                    }}
-                  >
-                    <HStack gap={2}>
-                      <Text as="span">{route.icon}</Text>
-                      <Text as="span">{quickRouteLabel(route)}</Text>
-                    </HStack>
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-            </TabsRoot>
-          </Card>
-
-          <SimpleGrid columns={{ base: 1, lg: 1 }}>
-            {activeRoute.requiresDeviceUrl && !deviceUrl ? (
-              <DeviceMissingNotice />
-            ) : (
-              <RouteRenderer route={activeRoute} deviceUrl={deviceUrl} />
-            )}
-          </SimpleGrid>
-        </VStack>
-      </Container>
-    </Box>
+        <BottomNav current={current} onNavigate={navigate} />
+      </div>
+    </ToastProvider>
   )
 }

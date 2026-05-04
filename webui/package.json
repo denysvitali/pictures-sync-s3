@@ -1,20 +1,22 @@
 {
-  "name": "photo-backup-station-react-ui",
-  "version": "2.0.0",
+  "name": "photo-backup-station",
+  "version": "3.0.0",
   "private": true,
+  "type": "module",
   "description": "React frontend for Photo Backup Station",
   "scripts": {
-    "build": "node ./scripts/build.js"
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
   },
   "dependencies": {
-    "@chakra-ui/react": "^3.24.0",
-    "@emotion/react": "^11.14.0",
-    "@emotion/styled": "^11.14.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^5.1.0",
+    "@tailwindcss/vite": "^4.1.4",
+    "@vitejs/plugin-react": "^4.4.1",
+    "tailwindcss": "^4.1.4",
     "vite": "^6.3.5"
   }
 }
