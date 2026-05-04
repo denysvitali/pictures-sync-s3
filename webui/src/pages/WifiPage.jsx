@@ -143,7 +143,7 @@ export function WifiPage({ deviceUrl }) {
 
   return (
     <Stack spacing={4} align="stretch">
-      <Card bg="whiteAlpha.50">
+      <Card variant="panel">
         <CardBody>
           <Heading size="sm">Wi-Fi status</Heading>
           {loading ? (
@@ -161,7 +161,7 @@ export function WifiPage({ deviceUrl }) {
         </CardBody>
       </Card>
 
-      <Card bg="whiteAlpha.50">
+      <Card variant="panel">
         <CardBody>
           <Heading size="sm" mb={3}>
             Saved networks
@@ -182,7 +182,7 @@ export function WifiPage({ deviceUrl }) {
                   size="sm"
                   type="password"
                 />
-                <Button type="submit" colorScheme="teal" size="sm" isLoading={connecting}>
+                <Button type="submit" variant="brand" size="sm" isLoading={connecting}>
                   Connect
                 </Button>
               </HStack>
@@ -200,7 +200,7 @@ export function WifiPage({ deviceUrl }) {
             <Button size="sm" variant="outline" onClick={handleScan} isLoading={scanBusy}>
               Scan saved networks
             </Button>
-            <Button size="sm" onClick={saveOrder} isLoading={reorderBusy} isDisabled={networks.length < 2}>
+            <Button size="sm" variant="brand" onClick={saveOrder} isLoading={reorderBusy} isDisabled={networks.length < 2}>
               Save order
             </Button>
             <Button size="sm" onClick={load} isLoading={loading} variant="ghost">

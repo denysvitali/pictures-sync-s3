@@ -22,7 +22,7 @@ import {
   Text,
   VStack
 } from '@chakra-ui/react'
-import { useDeviceUrl } from './DeviceContext'
+import { useDeviceUrl, isHostedPagesUrl } from './DeviceContext'
 import { getVersion } from './api'
 import { navigateRoute, parseHashRoute, pageByPath, pageRegistry } from './routes'
 
@@ -46,57 +46,64 @@ function DeviceSwitcher() {
   }
 
   return (
-    <Card className="endpoint-card">
+    <Card className="endpoint-card" variant="panel">
       <CardHeader className="endpoint-header">
         <Flex align="center" justify="space-between" gap={4} wrap="wrap">
           <Box>
-            <Heading size="md">Device endpoint</Heading>
+            <Heading size="md">Device connection</Heading>
             <Text className="muted-text" fontSize="sm">
-              Connect this dashboard to the photo backup device API.
+              Tell this interface which backup device to control.
             </Text>
           </Box>
-          <Badge className="mode-badge">Targeted API</Badge>
+          <Badge className="mode-badge">Live</Badge>
         </Flex>
       </CardHeader>
       <CardBody className="endpoint-body">
         <Box className="endpoint-form">
           <Box className="field-stack">
             <Text as="label" htmlFor="device-input" className="field-label">
-              Base URL
+              Device address
             </Text>
             <Input
               id="device-input"
               value={rawValue}
               onChange={(event) => setRawValue(event.target.value)}
-              placeholder="http://192.168.1.10:8080"
+              placeholder="http://192.168.1.10"
               _focus={{ boxShadow: 'none', borderColor: 'teal.300' }}
             />
           </Box>
           <HStack className="endpoint-actions">
-            <Button colorScheme="teal" onClick={save}>
-              Save
+            <Button size="lg" variant="brand" onClick={save} className="primary-cta">
+              Connect
             </Button>
-            <Button variant="outline" colorScheme="teal" onClick={useCurrentHost}>
-              Use this host
+            <Button variant="outline" onClick={useCurrentHost}>
+              Use this page
             </Button>
             <Button variant="ghost" onClick={clearDeviceUrl}>
-              Clear
+              Disconnect
             </Button>
           </HStack>
         </Box>
         <Box className="active-target">
-          <Text className="field-label">Active target</Text>
+          <Text className="field-label">Connected device</Text>
           <Box as="span" className="target-value">
             {deviceUrl || '(not set)'}
           </Box>
         </Box>
-        <HStack className="quick-targets">
-          {DEVICE_EXAMPLES.map((item) => (
-            <Button size="sm" variant="outline" key={item} onClick={() => setDeviceUrl(item)}>
-              {item}
-            </Button>
-          ))}
-        </HStack>
+        <details className="advanced-connection">
+          <summary>Advanced connection details</summary>
+          <Text mt={2} fontSize="sm" className="muted-text">
+            Shortcuts:
+          </Text>
+          <HStack className="quick-targets" mt={2}>
+            {DEVICE_EXAMPLES.map((item) => (
+              <Button size="sm" variant="outline" key={item} onClick={() => setDeviceUrl(item)}>
+                {item}
+              </Button>
+            ))}
+          </HStack>
+          <Text className="advanced-note">This should normally be filled automatically when browsing from the device.</Text>
+        </details>
       </CardBody>
     </Card>
   )
@@ -104,7 +111,7 @@ function DeviceSwitcher() {
 
 function DeviceMissingNotice() {
   return (
-    <Card className="notice-card">
+    <Card className="notice-card" variant="panel">
       <CardBody>
         <Alert status="warning" variant="subtle">
           <AlertIndicator />
@@ -153,6 +160,8 @@ export default function App() {
   const [versionInfo, setVersionInfo] = useState(null)
   const [versionError, setVersionError] = useState('')
   const { deviceUrl } = useDeviceUrl()
+
+  const isHostedPages = isHostedPagesUrl(window.location.origin)
 
   const activeRoute = useMemo(() => pageByPath(activeRoutePath), [activeRoutePath])
 
@@ -203,27 +212,26 @@ export default function App() {
               <Heading size="lg" className="hero-title">
                 Photo Backup Station
               </Heading>
-              <Text className="hero-copy">
-                Remote status dashboard and sync configuration for your device.
-              </Text>
+            <Text className="hero-copy">Keep your camera backups running and tuned.</Text>
             </Box>
             <Box className="hero-status">
-              <Text className="field-label">Current target</Text>
-              <Text className="hero-target">{deviceUrl || 'Not configured'}</Text>
-              <Text className="field-label version-label">Running version</Text>
+              <Text className="field-label">Connected device</Text>
+              <Text className="hero-target">{deviceUrl || 'Not connected'}</Text>
+              <Text className="field-label version-label">Software</Text>
               <Text className={versionError ? 'hero-version unavailable' : 'hero-version'}>
                 {versionError ? 'Unavailable' : formatVersion(versionInfo)}
               </Text>
             </Box>
           </Box>
 
-          <DeviceSwitcher />
+          {isHostedPages && <DeviceSwitcher />}
 
-          <Card className="nav-card">
+            <Card className="nav-card" variant="panel">
             <TabsRoot
               value={activeRoute.path}
               onValueChange={(event) => navigateRoute(event.value)}
               variant="line"
+              className="nav-root"
             >
               <TabsList className="nav-tabs">
                 {pageRegistry.map((route) => (

@@ -20,29 +20,29 @@ export const pageRegistry = [
   {
     key: 'status',
     path: 'status',
-    label: 'Status',
+    label: 'Overview',
     icon: '📈',
     component: StatusPage,
     requiresDeviceUrl: true,
-    description: 'Current sync state and recent run history.'
+    description: 'See live backup health and recent activity.'
   },
   {
     key: 'wifi',
     path: 'wifi',
-    label: 'Wi-Fi',
+    label: 'Wi‑Fi',
     icon: '📶',
     component: WifiPage,
     requiresDeviceUrl: true,
-    description: 'Manage saved networks and connection actions.'
+    description: 'Connect the device to your home network.'
   },
   {
     key: 'history',
     path: 'history',
-    label: 'History',
+    label: 'Runs',
     icon: '🗂️',
     component: HistoryPage,
     requiresDeviceUrl: true,
-    description: 'Inspect historical sync jobs and status messages.'
+    description: 'Review completed and failed backup runs.'
   },
   {
     key: 'gallery',
@@ -51,16 +51,16 @@ export const pageRegistry = [
     icon: '🖼️',
     component: GalleryPage,
     requiresDeviceUrl: true,
-    description: 'Browse synced images and folders from the device.'
+    description: 'Quickly check what synced files look like.'
   },
   {
     key: 'config',
     path: 'config',
-    label: 'Config',
+    label: 'Settings',
     icon: '⚙️',
     component: ConfigPage,
     requiresDeviceUrl: true,
-    description: 'Edit sync settings and validate rclone config.'
+    description: 'Set destination, tuning, and maintenance options.'
   }
 ]
 

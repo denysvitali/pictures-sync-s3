@@ -7,18 +7,17 @@ import {
   Button,
   CardRoot as Card,
   CardBody,
+  CardHeader,
   Heading,
   HStack,
   Input,
-  ListRoot as List,
   ListItem,
+  ListRoot,
   Spinner,
   Stack,
   Text,
   Textarea,
-  VStack,
-  Wrap,
-  WrapItem
+  VStack
 } from '@chakra-ui/react'
 import {
   changeGokrazyPassword,
@@ -116,7 +115,7 @@ export function ConfigPage({ deviceUrl }) {
         tailscale_auth_key: tailscaleAuthKey
       })
       setTailscaleAuthKey('')
-      setMessage('Settings saved.')
+      setMessage('Settings saved. Your destination is ready.')
       await load()
     } catch (err) {
       setError(err.message)
@@ -132,7 +131,7 @@ export function ConfigPage({ deviceUrl }) {
     try {
       const response = await testConfig(deviceUrl)
       if (response?.success) {
-        setMessage('Connection test succeeded.')
+        setMessage('Connection test passed. Device can reach the destination.')
       } else {
         setError(response?.error || 'Connection test failed.')
       }
@@ -197,76 +196,61 @@ export function ConfigPage({ deviceUrl }) {
   const otaBusy = ['checking', 'downloading', 'installing'].includes(otaStatus?.state)
 
   return (
-    <Card bg="whiteAlpha.50">
+    <Card bg="transparent">
+      <CardHeader>
+        <Heading size="lg" className="section-title">Sync settings</Heading>
+      </CardHeader>
       <CardBody>
-        <HStack justify="space-between" align="center">
-          <Heading size="sm">Configuration</Heading>
-          <Button size="sm" onClick={load} isLoading={loading}>
-            Refresh
-          </Button>
-        </HStack>
+        <Card className="section-card" variant="panel">
+          <CardBody>
+            <HStack justify="space-between" align="center">
+              <div>
+                <Text className="section-title">Destination</Text>
+                <Text className="form-subtitle">Choose where backups are uploaded.</Text>
+              </div>
+              <Button size="sm" onClick={load} isLoading={loading}>
+                Refresh
+              </Button>
+            </HStack>
 
-        {loading && (
-          <Stack mt={4} spacing={2}>
-            <Spinner />
-          </Stack>
-        )}
-
-        {error ? (
-          <Alert status="error" mt={4}>
-            <AlertIndicator />
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        ) : null}
-
-        {message ? (
-          <Alert status="success" mt={4}>
-            <AlertIndicator />
-            <AlertDescription>{message}</AlertDescription>
-          </Alert>
-        ) : null}
-
-        <Stack mt={4} spacing={5}>
-          <Card bg="whiteAlpha.100" variant="outline">
-            <CardBody>
-              <HStack justify="space-between">
-                <Text fontWeight="medium">Configured remote</Text>
-                <Badge colorScheme={config.configured ? 'green' : 'orange'}>
-                  {config.configured ? 'configured' : 'not configured'}
-                </Badge>
-              </HStack>
-              <Text mt={2} fontSize="sm" color="gray.300">
-                Remotes detected: {config.remotes?.length || 0}
-              </Text>
-              <List mt={2} spacing={1} color="gray.100">
-                {(config.remotes || []).map((item) => (
-                  <ListItem key={item}>• {item}</ListItem>
-                ))}
-                {(config.remotes || []).length === 0 ? <ListItem>No remotes found.</ListItem> : null}
-              </List>
-            </CardBody>
-          </Card>
-
-          <form onSubmit={onSave}>
-            <Card variant="outline" bg="whiteAlpha.100">
+            <Card className="section-card" mt={4} variant="panel">
               <CardBody>
-                <Heading size="sm" mb={3}>
-                  Sync settings
-                </Heading>
-                <Stack spacing={3}>
-                  <VStack align="start" spacing={1}>
-                    <Text color="gray.200" fontSize="sm">
-                      Remote name
-                    </Text>
-                    <Input value={remoteName} onChange={(event) => setRemoteName(event.target.value)} />
-                  </VStack>
-                  <VStack align="start" spacing={1}>
-                    <Text color="gray.200" fontSize="sm">
-                      Remote path
-                    </Text>
-                    <Input value={remotePath} onChange={(event) => setRemotePath(event.target.value)} />
-                  </VStack>
-                  <VStack align="start" spacing={1}>
+                <HStack justify="space-between" wrap="wrap">
+                  <Text fontWeight="medium">Configured destination</Text>
+                  <Badge colorScheme={config.configured ? 'green' : 'orange'}>
+                    {config.configured ? 'Configured' : 'Not configured'}
+                  </Badge>
+                </HStack>
+                <Text mt={2} fontSize="sm" color="gray.300">
+                  Remotes detected: {config.remotes?.length || 0}
+                </Text>
+                <ListRoot mt={2} spacing={1} color="gray.100">
+                  {(config.remotes || []).map((item) => (
+                    <ListItem key={item}>• {item}</ListItem>
+                  ))}
+                  {(config.remotes || []).length === 0 ? <ListItem>No remote entries found.</ListItem> : null}
+                </ListRoot>
+              </CardBody>
+            </Card>
+
+            <form onSubmit={onSave}>
+              <Stack mt={4} spacing={4}>
+                <Stack spacing={1}>
+                  <Text color="gray.200" fontSize="sm">
+                    Remote name
+                  </Text>
+                  <Input value={remoteName} onChange={(event) => setRemoteName(event.target.value)} />
+                </Stack>
+
+                <Stack spacing={1}>
+                  <Text color="gray.200" fontSize="sm">
+                    Remote path
+                  </Text>
+                  <Input value={remotePath} onChange={(event) => setRemotePath(event.target.value)} />
+                </Stack>
+
+                <HStack>
+                  <Stack spacing={1} flex={1}>
                     <Text color="gray.200" fontSize="sm">
                       Reformat threshold
                     </Text>
@@ -275,197 +259,189 @@ export function ConfigPage({ deviceUrl }) {
                       value={reformatThreshold}
                       onChange={(event) => setReformatThreshold(event.target.valueAsNumber)}
                     />
-                  </VStack>
-                  <Wrap spacing={3}>
-                    <WrapItem>
-                      <VStack align="start" spacing={1}>
-                        <Text color="gray.200" fontSize="sm">
-                          Transfers
-                        </Text>
-                        <Input
-                          type="number"
-                          value={transfers}
-                          onChange={(event) => setTransfers(event.target.valueAsNumber)}
-                        />
-                      </VStack>
-                    </WrapItem>
-                    <WrapItem>
-                      <VStack align="start" spacing={1}>
-                        <Text color="gray.200" fontSize="sm">
-                          Checkers
-                        </Text>
-                        <Input
-                          type="number"
-                          value={checkers}
-                          onChange={(event) => setCheckers(event.target.valueAsNumber)}
-                        />
-                      </VStack>
-                    </WrapItem>
-                  </Wrap>
-                  <HStack as="label" spacing={2} color="gray.100">
-                    <Input
+                  </Stack>
+                  <Stack spacing={1}>
+                    <Text color="gray.200" fontSize="sm">
+                      Transfers
+                    </Text>
+                    <Input type="number" value={transfers} onChange={(event) => setTransfers(event.target.valueAsNumber)} />
+                  </Stack>
+                  <Stack spacing={1}>
+                    <Text color="gray.200" fontSize="sm">
+                      Checkers
+                    </Text>
+                    <Input type="number" value={checkers} onChange={(event) => setCheckers(event.target.valueAsNumber)} />
+                  </Stack>
+                </HStack>
+
+                <VStack align="start" spacing={1}>
+                  <Text color="gray.200" fontSize="sm">
+                    Google Photos sync
+                  </Text>
+                  <HStack>
+                    <input
                       type="checkbox"
-                      width="auto"
                       checked={googlePhotosEnabled}
                       onChange={(event) => setGooglePhotosEnabled(event.target.checked)}
                     />
-                    <Text>Enable Google Photos</Text>
+                    <Text>Also upload a copy to Google Photos</Text>
                   </HStack>
-                  <VStack align="start" spacing={1}>
-                    <Text color="gray.200" fontSize="sm">
-                      Google Photos remote
-                    </Text>
-                    <Input
-                      isDisabled={!googlePhotosEnabled}
-                      value={googlePhotosRemoteName}
-                      onChange={(event) => setGooglePhotosRemoteName(event.target.value)}
-                      placeholder="gphotos"
-                    />
-                  </VStack>
-                  <VStack align="start" spacing={1}>
-                    <HStack justify="space-between" width="100%">
-                      <Text color="gray.200" fontSize="sm">
-                        Tailscale auth key
-                      </Text>
-                      <Badge colorScheme={tailscaleAuthKeyConfigured ? 'green' : 'orange'}>
-                        {tailscaleAuthKeyConfigured ? 'configured' : 'not configured'}
-                      </Badge>
-                    </HStack>
-                    <Input
-                      type="password"
-                      autoComplete="off"
-                      value={tailscaleAuthKey}
-                      onChange={(event) => setTailscaleAuthKey(event.target.value)}
-                      placeholder="tskey-auth-..."
-                    />
-                    <Text fontSize="xs" color="gray.400">
-                      Stored at {tailscaleAuthKeyPath}
-                    </Text>
-                  </VStack>
+                </VStack>
+
+                <Stack spacing={1}>
+                  <Text color="gray.200" fontSize="sm">
+                    Google Photos remote
+                  </Text>
+                  <Input
+                    isDisabled={!googlePhotosEnabled}
+                    value={googlePhotosRemoteName}
+                    onChange={(event) => setGooglePhotosRemoteName(event.target.value)}
+                    placeholder="gphotos"
+                  />
                 </Stack>
-                <HStack mt={4} spacing={2}>
-                  <Button type="submit" colorScheme="teal" isLoading={saving}>
-                    Save settings
+
+                <HStack mt={2} spacing={2}>
+                  <Button type="submit" variant="brand" isLoading={saving} className="primary-cta">
+                    Save destination
                   </Button>
                   <Button type="button" onClick={onTest} isLoading={testing} variant="outline">
-                    Test connection
+                    Test destination
                   </Button>
                 </HStack>
-              </CardBody>
-            </Card>
-          </form>
+              </Stack>
+            </form>
 
-          <form onSubmit={onChangeGokrazyPassword}>
-            <Card variant="outline" bg="whiteAlpha.100">
-              <CardBody>
-                <Heading size="sm" mb={3}>
-                  Gokrazy UI password
-                </Heading>
-                <Stack spacing={3}>
-                  <VStack align="start" spacing={1}>
-                    <Text color="gray.200" fontSize="sm">
-                      Current password
-                    </Text>
+            {loading && (
+              <Stack mt={4} spacing={2}>
+                <Spinner />
+              </Stack>
+            )}
+
+            {error ? (
+              <Alert status="error" mt={4}>
+                <AlertIndicator />
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            ) : null}
+            {message ? (
+              <Alert status="success" mt={4}>
+                <AlertIndicator />
+                <AlertDescription>{message}</AlertDescription>
+              </Alert>
+            ) : null}
+          </CardBody>
+        </Card>
+
+        <details className="advanced-connection">
+          <summary>Advanced options</summary>
+          <Card className="section-card" mt={3} variant="panel">
+            <CardHeader>
+              <Heading size="sm">Security and maintenance</Heading>
+            </CardHeader>
+            <CardBody>
+              <Stack spacing={4}>
+                <form onSubmit={onChangeGokrazyPassword}>
+                  <VStack align="stretch" spacing={3}>
+                    <Text fontWeight="medium">Gokrazy web password</Text>
                     <Input
                       type="password"
                       autoComplete="current-password"
+                      placeholder="Current password"
                       value={currentGokrazyPassword}
                       onChange={(event) => setCurrentGokrazyPassword(event.target.value)}
                     />
-                  </VStack>
-                  <VStack align="start" spacing={1}>
-                    <Text color="gray.200" fontSize="sm">
-                      New password
-                    </Text>
                     <Input
                       type="password"
                       autoComplete="new-password"
+                      placeholder="New password"
                       value={newGokrazyPassword}
                       onChange={(event) => setNewGokrazyPassword(event.target.value)}
                     />
-                  </VStack>
-                  <VStack align="start" spacing={1}>
-                    <Text color="gray.200" fontSize="sm">
-                      Confirm new password
-                    </Text>
                     <Input
                       type="password"
                       autoComplete="new-password"
+                      placeholder="Confirm new password"
                       value={confirmGokrazyPassword}
                       onChange={(event) => setConfirmGokrazyPassword(event.target.value)}
                     />
+                    <Button type="submit" size="sm" variant="brand" isLoading={savingGokrazyPassword}>
+                      Update password
+                    </Button>
                   </VStack>
-                </Stack>
-                <HStack mt={4} spacing={2}>
-                  <Button type="submit" colorScheme="teal" isLoading={savingGokrazyPassword}>
-                    Change password
-                  </Button>
-                </HStack>
-              </CardBody>
-            </Card>
-          </form>
+                </form>
 
-          <Card variant="outline" bg="whiteAlpha.100">
-            <CardBody>
-              <HStack justify="space-between" align="start">
-                <VStack align="start" spacing={1}>
-                  <Heading size="sm">System update</Heading>
+                <form onSubmit={(event) => {
+                  event.preventDefault()
+                  onSaveBreakglass()
+                }}>
+                  <VStack align="stretch" spacing={2}>
+                    <Text fontWeight="medium">Breakglass SSH keys</Text>
+                    <Text fontSize="sm" color="gray.300">
+                      {breakglassPath}
+                    </Text>
+                    <Textarea
+                      mt={2}
+                      minH="120px"
+                      fontFamily="mono"
+                      value={breakglassKeys}
+                      onChange={(event) => setBreakglassKeys(event.target.value)}
+                      placeholder="ssh-ed25519 AAAA..."
+                    />
+                    <HStack spacing={2}>
+                    <Button size="sm" variant="brand" type="submit" isLoading={savingBreakglass}>
+                      Save keys
+                    </Button>
+                    </HStack>
+                  </VStack>
+                </form>
+
+                <Stack spacing={2}>
+                  <Text fontWeight="medium">Tailscale auth key</Text>
+                  <HStack>
+                    <Text fontSize="sm" color="gray.300">
+                      Stored: {tailscaleAuthKeyConfigured ? 'configured' : 'not configured'}
+                    </Text>
+                    <Badge colorScheme={tailscaleAuthKeyConfigured ? 'green' : 'orange'}>
+                      {tailscaleAuthKeyConfigured ? 'ready' : 'missing'}
+                    </Badge>
+                  </HStack>
+                  <Text fontSize="xs" color="gray.400">
+                    Enter a key only when updating. Saved at {tailscaleAuthKeyPath}.
+                  </Text>
+                  <Input
+                    type="password"
+                    autoComplete="off"
+                    value={tailscaleAuthKey}
+                    onChange={(event) => setTailscaleAuthKey(event.target.value)}
+                    placeholder="tskey-auth-..."
+                  />
+                </Stack>
+
+                <Stack spacing={2}>
+                  <HStack justify="space-between" align="center">
+                    <Text fontWeight="medium">System update</Text>
+                    <Badge colorScheme={otaStatus?.state === 'failed' ? 'red' : otaBusy ? 'blue' : 'green'}>
+                      {otaStatus?.state || 'idle'}
+                    </Badge>
+                  </HStack>
                   <Text fontSize="sm" color="gray.300">
                     {otaStatus?.release ? `${otaStatus.release} · ${otaStatus.asset || 'OTA image'}` : 'Latest GitHub release'}
                   </Text>
-                </VStack>
-                <Badge colorScheme={otaStatus?.state === 'failed' ? 'red' : otaBusy ? 'blue' : 'green'}>
-                  {otaStatus?.state || 'idle'}
-                </Badge>
-              </HStack>
-              {otaStatus?.message ? (
-                <Text mt={3} fontSize="sm" color="gray.200">
-                  {otaStatus.message}
-                </Text>
-              ) : null}
-              {otaStatus?.error ? (
-                <Text mt={3} fontSize="sm" color="red.200">
-                  {otaStatus.error}
-                </Text>
-              ) : null}
-              <HStack mt={4} spacing={2}>
-                <Button colorScheme="teal" onClick={onInstallOta} isLoading={installingOta || otaBusy}>
-                  Install latest OTA
-                </Button>
-                <Button variant="outline" onClick={load} isLoading={loading}>
-                  Refresh
-                </Button>
-              </HStack>
+                  {otaStatus?.message ? <Text fontSize="sm">{otaStatus.message}</Text> : null}
+                  {otaStatus?.error ? <Text color="red.200" fontSize="sm">{otaStatus.error}</Text> : null}
+                  <HStack>
+                    <Button size="sm" variant="brand" onClick={onInstallOta} isLoading={installingOta || otaBusy}>
+                      Install latest OTA
+                    </Button>
+                    <Button size="sm" onClick={load} isLoading={loading} variant="outline">
+                      Re-check
+                    </Button>
+                  </HStack>
+                </Stack>
+              </Stack>
             </CardBody>
           </Card>
-
-          <Card variant="outline" bg="whiteAlpha.100">
-            <CardBody>
-              <HStack justify="space-between">
-                <Heading size="sm">Breakglass SSH keys</Heading>
-                <Badge colorScheme={breakglassKeys.trim() ? 'green' : 'orange'}>
-                  {breakglassKeys.trim() ? 'configured' : 'not configured'}
-                </Badge>
-              </HStack>
-              <Text mt={2} fontSize="sm" color="gray.300">
-                {breakglassPath}
-              </Text>
-              <Textarea
-                mt={3}
-                minH="160px"
-                fontFamily="mono"
-                value={breakglassKeys}
-                onChange={(event) => setBreakglassKeys(event.target.value)}
-                placeholder="ssh-ed25519 AAAA..."
-              />
-              <HStack mt={4} spacing={2}>
-                <Button colorScheme="teal" onClick={onSaveBreakglass} isLoading={savingBreakglass}>
-                  Save keys
-                </Button>
-              </HStack>
-            </CardBody>
-          </Card>
-        </Stack>
+        </details>
       </CardBody>
     </Card>
   )
