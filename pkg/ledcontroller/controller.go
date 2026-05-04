@@ -341,6 +341,7 @@ func (l *LED) SetBrightness(value int) error {
 	defer l.mu.Unlock()
 
 	data := []byte(fmt.Sprintf("%d", value))
+	// #nosec G306 -- sysfs LED brightness file needs broader permissions on embedded device
 	return os.WriteFile(l.brightnessPath, data, 0644)
 }
 

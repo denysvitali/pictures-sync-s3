@@ -52,6 +52,7 @@ func GetOrCreateCardID(mountPath string, monitor *Monitor) (string, bool, error)
 	log.Printf("CardID: Generated new card ID: %s", newID)
 
 	// Write to card (filesystem should be read-write at this point)
+	// #nosec G306 -- Card ID on SD card must be readable by other processes
 	if err := os.WriteFile(idPath, []byte(newID+"\n"), 0644); err != nil {
 		log.Printf("CardID ERROR: Could not write card ID to %s: %v", idPath, err)
 		// This means the card will get a different ID next time
@@ -82,6 +83,7 @@ func CreateNewCardID(mountPath string, monitor *Monitor) (string, error) {
 	log.Printf("CardID: Creating new card ID: %s", newID)
 
 	// Write to card (filesystem should be read-write at this point)
+	// #nosec G306 -- Card ID on SD card must be readable by other processes
 	if err := os.WriteFile(idPath, []byte(newID+"\n"), 0644); err != nil {
 		log.Printf("CardID ERROR: Could not write card ID to %s: %v", idPath, err)
 		// This is a critical error - return it instead of ignoring

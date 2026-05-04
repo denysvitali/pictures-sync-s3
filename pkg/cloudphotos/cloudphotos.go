@@ -86,7 +86,7 @@ func NewManager(configPath, remoteName, remotePath string, syncMgr *syncmanager.
 	}
 
 	// Ensure cache directory exists
-	if err := os.MkdirAll(m.cacheDir, 0755); err != nil {
+	if err := os.MkdirAll(m.cacheDir, 0750); err != nil {
 		return nil, fmt.Errorf("failed to create cache directory: %w", err)
 	}
 
@@ -256,7 +256,7 @@ func (m *Manager) DownloadPhoto(photoPath string) (string, error) {
 
 	// Ensure cache directory structure exists
 	cacheDir := filepath.Dir(cachedPath)
-	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+	if err := os.MkdirAll(cacheDir, 0750); err != nil {
 		return "", fmt.Errorf("failed to create cache directory: %w", err)
 	}
 
@@ -416,7 +416,7 @@ func (m *Manager) ClearCache() error {
 		return fmt.Errorf("failed to clear cache: %w", err)
 	}
 
-	if err := os.MkdirAll(m.cacheDir, 0755); err != nil {
+	if err := os.MkdirAll(m.cacheDir, 0750); err != nil {
 		return fmt.Errorf("failed to recreate cache directory: %w", err)
 	}
 

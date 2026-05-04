@@ -64,6 +64,7 @@ func NewMonitor(mountPath string) *Monitor {
 // Start begins monitoring for SD card events
 func (m *Monitor) Start() error {
 	// Ensure mount directory exists
+	// #nosec G301 -- SD card mount point must be accessible by all processes on embedded device
 	if err := os.MkdirAll(m.mountPath, 0755); err != nil {
 		return err
 	}
@@ -277,6 +278,7 @@ func (m *Monitor) createDevModeCard() {
 
 	// Create DCIM structure with some mock photos
 	dcimPath := filepath.Join(m.mountPath, "DCIM", "100CANON")
+	// #nosec G301 -- Mock SD card DCIM structure must be accessible by web UI
 	if err := os.MkdirAll(dcimPath, 0755); err != nil {
 		log.Printf("Failed to create mock DCIM directory: %v", err)
 		return
@@ -288,6 +290,7 @@ func (m *Monitor) createDevModeCard() {
 		photoPath := filepath.Join(dcimPath, photo)
 		// Create a small mock JPEG file (just placeholder content)
 		content := []byte("Mock JPEG file content for " + photo)
+		// #nosec G306 -- Mock photo files on SD card must be readable by web UI process
 		if err := os.WriteFile(photoPath, content, 0644); err != nil {
 			log.Printf("Failed to create mock photo %s: %v", photo, err)
 		}
