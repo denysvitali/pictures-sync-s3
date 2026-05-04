@@ -96,6 +96,61 @@ func TestValidateB2Config(t *testing.T) {
 	}
 }
 
+func TestValidateB2BucketName(t *testing.T) {
+	tests := []struct {
+		name    string
+		bucket  string
+		wantErr string
+	}{
+		{"valid simple", "my-bucket", ""},
+		{"valid digits", "bucket123", ""},
+		{"valid single char repeated", "aaa", ""},
+		{"valid max length", strings.Repeat("a", 63), ""},
+		{"too short", "ab", "at least 3 characters"},
+		{"too long", strings.Repeat("a", 64), "at most 63 characters"},
+		{"starts with hyphen", "-mybucket", "must start and end"},
+		{"ends with hyphen", "mybucket-", "must start and end"},
+		{"uppercase", "MyBucket", "must start and end"},
+		{"consecutive hyphens", "my--bucket", "consecutive hyphens"},
+		{"contains underscore", "my_bucket", "must start and end"},
+		{"contains dot", "my.bucket", "must start and end"},
+		{"whitespace only", "   ", "must start and end"},
+		{"contains null byte", "abc\x00def", "invalid characters"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateB2BucketName(tt.bucket)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("expected no error, got: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("expected error containing %q, got: %v", tt.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestB2RegionsNotEmpty(t *testing.T) {
+	if len(B2Regions) == 0 {
+		t.Fatal("B2Regions should not be empty")
+	}
+	for _, r := range B2Regions {
+		if r.ID == "" || r.Name == "" || r.Endpoint == "" {
+			t.Errorf("B2Region %+v has empty fields", r)
+		}
+		if !strings.HasPrefix(r.Endpoint, "https://") {
+			t.Errorf("B2Region %q endpoint should use HTTPS: %s", r.ID, r.Endpoint)
+		}
+	}
+}
+
 func TestBuildB2RcloneConfig(t *testing.T) {
 	cfg := &B2Config{
 		Account:    "myaccount",

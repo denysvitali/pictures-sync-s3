@@ -116,6 +116,7 @@ func GetRcloneConfigPath() string {
 
 // loadStateFile reads the state file and returns the raw data
 func loadStateFile() ([]byte, error) {
+	// #nosec G304 -- StateFile is a controlled application path (/perm/pictures-sync/state.json)
 	data, err := os.ReadFile(StateFile)
 	if err != nil {
 		if os.IsNotExist(err) {

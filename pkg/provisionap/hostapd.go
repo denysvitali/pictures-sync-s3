@@ -24,6 +24,7 @@ type Process interface {
 type execRunner struct{}
 
 func (execRunner) Start(ctx context.Context, name string, args ...string) (Process, error) {
+	// #nosec G204 -- name and args are controlled by the provisionap package (hostapd binary)
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

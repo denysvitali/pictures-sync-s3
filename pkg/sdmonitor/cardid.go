@@ -26,6 +26,7 @@ func GetOrCreateCardID(mountPath string, monitor *Monitor) (string, bool, error)
 	log.Printf("CardID: Attempting to read or create card ID at %s", idPath)
 
 	// Try to read existing ID
+	// #nosec G304 -- idPath is constructed from mount path + well-known CardIDFile constant
 	if data, err := os.ReadFile(idPath); err == nil {
 		cardID := strings.TrimSpace(string(data))
 		if cardID != "" {

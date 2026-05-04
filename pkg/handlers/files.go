@@ -192,6 +192,7 @@ func (ctx *Context) HandleThumbnail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Open and decode the image
+	// #nosec G304 -- filePath is validated against mount directory and traversal is blocked above
 	file, err := os.Open(filePath)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to open image: %v", err), http.StatusInternalServerError)
@@ -327,6 +328,7 @@ func (ctx *Context) HandleSDCardFiles(w http.ResponseWriter, r *http.Request) {
 
 // extractEXIF extracts EXIF metadata from an image file
 func extractEXIF(filePath string) map[string]interface{} {
+	// #nosec G304 -- filePath is within validated SD card mount directory
 	fileData, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil

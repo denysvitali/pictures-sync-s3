@@ -182,6 +182,7 @@ export const testConfig = (deviceUrl) =>
     deviceUrl,
     method: 'POST'
   })
+export const getB2Regions = (deviceUrl) => apiRequest('/api/config/b2/regions', { deviceUrl })
 export const saveB2Config = (deviceUrl, payload) =>
   apiRequest('/api/config/b2', {
     deviceUrl,

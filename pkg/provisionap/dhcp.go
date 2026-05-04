@@ -116,7 +116,12 @@ func (s *dhcpServer) leaseFor(mac net.HardwareAddr) net.IP {
 
 	start := ipToUint32(s.cfg.DHCPStart)
 	end := ipToUint32(s.cfg.DHCPEnd)
-	offset := uint32(len(s.leases))
+	leaseCount := len(s.leases)
+	if leaseCount < 0 {
+		leaseCount = 0
+	}
+	// #nosec G115 -- lease count from in-memory map is bounded by available memory
+	offset := uint32(leaseCount)
 	if start+offset > end {
 		offset = 0
 	}
@@ -162,6 +167,11 @@ func appendDHCPOption(packet []byte, code byte, value []byte) []byte {
 	if code == 255 {
 		return packet
 	}
+	// DHCP option length is a single byte; truncate if exceeding 255.
+	if len(value) > 255 {
+		value = value[:255]
+	}
+	// #nosec G115 -- len(value) is bounded to [0,255] above
 	packet = append(packet, byte(len(value)))
 	return append(packet, value...)
 }
@@ -173,7 +183,13 @@ func uint32Bytes(value uint32) []byte {
 }
 
 func uint32ToIP(value uint32) net.IP {
-	return net.IPv4(byte(value>>24), byte(value>>16), byte(value>>8), byte(value))
+	// Each shifted value is masked to [0,255] for safe byte conversion.
+	return net.IPv4(
+		byte((value>>24)&0xFF),
+		byte((value>>16)&0xFF),
+		byte((value>>8)&0xFF),
+		byte(value&0xFF),
+	)
 }
 
 func listenUDPWithBroadcast(ctx context.Context, interfaceName, addr string) (*net.UDPConn, error) {

@@ -23,6 +23,7 @@ import {
 } from '@chakra-ui/react'
 import {
   changeGokrazyPassword,
+  getB2Regions,
   getBreakglassAuthorizedKeys,
   getConfig,
   getOtaStatus,
@@ -73,18 +74,22 @@ export function ConfigPage({ deviceUrl }) {
   const [b2RemoteName, setB2RemoteName] = useState('b2')
   const [b2RemotePath, setB2RemotePath] = useState('/photos')
   const [b2Endpoint, setB2Endpoint] = useState('')
+  const [b2SelectedRegion, setB2SelectedRegion] = useState('')
+  const [b2Regions, setB2Regions] = useState([])
   const [savingB2, setSavingB2] = useState(false)
+  const [b2BucketError, setB2BucketError] = useState('')
 
   const load = async () => {
     if (!deviceUrl) return
     setLoading(true)
     setError('')
     try {
-      const [configResponse, settingsResponse, breakglassResponse, otaResponse] = await Promise.all([
+      const [configResponse, settingsResponse, breakglassResponse, otaResponse, regionsResponse] = await Promise.all([
         getConfig(deviceUrl),
         getSettings(deviceUrl),
         getBreakglassAuthorizedKeys(deviceUrl),
         getOtaStatus(deviceUrl),
+        getB2Regions(deviceUrl).catch(() => []),
       ])
       setConfig(configResponse || { configured: false, remotes: [] })
       setRemoteName(settingsResponse?.remote_name || '')
@@ -99,6 +104,8 @@ export function ConfigPage({ deviceUrl }) {
       setBreakglassKeys(breakglassResponse?.authorized_keys || '')
       setBreakglassPath(breakglassResponse?.path || '/perm/breakglass/authorized_keys')
       setOtaStatus(otaResponse || { state: 'idle' })
+      const regions = Array.isArray(regionsResponse) ? regionsResponse : []
+      setB2Regions(regions)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -207,6 +214,30 @@ export function ConfigPage({ deviceUrl }) {
 
   const otaBusy = ['checking', 'downloading', 'installing'].includes(otaStatus?.state)
 
+  function validateB2Bucket(name) {
+    if (!name) return ''
+    if (name.length < 3) return 'Must be at least 3 characters'
+    if (name.length > 63) return 'Must be at most 63 characters'
+    if (!/^[a-z0-9]/.test(name)) return 'Must start with a lowercase letter or digit'
+    if (!/[a-z0-9]$/.test(name)) return 'Must end with a lowercase letter or digit'
+    if (!/^[a-z0-9\-]+$/.test(name)) return 'Only lowercase letters, digits, and hyphens allowed'
+    if (/--/.test(name)) return 'Must not contain consecutive hyphens'
+    return ''
+  }
+
+  function onB2BucketChange(value) {
+    setB2Bucket(value)
+    setB2BucketError(validateB2Bucket(value))
+  }
+
+  function onB2RegionChange(regionId) {
+    setB2SelectedRegion(regionId)
+    const region = b2Regions.find((r) => r.id === regionId)
+    if (region) {
+      setB2Endpoint(region.endpoint)
+    }
+  }
+
   return (
     <Card bg="transparent" border="none">
       <CardHeader>
@@ -251,10 +282,15 @@ export function ConfigPage({ deviceUrl }) {
               <CardBody>
                 <Text fontWeight="medium" color="fg.default" mb={1}>Backblaze B2 quick setup</Text>
                 <Text color="fg.muted" fontSize="sm" mb={3}>
-                  Enter your B2 credentials to auto-generate the rclone config.
+                  Enter your B2 Application Key credentials to auto-generate the rclone config.
+                  You can find these in the Backblaze web console under
+                  <Text as="span" fontWeight="semibold"> App Keys</Text>.
+                  The <Text as="span" fontWeight="semibold">keyID</Text> is your Account ID and
+                  the <Text as="span" fontWeight="semibold">applicationKey</Text> is your Application Key.
                 </Text>
                 <form onSubmit={async (event) => {
                   event.preventDefault()
+                  if (b2BucketError) return
                   setSavingB2(true)
                   setMessage('')
                   setError('')
@@ -282,11 +318,12 @@ export function ConfigPage({ deviceUrl }) {
                 }}>
                   <Stack gap={3}>
                     <Box>
-                      <Text color="fg.muted" fontSize="sm" mb={1}>Account ID</Text>
+                      <Text color="fg.muted" fontSize="sm" mb={1}>Account ID (keyID)</Text>
                       <Input
                         value={b2Account}
                         onChange={(event) => setB2Account(event.target.value)}
                         placeholder="004..."
+                        autoComplete="off"
                       />
                     </Box>
                     <Box>
@@ -296,15 +333,60 @@ export function ConfigPage({ deviceUrl }) {
                         value={b2Key}
                         onChange={(event) => setB2Key(event.target.value)}
                         placeholder="K004..."
+                        autoComplete="off"
                       />
                     </Box>
                     <Box>
                       <Text color="fg.muted" fontSize="sm" mb={1}>Bucket name</Text>
                       <Input
                         value={b2Bucket}
-                        onChange={(event) => setB2Bucket(event.target.value)}
+                        onChange={(event) => onB2BucketChange(event.target.value)}
                         placeholder="my-photo-backup"
+                        autoComplete="off"
                       />
+                      {b2BucketError ? (
+                        <Text color="danger" fontSize="xs" mt={1}>{b2BucketError}</Text>
+                      ) : null}
+                    </Box>
+                    {b2Regions.length > 0 ? (
+                      <Box>
+                        <Text color="fg.muted" fontSize="sm" mb={1}>Region</Text>
+                        <select
+                          value={b2SelectedRegion}
+                          onChange={(event) => onB2RegionChange(event.target.value)}
+                          style={{
+                            width: '100%',
+                            padding: '8px 12px',
+                            borderRadius: '6px',
+                            border: '1px solid var(--chakra-colors-border)',
+                            background: 'var(--chakra-colors-bg)',
+                            color: 'var(--chakra-colors-fg-default)',
+                            fontSize: '14px',
+                          }}
+                        >
+                          <option value="">Select a region...</option>
+                          {b2Regions.map((region) => (
+                            <option key={region.id} value={region.id}>
+                              {region.name}
+                            </option>
+                          ))}
+                        </select>
+                      </Box>
+                    ) : null}
+                    <Box>
+                      <Text color="fg.muted" fontSize="sm" mb={1}>Endpoint</Text>
+                      <Input
+                        value={b2Endpoint}
+                        onChange={(event) => {
+                          setB2Endpoint(event.target.value)
+                          setB2SelectedRegion('')
+                        }}
+                        placeholder="https://s3.us-west-004.backblazeb2.com"
+                        autoComplete="off"
+                      />
+                      <Text color="fg.subtle" fontSize="xs" mt={1}>
+                        Auto-filled when selecting a region. Only change if using a custom endpoint.
+                      </Text>
                     </Box>
                     <HStack gap={4}>
                       <Box flex={1}>
@@ -324,15 +406,12 @@ export function ConfigPage({ deviceUrl }) {
                         />
                       </Box>
                     </HStack>
-                    <Box>
-                      <Text color="fg.muted" fontSize="sm" mb={1}>Endpoint (optional)</Text>
-                      <Input
-                        value={b2Endpoint}
-                        onChange={(event) => setB2Endpoint(event.target.value)}
-                        placeholder="https://s3.us-west-001.backblazeb2.com"
-                      />
-                    </Box>
-                    <Button type="submit" variant="brand" loading={savingB2}>
+                    <Button
+                      type="submit"
+                      variant="brand"
+                      loading={savingB2}
+                      disabled={!b2Account || !b2Key || !b2Bucket || !!b2BucketError}
+                    >
                       Configure B2 remote
                     </Button>
                   </Stack>

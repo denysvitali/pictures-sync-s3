@@ -43,7 +43,8 @@ func newRootCommand() *cobra.Command {
 	}
 
 	cmd := &cobra.Command{
-		Use:   "ota-upload --image photo-backup-rpi4b-root.squashfs.gz --target https://gokrazy:password@device/",
+		// #nosec G101 -- example placeholder password in usage string
+		Use: "ota-upload --image photo-backup-rpi4b-root.squashfs.gz --target https://gokrazy:password@device/",
 		Short: "Upload a gzipped gokrazy root image to a running device",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return run(cmd.Context(), opts)
@@ -83,7 +84,8 @@ func run(ctx context.Context, opts options) error {
 	client := &http.Client{Timeout: opts.timeout}
 	if opts.insecure {
 		client.Transport = &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // Explicit CLI opt-in for self-signed gokrazy devices.
+			// #nosec G402 -- explicit CLI opt-in for self-signed gokrazy devices
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		}
 	}
 	target, err := updater.NewTarget(ctx, baseURL, client)

@@ -262,6 +262,7 @@ func (m *Manager) DownloadPhoto(photoPath string) (string, error) {
 
 	// Create temporary file for download
 	tmpPath := cachedPath + ".tmp"
+	// #nosec G304 -- tmpPath is derived from a SHA256-hashed cache path within the cache directory
 	tmpFile, err := os.Create(tmpPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to create temporary file: %w", err)

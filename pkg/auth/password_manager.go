@@ -10,6 +10,7 @@ import (
 )
 
 const (
+	// #nosec G101 -- this is a well-known gokrazy system file path, not a credential
 	DefaultGokrazyPasswordFile = "/etc/gokr-pw.txt"
 	MinPasswordLength          = 8
 	MaxPasswordLength          = 256
