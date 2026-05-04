@@ -422,6 +422,7 @@ func TestSubscribeDuringNotification(t *testing.T) {
 
 	var wg sync.WaitGroup
 	stopSignal := make(chan struct{})
+	allChans := make(chan chan CurrentState, 200)
 
 	// Goroutine 1: Continuously subscribe new listeners
 	wg.Add(1)
@@ -433,11 +434,7 @@ func TestSubscribeDuringNotification(t *testing.T) {
 				return
 			default:
 				ch := mgr.Subscribe()
-				// Start a goroutine to drain the channel
-				go func(c chan CurrentState) {
-					for range c {
-					}
-				}(ch)
+				allChans <- ch
 			}
 		}
 	}()
@@ -484,8 +481,12 @@ func TestSubscribeDuringNotification(t *testing.T) {
 
 	wg.Wait()
 
-	// BUG: Race detector should catch issues
-	// Run with: go test -race -run TestSubscribeDuringNotification
+	// Unsubscribe all remaining channels to prevent goroutine leaks
+	close(allChans)
+	for ch := range allChans {
+		mgr.Unsubscribe(ch)
+	}
+
 	t.Log("Test completed - check race detector output")
 }
 

@@ -65,6 +65,11 @@ func (m *Manager) AddNetwork(ssid, password string) error {
 		return fmt.Errorf("SSID cannot be empty")
 	}
 
+	// Validate SSID length (WiFi spec: max 32 bytes)
+	if len(ssid) > 32 {
+		return fmt.Errorf("SSID exceeds maximum length of 32 bytes")
+	}
+
 	// Validate password strength for WPA/WPA2 networks
 	if password != "" {
 		if err := ValidateWiFiPassword(password); err != nil {

@@ -290,8 +290,10 @@ func TestProgressUpdatesDuringStateTransitions(t *testing.T) {
 		}
 	}()
 
-	wg.Wait()
+	// Close stopProgress before wg.Wait to unblock goroutine 1
+	time.Sleep(100 * time.Millisecond)
 	close(stopProgress)
+	wg.Wait()
 	close(errors)
 
 	for err := range errors {
