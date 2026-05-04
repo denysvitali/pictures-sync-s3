@@ -29,6 +29,7 @@ import {
   getSettings,
   installOta,
   saveBreakglassAuthorizedKeys,
+  saveB2Config,
   saveSettings,
   testConfig,
 } from '../api'
@@ -64,6 +65,15 @@ export function ConfigPage({ deviceUrl }) {
   const [savingBreakglass, setSavingBreakglass] = useState(false)
   const [otaStatus, setOtaStatus] = useState({ state: 'idle' })
   const [installingOta, setInstallingOta] = useState(false)
+
+  // B2 config state
+  const [b2Account, setB2Account] = useState('')
+  const [b2Key, setB2Key] = useState('')
+  const [b2Bucket, setB2Bucket] = useState('')
+  const [b2RemoteName, setB2RemoteName] = useState('b2')
+  const [b2RemotePath, setB2RemotePath] = useState('/photos')
+  const [b2Endpoint, setB2Endpoint] = useState('')
+  const [savingB2, setSavingB2] = useState(false)
 
   const load = async () => {
     if (!deviceUrl) return
@@ -234,6 +244,99 @@ export function ConfigPage({ deviceUrl }) {
                     <ListItem color="fg.subtle">No remote entries found.</ListItem>
                   ) : null}
                 </ListRoot>
+              </CardBody>
+            </Card>
+
+            <Card variant="panel" mt={4}>
+              <CardBody>
+                <Text fontWeight="medium" color="fg.default" mb={1}>Backblaze B2 quick setup</Text>
+                <Text color="fg.muted" fontSize="sm" mb={3}>
+                  Enter your B2 credentials to auto-generate the rclone config.
+                </Text>
+                <form onSubmit={async (event) => {
+                  event.preventDefault()
+                  setSavingB2(true)
+                  setMessage('')
+                  setError('')
+                  try {
+                    const response = await saveB2Config(deviceUrl, {
+                      account_id: b2Account,
+                      application_key: b2Key,
+                      bucket_name: b2Bucket,
+                      remote_name: b2RemoteName || 'b2',
+                      remote_path: b2RemotePath || '/photos',
+                      endpoint: b2Endpoint || undefined,
+                    })
+                    if (response?.success) {
+                      setMessage('B2 remote configured and connection verified.')
+                      setB2Key('')
+                      await load()
+                    } else {
+                      setError(response?.error || 'B2 configuration failed.')
+                    }
+                  } catch (err) {
+                    setError(err.message)
+                  } finally {
+                    setSavingB2(false)
+                  }
+                }}>
+                  <Stack gap={3}>
+                    <Box>
+                      <Text color="fg.muted" fontSize="sm" mb={1}>Account ID</Text>
+                      <Input
+                        value={b2Account}
+                        onChange={(event) => setB2Account(event.target.value)}
+                        placeholder="004..."
+                      />
+                    </Box>
+                    <Box>
+                      <Text color="fg.muted" fontSize="sm" mb={1}>Application Key</Text>
+                      <Input
+                        type="password"
+                        value={b2Key}
+                        onChange={(event) => setB2Key(event.target.value)}
+                        placeholder="K004..."
+                      />
+                    </Box>
+                    <Box>
+                      <Text color="fg.muted" fontSize="sm" mb={1}>Bucket name</Text>
+                      <Input
+                        value={b2Bucket}
+                        onChange={(event) => setB2Bucket(event.target.value)}
+                        placeholder="my-photo-backup"
+                      />
+                    </Box>
+                    <HStack gap={4}>
+                      <Box flex={1}>
+                        <Text color="fg.muted" fontSize="sm" mb={1}>Remote name</Text>
+                        <Input
+                          value={b2RemoteName}
+                          onChange={(event) => setB2RemoteName(event.target.value)}
+                          placeholder="b2"
+                        />
+                      </Box>
+                      <Box flex={1}>
+                        <Text color="fg.muted" fontSize="sm" mb={1}>Remote path</Text>
+                        <Input
+                          value={b2RemotePath}
+                          onChange={(event) => setB2RemotePath(event.target.value)}
+                          placeholder="/photos"
+                        />
+                      </Box>
+                    </HStack>
+                    <Box>
+                      <Text color="fg.muted" fontSize="sm" mb={1}>Endpoint (optional)</Text>
+                      <Input
+                        value={b2Endpoint}
+                        onChange={(event) => setB2Endpoint(event.target.value)}
+                        placeholder="https://s3.us-west-001.backblazeb2.com"
+                      />
+                    </Box>
+                    <Button type="submit" variant="brand" loading={savingB2}>
+                      Configure B2 remote
+                    </Button>
+                  </Stack>
+                </form>
               </CardBody>
             </Card>
 

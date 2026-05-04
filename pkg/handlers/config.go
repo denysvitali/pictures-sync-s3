@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -165,6 +166,105 @@ func (ctx *Context) HandlePasswordChange(w http.ResponseWriter, r *http.Request)
 }
 
 // logConfigChange logs rclone configuration changes with client information
+// HandleConfigB2 handles Backblaze B2 remote configuration
+func (ctx *Context) HandleConfigB2(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Account    string `json:"account_id"`
+		Key        string `json:"application_key"`
+		Bucket     string `json:"bucket_name"`
+		RemoteName string `json:"remote_name"`
+		RemotePath string `json:"remote_path"`
+		Endpoint   string `json:"endpoint"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	b2cfg := &validation.B2Config{
+		Account:    req.Account,
+		Key:        req.Key,
+		Bucket:     req.Bucket,
+		RemoteName: req.RemoteName,
+		RemotePath: req.RemotePath,
+		Endpoint:   req.Endpoint,
+	}
+
+	configBytes, err := validation.BuildB2RcloneConfig(b2cfg)
+	if err != nil {
+		logConfigChange(r, "b2_validation_failed", err.Error())
+		JSONResponse(w, map[string]any{"success": false, "error": err.Error()})
+		return
+	}
+
+	// Validate the generated config
+	result, err := validation.ValidateRcloneConfig(configBytes)
+	if err != nil || !result.Valid {
+		errMsg := "Invalid generated configuration"
+		if err != nil {
+			errMsg = err.Error()
+		} else if len(result.Errors) > 0 {
+			errMsg = result.Errors[0].Error()
+		}
+		logConfigChange(r, "b2_validation_failed", errMsg)
+		JSONResponse(w, map[string]any{"success": false, "error": errMsg})
+		return
+	}
+
+	// Write config file
+	configPath := state.GetRcloneConfigPath()
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		logConfigChange(r, "b2_write_error", err.Error())
+		http.Error(w, fmt.Sprintf("Failed to create config directory: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if err := os.WriteFile(configPath, configBytes, 0600); err != nil {
+		logConfigChange(r, "b2_write_error", err.Error())
+		http.Error(w, fmt.Sprintf("Failed to write config: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	remoteName := strings.TrimSpace(req.RemoteName)
+	if remoteName == "" {
+		remoteName = "b2"
+	}
+	remotePath := strings.TrimSpace(req.RemotePath)
+	if remotePath == "" {
+		remotePath = "/photos"
+	}
+
+	// Update settings
+	if err := ctx.AppSettings.SetRemote(remoteName, remotePath); err != nil {
+		logConfigChange(r, "b2_settings_error", err.Error())
+		http.Error(w, fmt.Sprintf("Failed to save settings: %v", err), http.StatusInternalServerError)
+		return
+	}
+	ctx.SyncMgr.SetRemote(remoteName, remotePath)
+
+	// Test connection
+	if err := ctx.SyncMgr.TestConnection(); err != nil {
+		logConfigChange(r, "b2_test_failed", err.Error())
+		JSONResponse(w, map[string]any{
+			"success":     true,
+			"remote_name": remoteName,
+			"warning":     fmt.Sprintf("Config saved but connection test failed: %v", err),
+		})
+		return
+	}
+
+	logConfigChange(r, "b2_success", fmt.Sprintf("Configured B2 remote '%s' with bucket '%s'", remoteName, req.Bucket))
+	JSONResponse(w, map[string]any{
+		"success":     true,
+		"remote_name": remoteName,
+		"remotes":     []string{remoteName},
+	})
+}
+
 func logConfigChange(r *http.Request, status, details string) {
 	// Extract client IP, handling proxy headers
 	clientIP := r.RemoteAddr

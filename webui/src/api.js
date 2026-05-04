@@ -182,6 +182,12 @@ export const testConfig = (deviceUrl) =>
     deviceUrl,
     method: 'POST'
   })
+export const saveB2Config = (deviceUrl, payload) =>
+  apiRequest('/api/config/b2', {
+    deviceUrl,
+    method: 'POST',
+    body: payload
+  })
 export const getOtaStatus = (deviceUrl) => apiRequest('/api/ota/status', { deviceUrl })
 export const installOta = (deviceUrl) =>
   apiRequest('/api/ota/install', {
