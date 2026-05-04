@@ -127,8 +127,8 @@ function SystemStatusCard({ status }) {
           <StatusRow
             icon="wifi"
             label="WiFi"
-            value={status.sdcard_mounted ? 'Connected' : 'Unknown'}
-            ok={status.sdcard_mounted}
+            value={status.status !== 'idle' || status.sdcard_mounted ? 'Connected' : 'Unknown'}
+            ok={status.status !== 'idle' || status.sdcard_mounted}
           />
         </div>
 
@@ -162,7 +162,12 @@ function StatusRow({ icon, label, value, ok }) {
 
 function DeviceInfoCard({ status }) {
   const device = status.available_devices?.find((d) => d.is_mounted) || status.available_devices?.[0]
+  const hasCard = status.sdcard_mounted
   const photoCount = status.current_sync?.files_total || status.last_sync?.files_total || 0
+
+  const deviceName = device?.volume_label || device?.device_name || (hasCard ? 'SD Card' : null)
+  const deviceSize = device?.size_human || (device?.size ? formatBytes(device.size) : null)
+  const devicePath = device?.device_path || status.sdcard_path || null
 
   return (
     <Card>
@@ -170,7 +175,7 @@ function DeviceInfoCard({ status }) {
         <CardTitle>Device Info</CardTitle>
       </CardHeader>
 
-      {device ? (
+      {device || hasCard ? (
         <div className="space-y-3">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-info/10 flex items-center justify-center shrink-0">
@@ -178,16 +183,16 @@ function DeviceInfoCard({ status }) {
             </div>
             <div className="min-w-0">
               <p className="text-sm font-medium text-surface-200 truncate">
-                {device.volume_label || device.device_name || 'SD Card'}
+                {deviceName}
               </p>
               <p className="text-xs text-surface-500">
-                {device.size_human || formatBytes(device.size)}
-                {device.is_usb && ' (USB)'}
+                {deviceSize || (hasCard ? 'Mounted' : '')}
+                {device?.is_usb && ' (USB)'}
               </p>
             </div>
           </div>
 
-          {device.size > 0 && (
+          {device?.size > 0 && (
             <div>
               <div className="flex justify-between text-xs mb-1">
                 <span className="text-surface-400">Storage used</span>

@@ -160,6 +160,21 @@ func (h *Handler) processSyncOperation(event sdmonitor.Event) {
 		return
 	}
 
+	// Check if rclone is configured before attempting sync
+	hasConfig, err := state.EnsureRcloneConfig()
+	if err != nil {
+		log.Printf("Error checking rclone config: %v", err)
+		h.eventMgr.EmitError("Failed to check rclone configuration", err)
+		h.stateMgr.SetStatus(state.StatusError)
+		return
+	}
+	if !hasConfig {
+		log.Println("Rclone not configured - cannot sync. Please configure via web UI.")
+		h.eventMgr.EmitError("Rclone not configured. Please configure storage via the Settings page.", nil)
+		h.stateMgr.SetStatus(state.StatusError)
+		return
+	}
+
 	// Wait a moment before starting sync
 	time.Sleep(preSyncDelay)
 

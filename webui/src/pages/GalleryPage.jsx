@@ -16,7 +16,7 @@ function describeError(err) {
 }
 import { useDevice } from '../DeviceContext.jsx'
 import { useToast } from '../components/Toast.jsx'
-import { getFilesPaginated, getFileViewUrl, getThumbnailUrl } from '../api.js'
+import { getFilesPaginated, getFileViewUrl, getThumbnailUrl, getSDCardFiles, getSDCardPreviewUrl } from '../api.js'
 import { Card } from '../components/Card.jsx'
 import { Button } from '../components/Button.jsx'
 import { Icon } from '../components/Icons.jsx'
@@ -64,8 +64,10 @@ export default function GalleryPage() {
   const { deviceUrl } = useDevice()
   const toast = useToast()
 
+  const [source, setSource] = useState('cloud')
   const [currentPath, setCurrentPath] = useState('')
   const [files, setFiles] = useState([])
+  const [allSDCardFiles, setAllSDCardFiles] = useState([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
@@ -78,20 +80,33 @@ export default function GalleryPage() {
     if (!deviceUrl) return
     setLoading(true)
     try {
-      const data = await getFilesPaginated(deviceUrl, {
-        path: currentPath,
-        page,
-        pageSize: PAGE_SIZE,
-      })
-      const fileArr = Array.isArray(data?.files) ? data.files : []
-      // Sort: folders first, then alphabetically
-      fileArr.sort((a, b) => {
-        if (a.is_dir && !b.is_dir) return -1
-        if (!a.is_dir && b.is_dir) return 1
-        return a.name.localeCompare(b.name)
-      })
-      setFiles(fileArr)
-      setTotal(data?.total ?? fileArr.length)
+      if (source === 'sdcard') {
+        const data = await getSDCardFiles(deviceUrl, currentPath || 'DCIM')
+        const fileArr = Array.isArray(data?.files) ? data.files : []
+        fileArr.sort((a, b) => {
+          if (a.is_dir && !b.is_dir) return -1
+          if (!a.is_dir && b.is_dir) return 1
+          return a.name.localeCompare(b.name)
+        })
+        setAllSDCardFiles(fileArr)
+        const start = (page - 1) * PAGE_SIZE
+        setFiles(fileArr.slice(start, start + PAGE_SIZE))
+        setTotal(fileArr.length)
+      } else {
+        const data = await getFilesPaginated(deviceUrl, {
+          path: currentPath,
+          page,
+          pageSize: PAGE_SIZE,
+        })
+        const fileArr = Array.isArray(data?.files) ? data.files : []
+        fileArr.sort((a, b) => {
+          if (a.is_dir && !b.is_dir) return -1
+          if (!a.is_dir && b.is_dir) return 1
+          return a.name.localeCompare(b.name)
+        })
+        setFiles(fileArr)
+        setTotal(data?.total ?? fileArr.length)
+      }
     } catch (err) {
       toast.error(`Could not load files: ${describeError(err)}`)
       setFiles([])
@@ -99,7 +114,7 @@ export default function GalleryPage() {
     } finally {
       setLoading(false)
     }
-  }, [deviceUrl, currentPath, page])
+  }, [deviceUrl, currentPath, page, source])
 
   useEffect(() => {
     fetchFiles()
@@ -107,6 +122,13 @@ export default function GalleryPage() {
 
   const navigateTo = useCallback((path) => {
     setCurrentPath(path)
+    setPage(1)
+    setFiles([])
+  }, [])
+
+  const handleSourceChange = useCallback((newSource) => {
+    setSource(newSource)
+    setCurrentPath('')
     setPage(1)
     setFiles([])
   }, [])
@@ -121,10 +143,12 @@ export default function GalleryPage() {
   const handleImageClick = useCallback(
     (file) => {
       if (!deviceUrl) return
-      const url = getFileViewUrl(deviceUrl, file.path)
+      const url = source === 'sdcard'
+        ? getSDCardPreviewUrl(deviceUrl, file.path)
+        : getFileViewUrl(deviceUrl, file.path)
       window.open(url, '_blank', 'noopener,noreferrer')
     },
-    [deviceUrl]
+    [deviceUrl, source]
   )
 
   const handleBreadcrumbClick = useCallback(
@@ -163,6 +187,34 @@ export default function GalleryPage() {
 
   return (
     <div className="min-h-screen">
+      {/* Source toggle */}
+      <div className="flex items-center gap-2 mb-6">
+        <div className="flex bg-surface-800 rounded-lg p-1">
+          <button
+            onClick={() => handleSourceChange('cloud')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              source === 'cloud'
+                ? 'bg-brand-600 text-white shadow'
+                : 'text-surface-400 hover:text-surface-200'
+            }`}
+          >
+            <Icon name="cloud" className="w-4 h-4" />
+            Cloud
+          </button>
+          <button
+            onClick={() => handleSourceChange('sdcard')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              source === 'sdcard'
+                ? 'bg-brand-600 text-white shadow'
+                : 'text-surface-400 hover:text-surface-200'
+            }`}
+          >
+            <Icon name="sd-card" className="w-4 h-4" />
+            SD Card
+          </button>
+        </div>
+      </div>
+
       {/* Full-size image preview overlay */}
       {imagePreview && (
         <div
@@ -234,6 +286,7 @@ export default function GalleryPage() {
                 key={file.path}
                 file={file}
                 deviceUrl={deviceUrl}
+                source={source}
                 onFolderClick={handleFolderClick}
                 onImageClick={handleImageClick}
                 onImagePreview={setImagePreview}
@@ -320,10 +373,15 @@ function PaginationButton({ page: pageNum, active = false, onClick }) {
   )
 }
 
-function FileCard({ file, deviceUrl, onFolderClick, onImageClick, onImagePreview }) {
+function FileCard({ file, deviceUrl, source, onFolderClick, onImageClick, onImagePreview }) {
   const [thumbLoaded, setThumbLoaded] = useState(false)
   const [thumbError, setThumbError] = useState(false)
-  const isImg = !file.is_dir && isImageFile(file.name)
+  const isImg = !file.is_dir && (source === 'sdcard' ? file.is_image : isImageFile(file.name))
+
+  const thumbUrl = getThumbnailUrl(deviceUrl, file.path)
+  const previewUrl = source === 'sdcard'
+    ? getSDCardPreviewUrl(deviceUrl, file.path)
+    : getFileViewUrl(deviceUrl, file.path)
 
   const handleClick = () => {
     if (file.is_dir) {
@@ -350,7 +408,7 @@ function FileCard({ file, deviceUrl, onFolderClick, onImageClick, onImagePreview
               </div>
             )}
             <img
-              src={getThumbnailUrl(deviceUrl, file.path)}
+              src={thumbUrl}
               alt={file.name}
               loading="lazy"
               className={`w-full h-full object-cover transition-opacity duration-300 ${
@@ -397,8 +455,7 @@ function FileCard({ file, deviceUrl, onFolderClick, onImageClick, onImagePreview
           className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/60 text-white/80 hover:text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-sm"
           onClick={(e) => {
             e.stopPropagation()
-            const url = getFileViewUrl(deviceUrl, file.path)
-            onImagePreview(url)
+            onImagePreview(previewUrl)
           }}
           aria-label={`Preview ${file.name}`}
         >
@@ -409,7 +466,7 @@ function FileCard({ file, deviceUrl, onFolderClick, onImageClick, onImagePreview
       {/* Download button for files */}
       {!file.is_dir && (
         <a
-          href={getFileViewUrl(deviceUrl, file.path)}
+          href={previewUrl}
           download
           onClick={(e) => e.stopPropagation()}
           className="absolute bottom-2 right-2 w-7 h-7 rounded-full bg-black/60 text-white/80 hover:text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-sm"

@@ -112,6 +112,10 @@ export const getFiles = (d, path = '') =>
   apiRequest('/api/files', { deviceUrl: d, query: { path } })
 export const getFilesPaginated = (d, { path = '', page = 1, pageSize = 50 }) =>
   apiRequest('/api/files/paginated', { deviceUrl: d, query: { path, page, page_size: pageSize } })
+export const getSDCardFiles = (d, path = 'DCIM') =>
+  apiRequest('/api/sdcard/files', { deviceUrl: d, query: { path } })
+export const getSDCardPreviewUrl = (d, filePath) =>
+  `${normalizeBaseUrl(d)}/api/sdcard/preview?path=${encodeURIComponent(filePath || '')}`
 export const getConfig = (d) => apiRequest('/api/config', { deviceUrl: d })
 export const getBreakglassAuthorizedKeys = (d) =>
   apiRequest('/api/breakglass/authorized-keys', { deviceUrl: d })
