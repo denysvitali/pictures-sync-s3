@@ -75,10 +75,10 @@ function WifiStatusCard({ status }) {
                 {status.ip_address ? ` · ${status.ip_address}` : ''}
               </p>
             </div>
-            {status.signal_strength != null && (
-              <StatusBadge variant={signalVariant(status.signal_strength)}>
-                <Icon name={signalIcon(status.signal_strength)} className="w-3 h-3" />
-                {signalLabel(status.signal_strength)}
+            {status.signal != null && (
+              <StatusBadge variant={signalVariant(status.signal)}>
+                <Icon name={signalIcon(status.signal)} className="w-3 h-3" />
+                {signalLabel(status.signal)}
               </StatusBadge>
             )}
           </div>
@@ -121,7 +121,7 @@ function ScannedNetworkItem({ network, currentSsid, onConnect }) {
   const isCurrent = currentSsid === network.ssid
 
   async function handleConnect() {
-    if (network.secured && !expanded) {
+    if (network.encrypted && !expanded) {
       setExpanded(true)
       return
     }
@@ -137,13 +137,13 @@ function ScannedNetworkItem({ network, currentSsid, onConnect }) {
     <div className="border border-surface-700/30 rounded-lg overflow-hidden">
       <div className="flex items-center gap-3 p-3">
         <Icon
-          name={signalIcon(network.signal_strength)}
-          className={`w-5 h-5 text-${signalVariant(network.signal_strength)}`}
+          name={signalIcon(network.signal)}
+          className={`w-5 h-5 text-${signalVariant(network.signal)}`}
         />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium text-surface-100 truncate">{network.ssid}</span>
-            {network.secured && <Icon name="lock" className="w-3.5 h-3.5 text-surface-400 shrink-0" />}
+            {network.encrypted && <Icon name="lock" className="w-3.5 h-3.5 text-surface-400 shrink-0" />}
             {isCurrent && (
               <StatusBadge variant="success">
                 <Icon name="check" className="w-3 h-3" />
@@ -165,7 +165,7 @@ function ScannedNetworkItem({ network, currentSsid, onConnect }) {
         </Button>
       </div>
 
-      {expanded && !isCurrent && network.secured && (
+      {expanded && !isCurrent && network.encrypted && (
         <div className="px-3 pb-3 space-y-2">
           <PasswordInput
             value={password}
@@ -213,7 +213,7 @@ function SavedNetworkItem({ network, index, total, onMoveUp, onMoveDown, onDisco
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-surface-100 truncate">{network.ssid}</span>
-          {network.secured && <Icon name="lock" className="w-3.5 h-3.5 text-surface-400 shrink-0" />}
+          {network.has_password && <Icon name="lock" className="w-3.5 h-3.5 text-surface-400 shrink-0" />}
           {isConnected && (
             <StatusBadge variant="success">
               <Icon name="check" className="w-3 h-3" />
@@ -259,7 +259,7 @@ export default function WifiPage() {
   const fetchSavedNetworks = useCallback(async () => {
     try {
       const data = await getWifiNetworks(deviceUrl)
-      setSavedNetworks(Array.isArray(data) ? data : [])
+      setSavedNetworks(data?.networks ?? [])
     } catch (err) {
       toast.error(`Could not load saved networks: ${describeError(err)}`)
     }
@@ -276,9 +276,9 @@ export default function WifiPage() {
     setScanning(true)
     try {
       const data = await scanWifi(deviceUrl, 'signal_strength')
-      setScannedNetworks(Array.isArray(data) ? data : [])
+      setScannedNetworks(data?.networks ?? [])
       setShowScanned(true)
-      toast.info(`Found ${Array.isArray(data) ? data.length : 0} networks`)
+      toast.info(`Found ${(data?.networks ?? []).length} networks`)
     } catch (err) {
       toast.error(`Scan failed: ${describeError(err)}`)
     } finally {

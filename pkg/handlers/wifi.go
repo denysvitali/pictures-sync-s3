@@ -238,7 +238,7 @@ func sortWiFiNetworks(networks []wifimanager.ScanResult, sortBy string) []wifima
 	copy(sorted, networks)
 
 	switch strings.ToLower(sortBy) {
-	case "signal":
+	case "signal", "signal_strength":
 		// Sort by signal strength (strongest first)
 		sort.Slice(sorted, func(i, j int) bool {
 			return sorted[i].Signal > sorted[j].Signal
