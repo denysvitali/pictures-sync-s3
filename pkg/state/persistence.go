@@ -44,9 +44,10 @@ func getPermDir() string {
 
 // ensureDirectories creates necessary directories if they don't exist
 func ensureDirectories() error {
-	if err := os.MkdirAll(PermDir, 0755); err != nil {
+	if err := os.MkdirAll(PermDir, 0750); err != nil {
 		return fmt.Errorf("failed to create perm directory: %w", err)
 	}
+	// #nosec G301 -- SD card mount point must be accessible by web UI process
 	if err := os.MkdirAll(MountDir, 0755); err != nil {
 		return fmt.Errorf("failed to create mount directory: %w", err)
 	}

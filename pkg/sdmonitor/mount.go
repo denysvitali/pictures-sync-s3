@@ -145,6 +145,7 @@ func (m *Monitor) cleanupMountPoint() error {
 	}
 
 	// Ensure the directory exists and is accessible
+	// #nosec G301 -- SD card mount point must be accessible by all processes on embedded device
 	if err := os.MkdirAll(m.mountPath, 0755); err != nil {
 		log.Printf("CleanupMountPoint: ERROR: Failed to create mount directory %s: %v", m.mountPath, err)
 		return fmt.Errorf("failed to create mount directory: %w", err)

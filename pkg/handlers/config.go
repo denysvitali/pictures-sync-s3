@@ -218,7 +218,7 @@ func (ctx *Context) HandleConfigB2(w http.ResponseWriter, r *http.Request) {
 
 	// Write config file
 	configPath := state.GetRcloneConfigPath()
-	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(configPath), 0750); err != nil {
 		logConfigChange(r, "b2_write_error", err.Error())
 		http.Error(w, fmt.Sprintf("Failed to create config directory: %v", err), http.StatusInternalServerError)
 		return

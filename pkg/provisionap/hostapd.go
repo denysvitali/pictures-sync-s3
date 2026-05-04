@@ -49,6 +49,7 @@ func (p *execProcess) Stop() error {
 }
 
 func writeHostapdConfig(cfg Config) (string, error) {
+	// #nosec G301 -- hostapd config dir must be accessible by system hostapd service
 	if err := os.MkdirAll(cfg.ConfigDir, 0755); err != nil {
 		return "", err
 	}
