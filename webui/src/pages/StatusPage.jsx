@@ -100,12 +100,12 @@ export function StatusPage({ deviceUrl }) {
 
   return (
     <VStack spacing={4} align="stretch">
-      <Card bg="whiteAlpha.50">
+      <Card variant="panel">
         <CardHeader>
           <Flex justify="space-between" align="center" gap={3} wrap="wrap">
             <Heading size="sm">System status</Heading>
             <HStack spacing={2}>
-              <Button size="sm" colorScheme="teal" onClick={load} isLoading={loading}>
+              <Button size="sm" variant="brand" onClick={load} isLoading={loading}>
                 Refresh
               </Button>
               <Button
@@ -202,7 +202,7 @@ export function StatusPage({ deviceUrl }) {
         </CardBody>
       </Card>
 
-      <Card bg="whiteAlpha.30">
+      <Card variant="panel">
         <CardHeader>
           <Flex justify="space-between" align="center">
             <Heading size="sm">Recent history</Heading>
