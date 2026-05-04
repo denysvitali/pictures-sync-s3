@@ -10,16 +10,31 @@ import (
 	"time"
 )
 
+// overrideStateDir sets the state directory for testing and returns a cleanup function
+// that restores all global path variables.
+func overrideStateDir(t *testing.T, dir string) {
+	t.Helper()
+	savedPermDir := PermDir
+	savedStateFile := StateFile
+	savedHistoryFile := HistoryFile
+	savedMountDir := MountDir
+	savedConfigFile := ConfigFile
+	savedStateDir := stateDir
+	t.Cleanup(func() {
+		PermDir = savedPermDir
+		StateFile = savedStateFile
+		HistoryFile = savedHistoryFile
+		MountDir = savedMountDir
+		ConfigFile = savedConfigFile
+		stateDir = savedStateDir
+	})
+	SetStateDir(dir)
+}
+
 // TestConcurrentMapAccessWithoutLocks tests for concurrent map access bugs
 func TestConcurrentMapAccessWithoutLocks(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldPermDir := PermDir
-	defer func() { PermDir = oldPermDir }()
-
-	// Override PermDir to use temp directory
-	PermDir = tmpDir
-	StateFile = filepath.Join(tmpDir, "state.json")
-	HistoryFile = filepath.Join(tmpDir, "history.json")
+	overrideStateDir(t, tmpDir)
 
 	mgr, err := NewManager()
 	if err != nil {
@@ -58,12 +73,7 @@ func TestConcurrentMapAccessWithoutLocks(t *testing.T) {
 // TestIntegerOverflowInSyncProgress tests for integer overflow in progress tracking
 func TestIntegerOverflowInSyncProgress(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldPermDir := PermDir
-	defer func() { PermDir = oldPermDir }()
-
-	PermDir = tmpDir
-	StateFile = filepath.Join(tmpDir, "state.json")
-	HistoryFile = filepath.Join(tmpDir, "history.json")
+	overrideStateDir(t, tmpDir)
 
 	mgr, err := NewManager()
 	if err != nil {
@@ -130,12 +140,7 @@ func TestIntegerOverflowInSyncProgress(t *testing.T) {
 // TestMemoryLeakInListeners tests for memory leaks in listener management
 func TestMemoryLeakInListeners(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldPermDir := PermDir
-	defer func() { PermDir = oldPermDir }()
-
-	PermDir = tmpDir
-	StateFile = filepath.Join(tmpDir, "state.json")
-	HistoryFile = filepath.Join(tmpDir, "history.json")
+	overrideStateDir(t, tmpDir)
 
 	mgr, err := NewManager()
 	if err != nil {
@@ -178,12 +183,7 @@ func TestMemoryLeakInListeners(t *testing.T) {
 // TestSliceBoundsInHistoryAccess tests for slice access violations
 func TestSliceBoundsInHistoryAccess(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldPermDir := PermDir
-	defer func() { PermDir = oldPermDir }()
-
-	PermDir = tmpDir
-	StateFile = filepath.Join(tmpDir, "state.json")
-	HistoryFile = filepath.Join(tmpDir, "history.json")
+	overrideStateDir(t, tmpDir)
 
 	mgr, err := NewManager()
 	if err != nil {
@@ -329,12 +329,7 @@ func (e *testError) Error() string {
 // TestConcurrentNotifyListeners tests for race conditions in notification
 func TestConcurrentNotifyListeners(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldPermDir := PermDir
-	defer func() { PermDir = oldPermDir }()
-
-	PermDir = tmpDir
-	StateFile = filepath.Join(tmpDir, "state.json")
-	HistoryFile = filepath.Join(tmpDir, "history.json")
+	overrideStateDir(t, tmpDir)
 
 	mgr, err := NewManager()
 	if err != nil {
@@ -373,12 +368,7 @@ func TestConcurrentNotifyListeners(t *testing.T) {
 // TestAtomicWriteRaceCondition tests for race conditions in file writes
 func TestAtomicWriteRaceCondition(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldPermDir := PermDir
-	defer func() { PermDir = oldPermDir }()
-
-	PermDir = tmpDir
-	StateFile = filepath.Join(tmpDir, "state.json")
-	HistoryFile = filepath.Join(tmpDir, "history.json")
+	overrideStateDir(t, tmpDir)
 
 	mgr, err := NewManager()
 	if err != nil {
@@ -418,12 +408,7 @@ func TestAtomicWriteRaceCondition(t *testing.T) {
 // TestDeepCopyVsShallowCopy tests for data race in GetHistory copy
 func TestDeepCopyVsShallowCopy(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldPermDir := PermDir
-	defer func() { PermDir = oldPermDir }()
-
-	PermDir = tmpDir
-	StateFile = filepath.Join(tmpDir, "state.json")
-	HistoryFile = filepath.Join(tmpDir, "history.json")
+	overrideStateDir(t, tmpDir)
 
 	mgr, err := NewManager()
 	if err != nil {
@@ -454,12 +439,7 @@ func TestDeepCopyVsShallowCopy(t *testing.T) {
 // TestHistorySliceAppendRace tests for race in history append
 func TestHistorySliceAppendRace(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldPermDir := PermDir
-	defer func() { PermDir = oldPermDir }()
-
-	PermDir = tmpDir
-	StateFile = filepath.Join(tmpDir, "state.json")
-	HistoryFile = filepath.Join(tmpDir, "history.json")
+	overrideStateDir(t, tmpDir)
 
 	mgr, err := NewManager()
 	if err != nil {
@@ -503,12 +483,7 @@ func TestHistorySliceAppendRace(t *testing.T) {
 // TestNilPointerDereference tests for nil pointer dereferences
 func TestNilPointerDereference(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldPermDir := PermDir
-	defer func() { PermDir = oldPermDir }()
-
-	PermDir = tmpDir
-	StateFile = filepath.Join(tmpDir, "state.json")
-	HistoryFile = filepath.Join(tmpDir, "history.json")
+	overrideStateDir(t, tmpDir)
 
 	mgr, err := NewManager()
 	if err != nil {
@@ -546,12 +521,7 @@ func TestNilPointerDereference(t *testing.T) {
 // TestProgressSaveThrottling tests the throttling mechanism for memory corruption
 func TestProgressSaveThrottling(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldPermDir := PermDir
-	defer func() { PermDir = oldPermDir }()
-
-	PermDir = tmpDir
-	StateFile = filepath.Join(tmpDir, "state.json")
-	HistoryFile = filepath.Join(tmpDir, "history.json")
+	overrideStateDir(t, tmpDir)
 
 	mgr, err := NewManager()
 	if err != nil {
@@ -596,12 +566,7 @@ func TestProgressSaveThrottling(t *testing.T) {
 // TestUnsubscribeRaceCondition tests race in Unsubscribe
 func TestUnsubscribeRaceCondition(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldPermDir := PermDir
-	defer func() { PermDir = oldPermDir }()
-
-	PermDir = tmpDir
-	StateFile = filepath.Join(tmpDir, "state.json")
-	HistoryFile = filepath.Join(tmpDir, "history.json")
+	overrideStateDir(t, tmpDir)
 
 	mgr, err := NewManager()
 	if err != nil {
@@ -635,11 +600,21 @@ func TestUnsubscribeRaceCondition(t *testing.T) {
 func TestChannelCloseAfterUnsubscribe(t *testing.T) {
 	tmpDir := t.TempDir()
 	oldPermDir := PermDir
-	defer func() { PermDir = oldPermDir }()
+	oldStateFile := StateFile
+	oldHistoryFile := HistoryFile
+	oldMountDir := MountDir
+	oldConfigFile := ConfigFile
+	oldStateDir := stateDir
+	defer func() {
+		PermDir = oldPermDir
+		StateFile = oldStateFile
+		HistoryFile = oldHistoryFile
+		MountDir = oldMountDir
+		ConfigFile = oldConfigFile
+		stateDir = oldStateDir
+	}()
 
-	PermDir = tmpDir
-	StateFile = filepath.Join(tmpDir, "state.json")
-	HistoryFile = filepath.Join(tmpDir, "history.json")
+	SetStateDir(tmpDir)
 
 	mgr, err := NewManager()
 	if err != nil {
