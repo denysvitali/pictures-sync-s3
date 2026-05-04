@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useDevice } from '../DeviceContext.jsx'
-import { useToast } from './components/Toast.jsx'
+import { useToast } from '../components/Toast.jsx'
 import { getFilesPaginated, getFileViewUrl, getThumbnailUrl } from '../api.js'
-import { Card } from './components/Card.jsx'
-import { Button } from './components/Button.jsx'
-import { Icon } from './components/Icons.jsx'
-import { LoadingSpinner } from './components/LoadingSpinner.jsx'
+import { Card } from '../components/Card.jsx'
+import { Button } from '../components/Button.jsx'
+import { Icon } from '../components/Icons.jsx'
+import { LoadingSpinner } from '../components/LoadingSpinner.jsx'
 
 const PAGE_SIZE = 40
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'tif', 'heic', 'heif', 'avif'])
