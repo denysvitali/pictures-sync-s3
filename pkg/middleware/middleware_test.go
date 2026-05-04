@@ -319,6 +319,7 @@ func TestDecodeJSON(t *testing.T) {
 		body        string
 		maxBytes    int64
 		expectError bool
+		useStruct   bool
 	}{
 		{
 			name:        "valid JSON",
@@ -337,6 +338,7 @@ func TestDecodeJSON(t *testing.T) {
 			body:        `{"key":"value","unknown":"field"}`,
 			maxBytes:    1024,
 			expectError: true, // DisallowUnknownFields is set
+			useStruct:   true,
 		},
 		{
 			name:        "too large",
@@ -349,9 +351,15 @@ func TestDecodeJSON(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/test", bytes.NewBufferString(tt.body))
-			var result map[string]string
 
-			err := DecodeJSON(req, &result, tt.maxBytes)
+			var err error
+			if tt.useStruct {
+				var result struct{ Key string }
+				err = DecodeJSON(req, &result, tt.maxBytes)
+			} else {
+				var result map[string]string
+				err = DecodeJSON(req, &result, tt.maxBytes)
+			}
 
 			if tt.expectError && err == nil {
 				t.Error("Expected error but got none")

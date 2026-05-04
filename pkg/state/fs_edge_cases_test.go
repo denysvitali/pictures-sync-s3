@@ -59,6 +59,11 @@ func TestFullDiskScenario(t *testing.T) {
 
 // TestReadOnlyFileSystem tests behavior on read-only filesystem
 func TestReadOnlyFileSystem(t *testing.T) {
+	// Skip when running as root - root bypasses file permission checks
+	if os.Getuid() == 0 {
+		t.Skip("Skipping read-only filesystem test when running as root")
+	}
+
 	tmpDir, err := os.MkdirTemp("", "state-readonly-*")
 	if err != nil {
 		t.Fatal(err)
@@ -79,15 +84,25 @@ func TestReadOnlyFileSystem(t *testing.T) {
 	}
 	defer os.Chmod(tmpDir, 0755) // Restore for cleanup
 
-	// Try to write to read-only filesystem
-	err = os.WriteFile(testFile, data, 0644)
+	// Try to create a NEW file in the read-only directory
+	newFile := filepath.Join(tmpDir, "new-file.json")
+	err = os.WriteFile(newFile, data, 0644)
 	if err == nil {
-		t.Error("Expected error writing to read-only filesystem")
+		t.Error("Expected error creating new file in read-only directory")
 	}
 
 	// Verify error is permission-related
 	if !os.IsPermission(err) {
 		t.Errorf("Expected permission error, got: %v", err)
+	}
+
+	// Also test that writing to an existing file with removed write permissions fails
+	if err := os.Chmod(testFile, 0444); err != nil {
+		t.Fatal(err)
+	}
+	err = os.WriteFile(testFile, data, 0644)
+	if err == nil {
+		t.Error("Expected error writing to read-only file")
 	}
 }
 

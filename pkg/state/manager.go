@@ -188,8 +188,9 @@ func (m *Manager) StartSync(cardID string, totalFiles, totalBytes int64) (*SyncR
 
 	// Check if sync is already in progress
 	if m.currentState.CurrentSync != nil {
+		cardID := m.currentState.CurrentSync.CardID
 		m.mu.Unlock()
-		return nil, fmt.Errorf("sync already in progress for card %s", m.currentState.CurrentSync.CardID)
+		return nil, fmt.Errorf("sync already in progress for card %s", cardID)
 	}
 
 	record := &SyncRecord{
