@@ -356,26 +356,39 @@ func BenchmarkDiskSync(b *testing.B) {
 
 // TestDiskFullHandling tests behavior when disk is full
 func TestDiskFullHandling(t *testing.T) {
+	// Skip when running as root - root bypasses file permission checks
+	if os.Getuid() == 0 {
+		t.Skip("Skipping disk full handling test when running as root")
+	}
+
 	// This test is difficult to simulate reliably without actually filling a disk
 	// Instead, we test that errors are properly propagated
 
 	tmpDir := t.TempDir()
 	oldStateDir := stateDir
+	oldStateFile := StateFile
+	oldHistoryFile := HistoryFile
 	stateDir = tmpDir
-	defer func() { stateDir = oldStateDir }()
+	StateFile = filepath.Join(tmpDir, "state.json")
+	HistoryFile = filepath.Join(tmpDir, "sync-history.json")
+	defer func() {
+		stateDir = oldStateDir
+		StateFile = oldStateFile
+		HistoryFile = oldHistoryFile
+	}()
 
 	m, err := NewManager()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Make state directory read-only to simulate write failure
-	if err := os.Chmod(tmpDir, 0444); err != nil {
+	// Make state directory read-only to prevent temp file creation
+	if err := os.Chmod(tmpDir, 0555); err != nil {
 		t.Skip("Cannot change directory permissions")
 	}
 	defer os.Chmod(tmpDir, 0755)
 
-	// Attempt to write - should fail gracefully
+	// Attempt to write - should fail because atomic write creates a temp file
 	err = m.SetStatus(StatusSyncing)
 	if err == nil {
 		t.Error("expected error when writing to read-only directory, got nil")

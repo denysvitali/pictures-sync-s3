@@ -240,7 +240,7 @@ func TestJSONUnmarshalUnsafeTypeAssertions(t *testing.T) {
 		{
 			name:        "TypeMismatch",
 			jsonData:    `{"status": 123, "sdcard_mounted": "yes"}`,
-			shouldError: false, // JSON decoder handles this
+			shouldError: true, // JSON decoder returns error for type mismatch
 		},
 		{
 			name: "NullValues",

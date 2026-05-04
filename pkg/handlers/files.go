@@ -155,6 +155,12 @@ func (ctx *Context) HandleThumbnail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Security: Reject absolute paths and directory traversal attempts
+	if filepath.IsAbs(requestedPath) || strings.Contains(requestedPath, "..") {
+		http.Error(w, "access denied", http.StatusForbidden)
+		return
+	}
+
 	// Security: Properly validate path to prevent traversal attacks
 	mountPath := state.MountDir
 
@@ -233,6 +239,14 @@ func (ctx *Context) HandleSDCardFiles(w http.ResponseWriter, r *http.Request) {
 	requestedPath := r.URL.Query().Get("path")
 	if requestedPath == "" {
 		requestedPath = "DCIM"
+	}
+
+	// Security: Reject absolute paths and directory traversal attempts
+	if filepath.IsAbs(requestedPath) || strings.Contains(requestedPath, "..") {
+		JSONResponse(w, map[string]interface{}{
+			"error": "access denied",
+		})
+		return
 	}
 
 	// Security: Validate path
@@ -436,6 +450,12 @@ func (ctx *Context) HandleSDCardPreview(w http.ResponseWriter, r *http.Request) 
 	requestedPath := r.URL.Query().Get("path")
 	if requestedPath == "" {
 		http.Error(w, "path parameter required", http.StatusBadRequest)
+		return
+	}
+
+	// Security: Reject absolute paths and directory traversal attempts
+	if filepath.IsAbs(requestedPath) || strings.Contains(requestedPath, "..") {
+		http.Error(w, "access denied", http.StatusForbidden)
 		return
 	}
 

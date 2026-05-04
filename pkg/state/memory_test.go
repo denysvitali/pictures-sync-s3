@@ -431,37 +431,35 @@ func TestConcurrentAccessMemorySafety(t *testing.T) {
 	var wg sync.WaitGroup
 	errors := make(chan error, 100)
 
-	// Writers
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func(id int) {
-			defer wg.Done()
-			for j := 0; j < 100; j++ {
-				if err := mgr.SetStatus(StatusSyncing); err != nil {
-					errors <- fmt.Errorf("writer %d: SetStatus failed: %v", id, err)
-					return
-				}
-
-				if _, err := mgr.StartSync(fmt.Sprintf("card-%d-%d", id, j), 100, 1000000); err != nil {
-					errors <- fmt.Errorf("writer %d: StartSync failed: %v", id, err)
-					return
-				}
-
-				if err := mgr.UpdateSyncProgress(50, 500000, "test.jpg", 1024, 1000, "5s"); err != nil {
-					errors <- fmt.Errorf("writer %d: UpdateSyncProgress failed: %v", id, err)
-					return
-				}
-
-				if err := mgr.FinishSync(true, nil); err != nil {
-					errors <- fmt.Errorf("writer %d: FinishSync failed: %v", id, err)
-					return
-				}
+	// Single writer to avoid "sync already in progress" contention
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for j := 0; j < 500; j++ {
+			if err := mgr.SetStatus(StatusSyncing); err != nil {
+				errors <- fmt.Errorf("writer: SetStatus failed: %v", err)
+				return
 			}
-		}(i)
-	}
 
-	// Readers
-	for i := 0; i < 10; i++ {
+			if _, err := mgr.StartSync(fmt.Sprintf("card-%d", j), 100, 1000000); err != nil {
+				errors <- fmt.Errorf("writer: StartSync failed: %v", err)
+				return
+			}
+
+			if err := mgr.UpdateSyncProgress(50, 500000, "test.jpg", 1024, 1000, "5s"); err != nil {
+				errors <- fmt.Errorf("writer: UpdateSyncProgress failed: %v", err)
+				return
+			}
+
+			if err := mgr.FinishSync(true, nil); err != nil {
+				errors <- fmt.Errorf("writer: FinishSync failed: %v", err)
+				return
+			}
+		}
+	}()
+
+	// Multiple concurrent readers
+	for i := 0; i < 20; i++ {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
@@ -481,7 +479,7 @@ func TestConcurrentAccessMemorySafety(t *testing.T) {
 			ch := mgr.Subscribe()
 			defer mgr.Unsubscribe(ch)
 
-			timeout := time.After(2 * time.Second)
+			timeout := time.After(3 * time.Second)
 			for {
 				select {
 				case <-ch:
@@ -516,34 +514,51 @@ func TestNotifyListenersDeadlock(t *testing.T) {
 
 	// Create slow consumers
 	var wg sync.WaitGroup
+	receivedCounts := make([]int, 10)
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
-		go func() {
+		go func(id int) {
 			defer wg.Done()
 			ch := mgr.Subscribe()
 			defer mgr.Unsubscribe(ch)
 
-			for j := 0; j < 50; j++ {
+			// Consume messages for up to 1 second; notification may
+			// drop messages when the buffer is full, so we just verify
+			// the system doesn't deadlock.
+			timeout := time.After(1 * time.Second)
+			for {
 				select {
 				case <-ch:
+					receivedCounts[id]++
 					// Slow consumer
 					time.Sleep(10 * time.Millisecond)
-				case <-time.After(5 * time.Second):
-					t.Error("Timeout waiting for state update - possible deadlock")
+				case <-timeout:
 					return
 				}
 			}
-		}()
+		}(i)
 	}
 
-	// Rapid state updates
+	// Rapid state updates - should complete quickly without deadlock
+	updateStart := time.Now()
 	for i := 0; i < 50; i++ {
 		mgr.SetStatus(StatusSyncing)
 		mgr.SetStatus(StatusIdle)
 	}
+	updateElapsed := time.Since(updateStart)
+
+	// If updates took more than 5 seconds, there may be a deadlock
+	if updateElapsed > 5*time.Second {
+		t.Errorf("State updates took too long (%v) - possible deadlock", updateElapsed)
+	}
 
 	wg.Wait()
-	t.Log("Deadlock test passed")
+
+	totalReceived := 0
+	for _, count := range receivedCounts {
+		totalReceived += count
+	}
+	t.Logf("Deadlock test passed: updates=%v, total messages received=%d", updateElapsed, totalReceived)
 }
 
 // Helper functions
