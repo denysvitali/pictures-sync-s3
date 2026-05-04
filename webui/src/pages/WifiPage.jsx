@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import {
-  AlertRoot as Alert,
+  Alert,
   AlertDescription,
   AlertIndicator,
   Badge,
+  Box,
   Button,
-  CardRoot as Card,
+  Card,
   CardBody,
   Heading,
   HStack,
@@ -20,7 +21,7 @@ import {
   TableHeader,
   TableRoot,
   TableRow,
-  Text
+  Text,
 } from '@chakra-ui/react'
 import {
   connectWifi,
@@ -28,7 +29,7 @@ import {
   getWifiNetworks,
   getWifiStatus,
   reorderWifi,
-  scanWifi
+  scanWifi,
 } from '../api'
 
 function networkId(network, index) {
@@ -142,18 +143,18 @@ export function WifiPage({ deviceUrl }) {
   }
 
   return (
-    <Stack spacing={4} align="stretch">
+    <Stack align="stretch" gap={4}>
       <Card variant="panel">
         <CardBody>
-          <Heading size="sm">Wi-Fi status</Heading>
+          <Heading size="sm" mb={2}>Wi-Fi status</Heading>
           {loading ? (
-            <Spinner mt={2} />
+            <Spinner size="sm" mt={2} />
           ) : (
-            <HStack mt={2} spacing={3} wrap="wrap">
-              <Badge colorScheme={status?.connected ? 'green' : 'red'}>
+            <HStack gap={3} wrap="wrap">
+              <Badge bg={status?.connected ? 'success.bg' : 'danger.bg'} color={status?.connected ? 'success' : 'danger'}>
                 {status?.connected ? `Connected: ${status.ssid}` : 'Not connected'}
               </Badge>
-              <Badge colorScheme="purple">
+              <Badge variant="outline" borderColor="border.muted" color="fg.muted">
                 signal: {status?.signal ?? 'n/a'}
               </Badge>
             </HStack>
@@ -163,12 +164,10 @@ export function WifiPage({ deviceUrl }) {
 
       <Card variant="panel">
         <CardBody>
-          <Heading size="sm" mb={3}>
-            Saved networks
-          </Heading>
+          <Heading size="sm" mb={3}>Saved networks</Heading>
           <form onSubmit={handleConnect}>
-            <Stack spacing={2}>
-              <HStack spacing={2}>
+            <Stack gap={2}>
+              <HStack gap={2}>
                 <Input
                   value={ssid}
                   onChange={(event) => setSsid(event.target.value)}
@@ -182,14 +181,14 @@ export function WifiPage({ deviceUrl }) {
                   size="sm"
                   type="password"
                 />
-                <Button type="submit" variant="brand" size="sm" isLoading={connecting}>
+                <Button type="submit" variant="brand" size="sm" loading={connecting}>
                   Connect
                 </Button>
               </HStack>
             </Stack>
           </form>
 
-          <HStack mt={3} spacing={2} wrap="wrap">
+          <HStack mt={3} gap={2} wrap="wrap">
             <NativeSelectRoot size="sm" width="180px">
               <NativeSelectField value={sortBy} onChange={(event) => setSortBy(event.target.value)}>
                 <option value="signal">Signal</option>
@@ -197,13 +196,13 @@ export function WifiPage({ deviceUrl }) {
                 <option value="security">Security</option>
               </NativeSelectField>
             </NativeSelectRoot>
-            <Button size="sm" variant="outline" onClick={handleScan} isLoading={scanBusy}>
+            <Button size="sm" variant="outline" onClick={handleScan} loading={scanBusy}>
               Scan saved networks
             </Button>
-            <Button size="sm" variant="brand" onClick={saveOrder} isLoading={reorderBusy} isDisabled={networks.length < 2}>
+            <Button size="sm" variant="brand" onClick={saveOrder} loading={reorderBusy} disabled={networks.length < 2}>
               Save order
             </Button>
-            <Button size="sm" onClick={load} isLoading={loading} variant="ghost">
+            <Button size="sm" onClick={load} loading={loading} variant="ghost">
               Refresh
             </Button>
           </HStack>
@@ -215,44 +214,45 @@ export function WifiPage({ deviceUrl }) {
             </Alert>
           ) : null}
 
-          <TableRoot mt={3} size="sm" variant="simple">
+          <TableRoot mt={3} size="sm" variant="line">
             <TableHeader>
               <TableRow>
-                <TableColumnHeader>SSID</TableColumnHeader>
-                <TableColumnHeader>Has password</TableColumnHeader>
-                <TableColumnHeader>Actions</TableColumnHeader>
-                <TableColumnHeader>Reorder</TableColumnHeader>
+                <TableColumnHeader color="fg.muted">SSID</TableColumnHeader>
+                <TableColumnHeader color="fg.muted">Has password</TableColumnHeader>
+                <TableColumnHeader color="fg.muted">Actions</TableColumnHeader>
+                <TableColumnHeader color="fg.muted">Reorder</TableColumnHeader>
               </TableRow>
             </TableHeader>
             <TableBody>
               {networks.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={4} color="gray.300">
+                  <TableCell colSpan={4} color="fg.subtle">
                     No saved networks found.
                   </TableCell>
                 </TableRow>
               ) : null}
               {networks.map((network, index) => (
                 <TableRow key={`${networkId(network, index)}`}>
-                  <TableCell>{network.ssid || network.SSID || 'Unknown network'}</TableCell>
-                  <TableCell>{network.has_password ? 'yes' : 'no'}</TableCell>
+                  <TableCell color="fg.default">{network.ssid || network.SSID || 'Unknown network'}</TableCell>
+                  <TableCell color="fg.muted">{network.has_password ? 'yes' : 'no'}</TableCell>
                   <TableCell>
                     <Button
                       size="xs"
-                      colorScheme="red"
                       variant="outline"
+                      borderColor="danger"
+                      color="danger"
                       onClick={() => handleDisconnect(network.ssid)}
-                      isLoading={disconnecting === network.ssid}
+                      loading={disconnecting === network.ssid}
                     >
                       Remove
                     </Button>
                   </TableCell>
                   <TableCell>
                     <HStack>
-                      <Button size="xs" onClick={() => move(index, -1)} isDisabled={index === 0}>
+                      <Button size="xs" variant="ghost" onClick={() => move(index, -1)} disabled={index === 0}>
                         ↑
                       </Button>
-                      <Button size="xs" onClick={() => move(index, 1)} isDisabled={index === networks.length - 1}>
+                      <Button size="xs" variant="ghost" onClick={() => move(index, 1)} disabled={index === networks.length - 1}>
                         ↓
                       </Button>
                     </HStack>

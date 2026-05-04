@@ -1,30 +1,53 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  AlertRoot as Alert,
+  Alert,
   AlertDescription,
   AlertIndicator,
   AlertTitle,
   Badge,
   Box,
   Button,
-  CardRoot as Card,
+  Card,
   CardBody,
   CardHeader,
   Container,
   Flex,
   Heading,
   HStack,
+  IconButton,
   Input,
   SimpleGrid,
   TabsList,
   TabsRoot,
   TabsTrigger,
   Text,
-  VStack
+  VStack,
 } from '@chakra-ui/react'
 import { useDeviceUrl, isHostedPagesUrl } from './DeviceContext'
+import { useColorMode } from './ColorMode'
 import { getVersion } from './api'
 import { navigateRoute, parseHashRoute, pageByPath, pageRegistry } from './routes'
+
+// Icon components using SVG
+const SunIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="5"/>
+    <line x1="12" y1="1" x2="12" y2="3"/>
+    <line x1="12" y1="21" x2="12" y2="23"/>
+    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+    <line x1="1" y1="12" x2="3" y2="12"/>
+    <line x1="21" y1="12" x2="23" y2="12"/>
+    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+  </svg>
+)
+
+const MoonIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+  </svg>
+)
 
 const DEVICE_EXAMPLES = ['http://192.168.1.10:8080', 'http://localhost:8080']
 const quickRouteLabel = (route) => route.label || route.path
@@ -46,22 +69,22 @@ function DeviceSwitcher() {
   }
 
   return (
-    <Card className="endpoint-card" variant="panel">
-      <CardHeader className="endpoint-header">
+    <Card variant="panel">
+      <CardHeader>
         <Flex align="center" justify="space-between" gap={4} wrap="wrap">
           <Box>
             <Heading size="md">Device connection</Heading>
-            <Text className="muted-text" fontSize="sm">
+            <Text color="fg.muted" fontSize="sm">
               Tell this interface which backup device to control.
             </Text>
           </Box>
-          <Badge className="mode-badge">Live</Badge>
+          <Badge bg="accent.muted" color="accent">Live</Badge>
         </Flex>
       </CardHeader>
-      <CardBody className="endpoint-body">
-        <Box className="endpoint-form">
-          <Box className="field-stack">
-            <Text as="label" htmlFor="device-input" className="field-label">
+      <CardBody>
+        <VStack align="stretch" gap={3}>
+          <Box>
+            <Text as="label" htmlFor="device-input" fontSize="sm" fontWeight="medium" color="fg.muted" mb={1} display="block">
               Device address
             </Text>
             <Input
@@ -69,40 +92,36 @@ function DeviceSwitcher() {
               value={rawValue}
               onChange={(event) => setRawValue(event.target.value)}
               placeholder="http://192.168.1.10"
-              _focus={{ boxShadow: 'none', borderColor: 'teal.300' }}
             />
           </Box>
-          <HStack className="endpoint-actions">
-            <Button size="lg" variant="brand" onClick={save} className="primary-cta">
-              Connect
-            </Button>
-            <Button variant="outline" onClick={useCurrentHost}>
-              Use this page
-            </Button>
-            <Button variant="ghost" onClick={clearDeviceUrl}>
-              Disconnect
-            </Button>
+          <HStack gap={2} wrap="wrap">
+            <Button size="lg" variant="brand" onClick={save}>Connect</Button>
+            <Button variant="outline" onClick={useCurrentHost}>Use this page</Button>
+            <Button variant="ghost" onClick={clearDeviceUrl}>Disconnect</Button>
           </HStack>
-        </Box>
-        <Box className="active-target">
-          <Text className="field-label">Connected device</Text>
-          <Box as="span" className="target-value">
+        </VStack>
+        
+        <Box mt={4} pt={4} borderTopWidth="1px" borderColor="border.subtle">
+          <Text fontSize="sm" fontWeight="medium" color="fg.muted" mb={1}>Connected device</Text>
+          <Text fontFamily="mono" fontSize="sm" color="fg.default">
             {deviceUrl || '(not set)'}
-          </Box>
-        </Box>
-        <details className="advanced-connection">
-          <summary>Advanced connection details</summary>
-          <Text mt={2} fontSize="sm" className="muted-text">
-            Shortcuts:
           </Text>
-          <HStack className="quick-targets" mt={2}>
-            {DEVICE_EXAMPLES.map((item) => (
-              <Button size="sm" variant="outline" key={item} onClick={() => setDeviceUrl(item)}>
-                {item}
-              </Button>
-            ))}
-          </HStack>
-          <Text className="advanced-note">This should normally be filled automatically when browsing from the device.</Text>
+        </Box>
+
+        <details mt={3} style={{ cursor: 'pointer' }}>
+          <summary style={{ color: 'var(--chakra-colors-fg-subtle)', fontSize: '0.82rem', fontWeight: 600 }}>
+            Advanced connection details
+          </summary>
+          <Box mt={3}>
+            <Text fontSize="sm" color="fg.muted" mb={2}>Shortcuts:</Text>
+            <HStack gap={2} wrap="wrap">
+              {DEVICE_EXAMPLES.map((item) => (
+                <Button size="sm" variant="outline" key={item} onClick={() => setDeviceUrl(item)}>
+                  {item}
+                </Button>
+              ))}
+            </HStack>
+          </Box>
         </details>
       </CardBody>
     </Card>
@@ -111,7 +130,7 @@ function DeviceSwitcher() {
 
 function DeviceMissingNotice() {
   return (
-    <Card className="notice-card" variant="panel">
+    <Card variant="panel" bg="warningBg">
       <CardBody>
         <Alert status="warning" variant="subtle">
           <AlertIndicator />
@@ -160,6 +179,7 @@ export default function App() {
   const [versionInfo, setVersionInfo] = useState(null)
   const [versionError, setVersionError] = useState('')
   const { deviceUrl } = useDeviceUrl()
+  const { colorMode, toggleColorMode } = useColorMode()
 
   const isHostedPages = isHostedPagesUrl(window.location.origin)
 
@@ -204,40 +224,82 @@ export default function App() {
   }, [deviceUrl])
 
   return (
-    <Box className="app-shell">
+    <Box minH="100vh" py={6} px={4}>
       <Container maxW="6xl">
-        <VStack align="stretch" className="app-stack">
-          <Box className="hero-panel">
-            <Box>
-              <Heading size="lg" className="hero-title">
-                Photo Backup Station
-              </Heading>
-            <Text className="hero-copy">Keep your camera backups running and tuned.</Text>
-            </Box>
-            <Box className="hero-status">
-              <Text className="field-label">Connected device</Text>
-              <Text className="hero-target">{deviceUrl || 'Not connected'}</Text>
-              <Text className="field-label version-label">Software</Text>
-              <Text className={versionError ? 'hero-version unavailable' : 'hero-version'}>
-                {versionError ? 'Unavailable' : formatVersion(versionInfo)}
-              </Text>
-            </Box>
-          </Box>
+        <VStack align="stretch" gap={4}>
+          {/* Hero Panel with Theme Toggle */}
+          <Card variant="panel">
+            <CardBody>
+              <Flex justify="space-between" align="center" gap={4} wrap="wrap">
+                <Box>
+                  <Heading size="lg" lineHeight="1.2">
+                    Photo Backup Station
+                  </Heading>
+                  <Text color="fg.muted" mt={2}>
+                    Keep your camera backups running and tuned.
+                  </Text>
+                </Box>
+                
+                <HStack gap={4}>
+                  <Box textAlign="right" display={{ base: 'none', md: 'block' }}>
+                    <Text fontSize="sm" color="fg.muted">Connected device</Text>
+                    <Text fontFamily="mono" fontSize="sm" color="fg.default">
+                      {deviceUrl || 'Not connected'}
+                    </Text>
+                    <Text fontSize="sm" color="fg.muted" mt={1}>Software</Text>
+                    <Text 
+                      fontFamily="mono" 
+                      fontSize="sm" 
+                      color={versionError ? 'danger' : 'fg.default'}
+                    >
+                      {versionError ? 'Unavailable' : formatVersion(versionInfo)}
+                    </Text>
+                  </Box>
+                  
+                  <IconButton
+                    aria-label={`Switch to ${colorMode === 'dark' ? 'light' : 'dark'} mode`}
+                    onClick={toggleColorMode}
+                    variant="ghost"
+                    size="lg"
+                    color="fg.muted"
+                    _hover={{ bg: 'panelSoft', color: 'fg.default' }}
+                  >
+                    {colorMode === 'dark' ? <SunIcon /> : <MoonIcon />}
+                  </IconButton>
+                </HStack>
+              </Flex>
+            </CardBody>
+          </Card>
 
           {isHostedPages && <DeviceSwitcher />}
 
-            <Card className="nav-card" variant="panel">
+          <Card variant="panel" p={2}>
             <TabsRoot
               value={activeRoute.path}
               onValueChange={(event) => navigateRoute(event.value)}
               variant="line"
-              className="nav-root"
             >
-              <TabsList className="nav-tabs">
+              <TabsList display="grid" gridTemplateColumns={{ base: 'repeat(2, 1fr)', md: 'repeat(5, 1fr)' }} gap={2} borderBottom="none">
                 {pageRegistry.map((route) => (
-                  <TabsTrigger key={route.path} value={route.path} className="nav-tab" _selected={{ color: 'white', borderColor: 'teal.300' }}>
-                    <Text as="span">{route.icon}</Text>
-                    <Text as="span">{quickRouteLabel(route)}</Text>
+                  <TabsTrigger 
+                    key={route.path} 
+                    value={route.path}
+                    justifyContent="center"
+                    minH="48px"
+                    borderRadius="l2"
+                    borderWidth="1px"
+                    borderColor="border.subtle"
+                    color="fg.muted"
+                    _selected={{ 
+                      bg: 'accent.muted', 
+                      borderColor: 'accent',
+                      color: 'accent',
+                    }}
+                  >
+                    <HStack gap={2}>
+                      <Text as="span">{route.icon}</Text>
+                      <Text as="span">{quickRouteLabel(route)}</Text>
+                    </HStack>
                   </TabsTrigger>
                 ))}
               </TabsList>
