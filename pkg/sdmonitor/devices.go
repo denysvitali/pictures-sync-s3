@@ -176,6 +176,7 @@ func getDeviceSize(devicePath string) (int64, error) {
 	}
 
 	for _, sizePath := range sizePaths {
+		// #nosec G304 -- sizePath is constructed from sysfs device paths
 		sizeData, err := os.ReadFile(sizePath)
 		if err == nil && len(sizeData) > 0 {
 			// Size is in 512-byte sectors
@@ -255,6 +256,7 @@ func isUSBDeviceHelper(sysPath string) bool {
 // isUSBInUevent checks if uevent file contains USB indicators
 func isUSBInUevent(path string) bool {
 	ueventPath := filepath.Join(path, "uevent")
+	// #nosec G304 -- ueventPath is constructed from sysfs device paths
 	data, err := os.ReadFile(ueventPath)
 	if err != nil {
 		return false
@@ -291,6 +293,7 @@ func checkMountStatus(info *DeviceInfo) {
 // GetVolumeID attempts to get a unique ID for the SD card
 func GetVolumeID(device string) string {
 	// Try to read volume ID from blkid
+	// #nosec G204 -- device path is a /dev block device controlled by the system
 	cmd := exec.Command("blkid", "-s", "UUID", "-o", "value", device)
 	output, err := cmd.Output()
 	if err == nil && len(output) > 0 {
@@ -303,6 +306,7 @@ func GetVolumeID(device string) string {
 
 // getVolumeLabel gets the volume label using blkid
 func getVolumeLabel(devicePath string) string {
+	// #nosec G204 -- devicePath is a /dev block device controlled by the system
 	cmd := exec.Command("blkid", "-s", "LABEL", "-o", "value", devicePath)
 	if output, err := cmd.Output(); err == nil && len(output) > 0 {
 		return strings.TrimSpace(string(output))

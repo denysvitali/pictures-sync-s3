@@ -74,6 +74,7 @@ func hasConfiguredNetworks(path string) (bool, error) {
 // loadWiFiNetworksFromFile reads either the app list format or gokrazy's
 // single-network /perm/wifi.json format.
 func loadWiFiNetworksFromFile(path string) ([]Network, error) {
+	// #nosec G304 -- path is a well-known config file location (/perm/wifi.json or /perm/extra-wifi.json)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {

@@ -35,6 +35,7 @@ func HasTailscaleAuthKey() (bool, error) {
 
 // HasTailscaleAuthKeyAt reports whether a non-empty auth key exists at path.
 func HasTailscaleAuthKeyAt(path string) (bool, error) {
+	// #nosec G304 -- path is a controlled config location (/perm/tailscale/auth_key)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {

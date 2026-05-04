@@ -263,6 +263,7 @@ func (m *MockBackend) StartSyncSimulation() {
 			select {
 			case <-m.cancelChan:
 				return // Sync was cancelled
+			// #nosec G404 -- weak random is acceptable for mock simulation timing
 			case <-time.After(time.Duration(200+rand.Intn(300)) * time.Millisecond):
 			}
 		}
@@ -378,6 +379,7 @@ func (m *MockBackend) HandleWiFiScan(w http.ResponseWriter, r *http.Request) {
 
 	for i := range networks {
 		// Add ±5 dB variation to signal strength
+		// #nosec G404 -- weak random is acceptable for mock signal variation
 		variation := rand.Intn(10) - 5
 		networks[i].Signal += variation
 	}
@@ -599,6 +601,7 @@ func (m *MockBackend) HandleConfigTest(w http.ResponseWriter, r *http.Request) {
 	time.Sleep(2 * time.Second)
 
 	// Simulate random test results
+	// #nosec G404 -- weak random is acceptable for mock test simulation
 	if rand.Float32() < 0.8 { // 80% success rate
 		handlers.JSONResponse(w, map[string]interface{}{
 			"success": true,

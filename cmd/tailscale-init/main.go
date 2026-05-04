@@ -20,6 +20,7 @@ func main() {
 	hostname := getenv("TS_HOSTNAME", defaultHostname)
 	extraArgs := strings.Fields(os.Getenv("TS_TAILSCALE_UP_ARGS"))
 
+	// #nosec G304 -- authKeyPath is a controlled config path (/perm/tailscale/authkey)
 	authKey, err := os.ReadFile(authKeyPath)
 	if err != nil {
 		log.Printf("tailscale-init: auth key path %q not readable, skipping Tailscale connect: %v", authKeyPath, err)
@@ -36,6 +37,7 @@ func main() {
 	args = append(args, extraArgs...)
 
 	log.Printf("tailscale-init: running /user/tailscale up")
+	// #nosec G204 G702 -- tailscaleBinary is a const, args from trusted config/env on embedded device
 	cmd := exec.Command(tailscaleBinary, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

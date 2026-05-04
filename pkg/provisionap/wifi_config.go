@@ -34,6 +34,7 @@ func loadClientNetworks(path string) ([]network, error) {
 		return nil, nil
 	}
 
+	// #nosec G304 -- path is a well-known WiFi config location set by the application
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -59,6 +60,7 @@ func loadAppNetworks(path string) ([]network, error) {
 		return nil, nil
 	}
 
+	// #nosec G304 -- path is a well-known WiFi config location set by the application
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {

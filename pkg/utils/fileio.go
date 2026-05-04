@@ -27,6 +27,7 @@ func AtomicWrite(filePath string, data []byte, perm os.FileMode) error {
 
 // ReadFileWithDefault reads a file and returns its contents, or returns the default value if the file doesn't exist.
 func ReadFileWithDefault(filePath string, defaultValue []byte) ([]byte, error) {
+	// #nosec G304 -- filePath is a controlled path set by the application
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {

@@ -215,6 +215,7 @@ func main() {
 	http.HandleFunc("/api/history", ctx.HandleHistory)
 	http.HandleFunc("/api/config", ctx.HandleConfig)
 	http.HandleFunc("/api/config/b2", ctx.HandleConfigB2)
+	http.HandleFunc("/api/config/b2/regions", ctx.HandleConfigB2Regions)
 	http.HandleFunc("/api/config/test", ctx.HandleConfigTest)
 	http.HandleFunc("/api/auth/password", ctx.HandlePasswordChange)
 	http.HandleFunc("/api/breakglass/authorized-keys", ctx.HandleBreakglassAuthorizedKeys)

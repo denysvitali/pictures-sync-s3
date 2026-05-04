@@ -165,6 +165,15 @@ func (ctx *Context) HandlePasswordChange(w http.ResponseWriter, r *http.Request)
 	JSONResponse(w, map[string]any{"status": "ok"})
 }
 
+// HandleConfigB2Regions returns available Backblaze B2 regions with their endpoints.
+func (ctx *Context) HandleConfigB2Regions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	JSONResponse(w, validation.B2Regions)
+}
+
 // logConfigChange logs rclone configuration changes with client information
 // HandleConfigB2 handles Backblaze B2 remote configuration
 func (ctx *Context) HandleConfigB2(w http.ResponseWriter, r *http.Request) {

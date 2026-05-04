@@ -26,7 +26,8 @@ const (
 	DefaultAssetName    = "photo-backup-rpi4b-root.squashfs.gz"
 	FlashAssetName      = "photo-backup-rpi4b.img.gz"
 	DefaultGitHubAPIURL = "https://api.github.com"
-	DefaultUpdateURL    = "http://gokrazy:photo-backup@127.0.0.1/"
+	// #nosec G101 -- default gokrazy updater URL with well-known local device password
+	DefaultUpdateURL = "http://gokrazy:photo-backup@127.0.0.1/"
 )
 
 type Installer interface {
@@ -340,7 +341,8 @@ func gokrazyUpdateClient(rawURL string, timeout time.Duration) *http.Client {
 		return client
 	}
 	client.Transport = &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // Loopback-only gokrazy updater uses self-signed TLS.
+		// #nosec G402 -- loopback-only gokrazy updater uses self-signed TLS
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 	return client
 }

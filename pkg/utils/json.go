@@ -43,6 +43,7 @@ func SaveJSON(filePath string, v any, perm os.FileMode) error {
 // LoadJSON loads JSON from a file and unmarshals it into a value.
 // Returns the provided default value if the file doesn't exist.
 func LoadJSON(filePath string, v any, defaultValue any) error {
+	// #nosec G304 -- filePath is a controlled config/state path set by the application
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -65,6 +66,7 @@ func LoadJSON(filePath string, v any, defaultValue any) error {
 // LoadJSONOrDefault loads JSON from a file, or returns the default value if the file doesn't exist.
 // This is a convenience function that returns the value directly.
 func LoadJSONOrDefault(filePath string, defaultValue any) (any, error) {
+	// #nosec G304 -- filePath is a controlled config/state path set by the application
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
