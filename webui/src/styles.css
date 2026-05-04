@@ -1,201 +1,41 @@
+/* 
+ * Global styles for Photo Backup Station
+ * Chakra UI handles most styling via the theme system
+ */
+
+/* Color scheme hint for native elements */
 :root {
-  color-scheme: dark;
-  font-family: 'Manrope', 'Trebuchet MS', 'Inter', 'Segoe UI', sans-serif;
+  color-scheme: light dark;
 }
 
-.app-shell {
-  min-height: 100vh;
-  padding: 24px 16px 36px;
+/* Smooth transitions for theme changes */
+html {
+  scroll-behavior: smooth;
 }
 
-.app-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.hero-panel,
-.endpoint-card,
-.nav-card,
-.notice-card,
-.section-card {
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  border-radius: 14px;
-  background: color-mix(in oklab, #141c31 88%, transparent);
-}
-
-.hero-panel {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  align-items: center;
-  padding: 22px;
-}
-
-.hero-title {
-  font-size: clamp(1.4rem, 2vw, 1.9rem);
+/* Ensure full height for app */
+html, body {
+  height: 100%;
   margin: 0;
 }
 
-.hero-copy,
-.muted-text {
-  color: #a6b4d8;
-  margin-top: 8px;
+/* Global background for dark mode - subtle gradient */
+:root[data-color-mode="dark"] {
+  background-color: #0b1220;
 }
 
-.hero-status {
-  min-width: min(100%, 290px);
-  padding: 14px;
-  border: 1px dashed rgba(102, 215, 255, 0.34);
-  border-radius: 10px;
+/* Clean background for light mode */
+:root[data-color-mode="light"] {
+  background-color: #f8fafc;
 }
 
-.hero-target,
-.hero-version,
-.target-value {
-  color: #eef2ff;
-  font-size: 0.92rem;
-  margin-top: 4px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+/* Body background to prevent white flash */
+body {
+  min-height: 100vh;
+  transition: background-color 0.2s ease;
 }
 
-.version-label {
-  margin-top: 12px;
-}
-
-.hero-version.unavailable {
-  color: #fecaca;
-}
-
-.page-intro {
-  color: #eff2ff;
-}
-
-.endpoint-header {
-  padding-bottom: 10px;
-}
-
-.endpoint-form {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 12px;
-}
-
-.field-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.field-label {
-  color: #b9c5e2;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  font-size: 0.74rem;
-  font-weight: 700;
-}
-
-.endpoint-actions {
-  display: grid;
-  gap: 10px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.active-target,
-.page-intro {
-  display: grid;
-  gap: 6px;
-}
-
-.quick-targets {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.advanced-connection {
-  margin-top: 6px;
-  border-top: 1px solid rgba(148, 163, 184, 0.2);
-  padding-top: 10px;
-  color: #a8b5d7;
-}
-
-.advanced-connection > summary {
-  cursor: pointer;
-  color: #e3e9ff;
-  font-size: 0.82rem;
-  font-weight: 600;
-}
-
-.mode-badge {
-  background: rgba(38, 181, 255, 0.17);
-  border: 1px solid rgba(38, 181, 255, 0.36);
-  color: #d2ecff;
-}
-
-.nav-card {
-  padding: 8px;
-}
-
-.nav-tabs {
-  width: 100%;
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 8px;
-  border-bottom: none;
-}
-
-.nav-tab {
-  min-height: 48px;
-  border-radius: 10px;
-  border: 1px solid rgba(148, 163, 184, 0.22);
-}
-
-.nav-tab[data-selected] {
-  background: rgba(38, 181, 255, 0.18);
-  border-color: rgba(38, 181, 255, 0.48);
-}
-
-.notice-card {
-  background: rgba(111, 58, 237, 0.16);
-  border-color: rgba(167, 139, 250, 0.36);
-}
-
-.section-title {
-  font-size: 1.1rem;
-  font-weight: 650;
-}
-
-.form-subtitle {
-  color: #a8b5d7;
-  margin-top: 5px;
-}
-
-@media (max-width: 960px) {
-  .hero-panel {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .nav-tabs {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 760px) {
-  .app-shell {
-    padding: 14px 10px 24px;
-  }
-
-  .hero-panel {
-    padding: 18px;
-  }
-
-  .endpoint-actions {
-    grid-template-columns: 1fr;
-  }
-
-  .nav-tabs {
-    grid-template-columns: 1fr;
-  }
+/* Root container */
+#root {
+  min-height: 100vh;
 }

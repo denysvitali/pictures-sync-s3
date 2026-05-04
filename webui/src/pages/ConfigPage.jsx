@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react'
 import {
-  AlertRoot as Alert,
+  Alert,
   AlertDescription,
   AlertIndicator,
   Badge,
+  Box,
   Button,
-  CardRoot as Card,
+  Card,
   CardBody,
   CardHeader,
+  Checkbox,
   Heading,
   HStack,
   Input,
@@ -17,7 +19,7 @@ import {
   Stack,
   Text,
   Textarea,
-  VStack
+  VStack,
 } from '@chakra-ui/react'
 import {
   changeGokrazyPassword,
@@ -28,7 +30,7 @@ import {
   installOta,
   saveBreakglassAuthorizedKeys,
   saveSettings,
-  testConfig
+  testConfig,
 } from '../api'
 
 function toNumberOrDefault(value, fallback) {
@@ -72,7 +74,7 @@ export function ConfigPage({ deviceUrl }) {
         getConfig(deviceUrl),
         getSettings(deviceUrl),
         getBreakglassAuthorizedKeys(deviceUrl),
-        getOtaStatus(deviceUrl)
+        getOtaStatus(deviceUrl),
       ])
       setConfig(configResponse || { configured: false, remotes: [] })
       setRemoteName(settingsResponse?.remote_name || '')
@@ -112,7 +114,7 @@ export function ConfigPage({ deviceUrl }) {
         checkers: Number(checkers),
         google_photos_enabled: Boolean(googlePhotosEnabled),
         google_photos_remote_name: googlePhotosRemoteName,
-        tailscale_auth_key: tailscaleAuthKey
+        tailscale_auth_key: tailscaleAuthKey,
       })
       setTailscaleAuthKey('')
       setMessage('Settings saved. Your destination is ready.')
@@ -196,115 +198,110 @@ export function ConfigPage({ deviceUrl }) {
   const otaBusy = ['checking', 'downloading', 'installing'].includes(otaStatus?.state)
 
   return (
-    <Card bg="transparent">
+    <Card bg="transparent" border="none">
       <CardHeader>
-        <Heading size="lg" className="section-title">Sync settings</Heading>
+        <Heading size="lg" color="fg.default">Sync settings</Heading>
       </CardHeader>
       <CardBody>
-        <Card className="section-card" variant="panel">
+        <Card variant="panel">
           <CardBody>
             <HStack justify="space-between" align="center">
-              <div>
-                <Text className="section-title">Destination</Text>
-                <Text className="form-subtitle">Choose where backups are uploaded.</Text>
-              </div>
-              <Button size="sm" onClick={load} isLoading={loading}>
+              <Box>
+                <Text fontWeight="semibold" color="fg.default">Destination</Text>
+                <Text color="fg.muted" fontSize="sm">Choose where backups are uploaded.</Text>
+              </Box>
+              <Button size="sm" onClick={load} loading={loading}>
                 Refresh
               </Button>
             </HStack>
 
-            <Card className="section-card" mt={4} variant="panel">
+            <Card variant="panel" mt={4}>
               <CardBody>
                 <HStack justify="space-between" wrap="wrap">
-                  <Text fontWeight="medium">Configured destination</Text>
-                  <Badge colorScheme={config.configured ? 'green' : 'orange'}>
+                  <Text fontWeight="medium" color="fg.default">Configured destination</Text>
+                  <Badge bg={config.configured ? 'success.bg' : 'warning.bg'} color={config.configured ? 'success' : 'warning'}>
                     {config.configured ? 'Configured' : 'Not configured'}
                   </Badge>
                 </HStack>
-                <Text mt={2} fontSize="sm" color="gray.300">
+                <Text mt={2} fontSize="sm" color="fg.muted">
                   Remotes detected: {config.remotes?.length || 0}
                 </Text>
-                <ListRoot mt={2} spacing={1} color="gray.100">
+                <ListRoot mt={2} gap={1} color="fg.default">
                   {(config.remotes || []).map((item) => (
-                    <ListItem key={item}>• {item}</ListItem>
+                    <ListItem key={item} color="fg.default">• {item}</ListItem>
                   ))}
-                  {(config.remotes || []).length === 0 ? <ListItem>No remote entries found.</ListItem> : null}
+                  {(config.remotes || []).length === 0 ? (
+                    <ListItem color="fg.subtle">No remote entries found.</ListItem>
+                  ) : null}
                 </ListRoot>
               </CardBody>
             </Card>
 
             <form onSubmit={onSave}>
-              <Stack mt={4} spacing={4}>
-                <Stack spacing={1}>
-                  <Text color="gray.200" fontSize="sm">
-                    Remote name
-                  </Text>
+              <Stack mt={4} gap={4}>
+                <Box>
+                  <Text color="fg.muted" fontSize="sm" mb={1}>Remote name</Text>
                   <Input value={remoteName} onChange={(event) => setRemoteName(event.target.value)} />
-                </Stack>
+                </Box>
 
-                <Stack spacing={1}>
-                  <Text color="gray.200" fontSize="sm">
-                    Remote path
-                  </Text>
+                <Box>
+                  <Text color="fg.muted" fontSize="sm" mb={1}>Remote path</Text>
                   <Input value={remotePath} onChange={(event) => setRemotePath(event.target.value)} />
-                </Stack>
+                </Box>
 
-                <HStack>
-                  <Stack spacing={1} flex={1}>
-                    <Text color="gray.200" fontSize="sm">
-                      Reformat threshold
-                    </Text>
+                <HStack gap={4}>
+                  <Box flex={1}>
+                    <Text color="fg.muted" fontSize="sm" mb={1}>Reformat threshold</Text>
                     <Input
                       type="number"
                       value={reformatThreshold}
                       onChange={(event) => setReformatThreshold(event.target.valueAsNumber)}
                     />
-                  </Stack>
-                  <Stack spacing={1}>
-                    <Text color="gray.200" fontSize="sm">
-                      Transfers
-                    </Text>
-                    <Input type="number" value={transfers} onChange={(event) => setTransfers(event.target.valueAsNumber)} />
-                  </Stack>
-                  <Stack spacing={1}>
-                    <Text color="gray.200" fontSize="sm">
-                      Checkers
-                    </Text>
-                    <Input type="number" value={checkers} onChange={(event) => setCheckers(event.target.valueAsNumber)} />
-                  </Stack>
+                  </Box>
+                  <Box flex={1}>
+                    <Text color="fg.muted" fontSize="sm" mb={1}>Transfers</Text>
+                    <Input 
+                      type="number" 
+                      value={transfers} 
+                      onChange={(event) => setTransfers(event.target.valueAsNumber)} 
+                    />
+                  </Box>
+                  <Box flex={1}>
+                    <Text color="fg.muted" fontSize="sm" mb={1}>Checkers</Text>
+                    <Input 
+                      type="number" 
+                      value={checkers} 
+                      onChange={(event) => setCheckers(event.target.valueAsNumber)} 
+                    />
+                  </Box>
                 </HStack>
 
-                <VStack align="start" spacing={1}>
-                  <Text color="gray.200" fontSize="sm">
-                    Google Photos sync
-                  </Text>
-                  <HStack>
-                    <input
-                      type="checkbox"
+                <Box>
+                  <HStack gap={2} mb={2}>
+                    <Checkbox 
                       checked={googlePhotosEnabled}
                       onChange={(event) => setGooglePhotosEnabled(event.target.checked)}
+                      colorScheme="cyan"
                     />
-                    <Text>Also upload a copy to Google Photos</Text>
+                    <Text color="fg.default">Also upload a copy to Google Photos</Text>
                   </HStack>
-                </VStack>
+                </Box>
 
-                <Stack spacing={1}>
-                  <Text color="gray.200" fontSize="sm">
-                    Google Photos remote
-                  </Text>
+                <Box>
+                  <Text color="fg.muted" fontSize="sm" mb={1}>Google Photos remote</Text>
                   <Input
-                    isDisabled={!googlePhotosEnabled}
+                    disabled={!googlePhotosEnabled}
                     value={googlePhotosRemoteName}
                     onChange={(event) => setGooglePhotosRemoteName(event.target.value)}
                     placeholder="gphotos"
                   />
-                </Stack>
+                </Box>
 
-                <HStack mt={2} spacing={2}>
-                  <Button type="submit" variant="brand" isLoading={saving} className="primary-cta">
+                <HStack gap={2}>
+                  <Button type="submit" variant="brand" loading={saving}>
                     Save destination
                   </Button>
-                  <Button type="button" onClick={onTest} isLoading={testing} variant="outline">
+                  <Button type="button" onClick={onTest} loading={testing} variant="outline">
                     Test destination
                   </Button>
                 </HStack>
@@ -312,7 +309,7 @@ export function ConfigPage({ deviceUrl }) {
             </form>
 
             {loading && (
-              <Stack mt={4} spacing={2}>
+              <Stack mt={4} gap={2}>
                 <Spinner />
               </Stack>
             )}
@@ -332,17 +329,25 @@ export function ConfigPage({ deviceUrl }) {
           </CardBody>
         </Card>
 
-        <details className="advanced-connection">
-          <summary>Advanced options</summary>
-          <Card className="section-card" mt={3} variant="panel">
+        <details style={{ marginTop: '16px', cursor: 'pointer' }}>
+          <summary style={{ 
+            color: 'var(--chakra-colors-fg-muted)', 
+            fontSize: '0.9rem', 
+            fontWeight: 600,
+            padding: '8px 0'
+          }}>
+            Advanced options
+          </summary>
+          <Card variant="panel" mt={3}>
             <CardHeader>
-              <Heading size="sm">Security and maintenance</Heading>
+              <Heading size="sm" color="fg.default">Security and maintenance</Heading>
             </CardHeader>
             <CardBody>
-              <Stack spacing={4}>
+              <Stack gap={6}>
+                {/* Gokrazy Password */}
                 <form onSubmit={onChangeGokrazyPassword}>
-                  <VStack align="stretch" spacing={3}>
-                    <Text fontWeight="medium">Gokrazy web password</Text>
+                  <VStack align="stretch" gap={3}>
+                    <Text fontWeight="medium" color="fg.default">Gokrazy web password</Text>
                     <Input
                       type="password"
                       autoComplete="current-password"
@@ -364,48 +369,48 @@ export function ConfigPage({ deviceUrl }) {
                       value={confirmGokrazyPassword}
                       onChange={(event) => setConfirmGokrazyPassword(event.target.value)}
                     />
-                    <Button type="submit" size="sm" variant="brand" isLoading={savingGokrazyPassword}>
+                    <Button type="submit" size="sm" variant="brand" loading={savingGokrazyPassword}>
                       Update password
                     </Button>
                   </VStack>
                 </form>
 
+                {/* Breakglass SSH Keys */}
                 <form onSubmit={(event) => {
                   event.preventDefault()
                   onSaveBreakglass()
                 }}>
-                  <VStack align="stretch" spacing={2}>
-                    <Text fontWeight="medium">Breakglass SSH keys</Text>
-                    <Text fontSize="sm" color="gray.300">
+                  <VStack align="stretch" gap={2}>
+                    <Text fontWeight="medium" color="fg.default">Breakglass SSH keys</Text>
+                    <Text fontSize="sm" color="fg.muted" fontFamily="mono">
                       {breakglassPath}
                     </Text>
                     <Textarea
-                      mt={2}
                       minH="120px"
                       fontFamily="mono"
+                      fontSize="sm"
                       value={breakglassKeys}
                       onChange={(event) => setBreakglassKeys(event.target.value)}
                       placeholder="ssh-ed25519 AAAA..."
                     />
-                    <HStack spacing={2}>
-                    <Button size="sm" variant="brand" type="submit" isLoading={savingBreakglass}>
+                    <Button size="sm" variant="brand" type="submit" loading={savingBreakglass}>
                       Save keys
                     </Button>
-                    </HStack>
                   </VStack>
                 </form>
 
-                <Stack spacing={2}>
-                  <Text fontWeight="medium">Tailscale auth key</Text>
+                {/* Tailscale */}
+                <Stack gap={2}>
+                  <Text fontWeight="medium" color="fg.default">Tailscale auth key</Text>
                   <HStack>
-                    <Text fontSize="sm" color="gray.300">
+                    <Text fontSize="sm" color="fg.muted">
                       Stored: {tailscaleAuthKeyConfigured ? 'configured' : 'not configured'}
                     </Text>
-                    <Badge colorScheme={tailscaleAuthKeyConfigured ? 'green' : 'orange'}>
+                    <Badge bg={tailscaleAuthKeyConfigured ? 'success.bg' : 'warning.bg'} color={tailscaleAuthKeyConfigured ? 'success' : 'warning'}>
                       {tailscaleAuthKeyConfigured ? 'ready' : 'missing'}
                     </Badge>
                   </HStack>
-                  <Text fontSize="xs" color="gray.400">
+                  <Text fontSize="xs" color="fg.subtle">
                     Enter a key only when updating. Saved at {tailscaleAuthKeyPath}.
                   </Text>
                   <Input
@@ -417,23 +422,27 @@ export function ConfigPage({ deviceUrl }) {
                   />
                 </Stack>
 
-                <Stack spacing={2}>
+                {/* OTA Update */}
+                <Stack gap={2}>
                   <HStack justify="space-between" align="center">
-                    <Text fontWeight="medium">System update</Text>
-                    <Badge colorScheme={otaStatus?.state === 'failed' ? 'red' : otaBusy ? 'blue' : 'green'}>
+                    <Text fontWeight="medium" color="fg.default">System update</Text>
+                    <Badge 
+                      bg={otaStatus?.state === 'failed' ? 'danger.bg' : otaBusy ? 'accent.muted' : 'success.bg'}
+                      color={otaStatus?.state === 'failed' ? 'danger' : otaBusy ? 'accent' : 'success'}
+                    >
                       {otaStatus?.state || 'idle'}
                     </Badge>
                   </HStack>
-                  <Text fontSize="sm" color="gray.300">
+                  <Text fontSize="sm" color="fg.muted">
                     {otaStatus?.release ? `${otaStatus.release} · ${otaStatus.asset || 'OTA image'}` : 'Latest GitHub release'}
                   </Text>
-                  {otaStatus?.message ? <Text fontSize="sm">{otaStatus.message}</Text> : null}
-                  {otaStatus?.error ? <Text color="red.200" fontSize="sm">{otaStatus.error}</Text> : null}
+                  {otaStatus?.message && <Text fontSize="sm" color="fg.default">{otaStatus.message}</Text>}
+                  {otaStatus?.error && <Text fontSize="sm" color="danger">{otaStatus.error}</Text>}
                   <HStack>
-                    <Button size="sm" variant="brand" onClick={onInstallOta} isLoading={installingOta || otaBusy}>
+                    <Button size="sm" variant="brand" onClick={onInstallOta} loading={installingOta || otaBusy}>
                       Install latest OTA
                     </Button>
-                    <Button size="sm" onClick={load} isLoading={loading} variant="outline">
+                    <Button size="sm" onClick={load} loading={loading} variant="outline">
                       Re-check
                     </Button>
                   </HStack>

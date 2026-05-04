@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  AlertRoot as Alert,
+  Alert,
   AlertDescription,
   AlertIndicator,
   Badge,
+  Box,
   Button,
-  CardRoot as Card,
+  Card,
   CardBody,
   CardHeader,
   Flex,
@@ -21,7 +22,7 @@ import {
   Text,
   VStack,
   Wrap,
-  WrapItem
+  WrapItem,
 } from '@chakra-ui/react'
 import { cancelSync, getHistory, getStatus, startSync } from '../api'
 
@@ -99,33 +100,36 @@ export function StatusPage({ deviceUrl }) {
   const latestHistory = useMemo(() => history.slice(0, 6), [history])
 
   return (
-    <VStack spacing={4} align="stretch">
+    <VStack align="stretch" gap={4}>
       <Card variant="panel">
         <CardHeader>
           <Flex justify="space-between" align="center" gap={3} wrap="wrap">
             <Heading size="sm">System status</Heading>
-            <HStack spacing={2}>
-              <Button size="sm" variant="brand" onClick={load} isLoading={loading}>
+            <HStack gap={2}>
+              <Button size="sm" variant="brand" onClick={load} loading={loading}>
                 Refresh
               </Button>
               <Button
                 size="sm"
-                colorScheme="green"
+                variant="solid"
+                bg="accent.alt"
+                color="gray.900"
                 onClick={start}
-                isLoading={syncing}
+                loading={syncing}
                 loadingText="Starting"
-                isDisabled={isSyncing}
+                disabled={isSyncing}
               >
                 Start sync
               </Button>
               <Button
                 size="sm"
-                colorScheme="red"
-                onClick={cancel}
-                isLoading={canceling}
-                loadingText="Cancelling"
-                isDisabled={!isSyncing}
                 variant="outline"
+                borderColor="danger"
+                color="danger"
+                onClick={cancel}
+                loading={canceling}
+                loadingText="Cancelling"
+                disabled={!isSyncing}
               >
                 Cancel sync
               </Button>
@@ -145,56 +149,56 @@ export function StatusPage({ deviceUrl }) {
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           ) : null}
-          <VStack align="stretch" spacing={4}>
-            <Wrap spacing={3}>
+          <VStack align="stretch" gap={4}>
+            <Wrap gap={3}>
               <WrapItem>
-                <Badge size="lg" variant="solid" colorScheme="teal">
+                <Badge bg="accent.muted" color="accent">
                   State: {status?.status || 'unknown'}
                 </Badge>
               </WrapItem>
               <WrapItem>
-                <Badge size="lg" variant="outline" colorScheme="blue">
+                <Badge variant="outline" borderColor="border.muted" color="fg.default">
                   SD card: {status?.sdcard_mounted ? 'mounted' : 'not mounted'}
                 </Badge>
               </WrapItem>
               <WrapItem>
-                <Badge size="lg" variant="outline" colorScheme="purple">
+                <Badge variant="outline" borderColor="border.muted" color="fg.muted">
                   Device select: {status?.needs_device_select ? 'required' : 'not needed'}
                 </Badge>
               </WrapItem>
             </Wrap>
 
-            <TableRoot size="sm" variant="simple">
+            <TableRoot size="sm" variant="line">
               <TableHeader>
                 <TableRow>
-                  <TableColumnHeader>Field</TableColumnHeader>
-                  <TableColumnHeader>Value</TableColumnHeader>
+                  <TableColumnHeader color="fg.muted">Field</TableColumnHeader>
+                  <TableColumnHeader color="fg.muted">Value</TableColumnHeader>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 <TableRow>
-                  <TableCell>SD card mount point</TableCell>
-                  <TableCell fontFamily="mono">{status?.sdcard_path || 'n/a'}</TableCell>
+                  <TableCell color="fg.muted">SD card mount point</TableCell>
+                  <TableCell fontFamily="mono" color="fg.default">{status?.sdcard_path || 'n/a'}</TableCell>
                 </TableRow>
                 <TableRow>
-                  <TableCell>Current file</TableCell>
-                  <TableCell fontFamily="mono">{status?.current_sync?.current_file || 'n/a'}</TableCell>
+                  <TableCell color="fg.muted">Current file</TableCell>
+                  <TableCell fontFamily="mono" color="fg.default">{status?.current_sync?.current_file || 'n/a'}</TableCell>
                 </TableRow>
                 <TableRow>
-                  <TableCell>Synced</TableCell>
-                  <TableCell>
+                  <TableCell color="fg.muted">Synced</TableCell>
+                  <TableCell color="fg.default">
                     {rowText(status?.current_sync?.files_synced)} / {rowText(status?.current_sync?.files_total)}
                   </TableCell>
                 </TableRow>
                 <TableRow>
-                  <TableCell>Transfer speed</TableCell>
-                  <TableCell>
+                  <TableCell color="fg.muted">Transfer speed</TableCell>
+                  <TableCell color="fg.default">
                     {status?.current_sync?.transfer_speed ? `${rowText(status.current_sync.transfer_speed)} B/s` : '—'}
                   </TableCell>
                 </TableRow>
                 <TableRow>
-                  <TableCell>ETA</TableCell>
-                  <TableCell>{status?.current_sync?.eta || '—'}</TableCell>
+                  <TableCell color="fg.muted">ETA</TableCell>
+                  <TableCell color="fg.default">{status?.current_sync?.eta || '—'}</TableCell>
                 </TableRow>
               </TableBody>
             </TableRoot>
@@ -206,35 +210,36 @@ export function StatusPage({ deviceUrl }) {
         <CardHeader>
           <Flex justify="space-between" align="center">
             <Heading size="sm">Recent history</Heading>
-            <Badge colorScheme="teal" variant="subtle">
-              {history.length}
-            </Badge>
+            <Badge bg="accentMuted" color="accent">{history.length}</Badge>
           </Flex>
         </CardHeader>
         <CardBody pt={0}>
           {loading && history.length === 0 ? (
             <Spinner size="sm" />
           ) : (
-            <TableRoot variant="simple" size="sm">
+            <TableRoot variant="line" size="sm">
               <TableHeader>
                 <TableRow>
-                  <TableColumnHeader>Started</TableColumnHeader>
-                  <TableColumnHeader>Status</TableColumnHeader>
-                  <TableColumnHeader>Message</TableColumnHeader>
-                  <TableColumnHeader textAlign="right">Count</TableColumnHeader>
+                  <TableColumnHeader color="fg.muted">Started</TableColumnHeader>
+                  <TableColumnHeader color="fg.muted">Status</TableColumnHeader>
+                  <TableColumnHeader color="fg.muted">Message</TableColumnHeader>
+                  <TableColumnHeader color="fg.muted" textAlign="right">Count</TableColumnHeader>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {latestHistory.map((row) => (
                   <TableRow key={row.id || row.start_time}>
-                    <TableCell fontFamily="mono">{prettyDate(row.start_time)}</TableCell>
+                    <TableCell fontFamily="mono" color="fg.default">{prettyDate(row.start_time)}</TableCell>
                     <TableCell>
-                      <Badge colorScheme={row.status === 'success' ? 'green' : row.status === 'error' ? 'red' : 'yellow'}>
+                      <Badge 
+                        bg={row.status === 'success' ? 'success.bg' : row.status === 'error' ? 'danger.bg' : 'warning.bg'}
+                        color={row.status === 'success' ? 'success' : row.status === 'error' ? 'danger' : 'warning'}
+                      >
                         {row.status || 'n/a'}
                       </Badge>
                     </TableCell>
-                    <TableCell>{row.error || 'ok'}</TableCell>
-                    <TableCell textAlign="right">
+                    <TableCell color="fg.default">{row.error || 'ok'}</TableCell>
+                    <TableCell textAlign="right" color="fg.default">
                       {row.files_synced != null ? `${row.files_synced}/${row.files_total}` : '—'}
                     </TableCell>
                   </TableRow>
@@ -242,7 +247,7 @@ export function StatusPage({ deviceUrl }) {
                 {latestHistory.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={4}>
-                      <Text color="gray.300">No history entries yet.</Text>
+                      <Text color="fg.subtle">No history entries yet.</Text>
                     </TableCell>
                   </TableRow>
                 ) : null}
