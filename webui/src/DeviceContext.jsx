@@ -8,10 +8,11 @@ function getInitialDeviceUrl() {
   if (fromUrl) return fromUrl
 
   try {
-    return localStorage.getItem('deviceUrl') || ''
-  } catch {
-    return ''
-  }
+    const saved = localStorage.getItem('deviceUrl')
+    if (saved) return saved
+  } catch {}
+
+  return window.location.origin
 }
 
 export function DeviceProvider({ children }) {
