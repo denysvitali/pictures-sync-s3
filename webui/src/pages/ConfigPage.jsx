@@ -1,4 +1,19 @@
 import { useState, useEffect, useCallback } from 'react'
+
+function describeError(err) {
+  if (!err) return 'Unknown error'
+  const msg = err.message || String(err)
+  if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('ERR_NETWORK')) {
+    return 'Device unreachable — is it powered on and connected to the network?'
+  }
+  if (msg.includes('ERR_CONNECTION_REFUSED')) {
+    return 'Connection refused — the web server may not be running'
+  }
+  if (msg.includes('timeout')) {
+    return 'Request timed out — the device may be unreachable'
+  }
+  return msg
+}
 import { useDevice } from '../DeviceContext.jsx'
 import { useToast } from '../components/Toast.jsx'
 import { Card, CardHeader, CardTitle } from '../components/Card.jsx'
@@ -184,7 +199,7 @@ function RemoteStorageSection() {
         toast.error(res?.message || 'Connection test failed')
       }
     } catch (err) {
-      toast.error(err.message || 'Connection test failed')
+      toast.error(describeError(err) || 'Connection test failed')
     } finally {
       setTesting(false)
     }
@@ -275,7 +290,7 @@ function B2SetupSection() {
       toast.success('Backblaze B2 configuration saved')
       setAppKey('')
     } catch (err) {
-      toast.error(err.message || 'Failed to save B2 configuration')
+      toast.error(describeError(err) || 'Failed to save B2 configuration')
     } finally {
       setSaving(false)
     }
@@ -382,7 +397,7 @@ function SyncSettingsSection() {
       })
       toast.success('Sync settings saved')
     } catch (err) {
-      toast.error(err.message || 'Failed to save sync settings')
+      toast.error(describeError(err) || 'Failed to save sync settings')
     } finally {
       setSaving(false)
     }
@@ -450,7 +465,7 @@ function OtaSection() {
       const data = await getOtaStatus(deviceUrl)
       setStatus(data)
     } catch (err) {
-      toast.error(err.message || 'Failed to check OTA status')
+      toast.error(describeError(err) || 'Failed to check OTA status')
     } finally {
       setLoading(false)
     }
@@ -467,7 +482,7 @@ function OtaSection() {
       toast.success('Update installation started')
       fetchStatus()
     } catch (err) {
-      toast.error(err.message || 'Failed to start update')
+      toast.error(describeError(err) || 'Failed to start update')
     } finally {
       setInstalling(false)
     }
@@ -553,7 +568,7 @@ function DangerZonePassword() {
       setNewPassword('')
       setConfirmPassword('')
     } catch (err) {
-      toast.error(err.message || 'Failed to change password')
+      toast.error(describeError(err) || 'Failed to change password')
     } finally {
       setSaving(false)
     }
@@ -633,7 +648,7 @@ function DangerZoneBreakglass() {
       await saveBreakglassAuthorizedKeys(deviceUrl, parsed)
       toast.success('Breakglass SSH keys saved')
     } catch (err) {
-      toast.error(err.message || 'Failed to save breakglass keys')
+      toast.error(describeError(err) || 'Failed to save breakglass keys')
     } finally {
       setSaving(false)
     }

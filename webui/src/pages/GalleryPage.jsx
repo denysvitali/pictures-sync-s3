@@ -1,4 +1,19 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+
+function describeError(err) {
+  if (!err) return 'Unknown error'
+  const msg = err.message || String(err)
+  if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('ERR_NETWORK')) {
+    return 'Device unreachable — is it powered on and connected to the network?'
+  }
+  if (msg.includes('ERR_CONNECTION_REFUSED')) {
+    return 'Connection refused — the web server may not be running'
+  }
+  if (msg.includes('timeout')) {
+    return 'Request timed out — the device may be unreachable'
+  }
+  return msg
+}
 import { useDevice } from '../DeviceContext.jsx'
 import { useToast } from '../components/Toast.jsx'
 import { getFilesPaginated, getFileViewUrl, getThumbnailUrl } from '../api.js'
@@ -78,7 +93,7 @@ export default function GalleryPage() {
       setFiles(fileArr)
       setTotal(data?.total ?? fileArr.length)
     } catch (err) {
-      toast.error(`Failed to load files: ${err.message}`)
+      toast.error(`Could not load files: ${describeError(err)}`)
       setFiles([])
       setTotal(0)
     } finally {

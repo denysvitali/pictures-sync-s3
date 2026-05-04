@@ -1,4 +1,19 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+
+function describeError(err) {
+  if (!err) return 'Unknown error'
+  const msg = err.message || String(err)
+  if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('ERR_NETWORK')) {
+    return 'Device unreachable — is it powered on and connected to the network?'
+  }
+  if (msg.includes('ERR_CONNECTION_REFUSED')) {
+    return 'Connection refused — the web server may not be running'
+  }
+  if (msg.includes('timeout')) {
+    return 'Request timed out — the device may be unreachable'
+  }
+  return msg
+}
 import { useDevice } from '../DeviceContext.jsx'
 import { getHistory } from '../api.js'
 import { Card, CardHeader, CardTitle } from '../components/Card.jsx'
@@ -193,7 +208,7 @@ export default function HistoryPage() {
       })
       setHistory(entries)
     } catch (err) {
-      toast.error(`Failed to load history: ${err.message}`)
+      toast.error(`Could not load history: ${describeError(err)}`)
     } finally {
       setLoading(false)
       setRefreshing(false)

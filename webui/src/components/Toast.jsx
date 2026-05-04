@@ -1,13 +1,25 @@
-import { useState, useCallback, createContext, useContext } from 'react'
+import { useState, useCallback, useRef, createContext, useContext } from 'react'
 
 const ToastContext = createContext(null)
 
 let toastId = 0
 
+const DEDUP_WINDOW_MS = 5000
+
 export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([])
+  const recentRef = useRef(new Map())
 
   const addToast = useCallback((message, variant = 'info', duration = 4000) => {
+    const now = Date.now()
+    const key = `${variant}:${message}`
+
+    const lastTime = recentRef.current.get(key)
+    if (lastTime && now - lastTime < DEDUP_WINDOW_MS) {
+      return null
+    }
+    recentRef.current.set(key, now)
+
     const id = ++toastId
     setToasts((prev) => [...prev, { id, message, variant }])
     if (duration > 0) {
@@ -45,7 +57,7 @@ export function ToastProvider({ children }) {
             key={t.id}
             className={`flex items-center gap-2 px-4 py-3 rounded-lg border text-sm font-medium animate-in slide-in-from-right backdrop-blur-sm ${variantStyles[t.variant] || variantStyles.info}`}
           >
-            <span className="flex-1">{t.message}</span>
+            <span className="flex-1 break-words">{t.message}</span>
             <button
               onClick={() => removeToast(t.id)}
               className="opacity-60 hover:opacity-100 shrink-0"

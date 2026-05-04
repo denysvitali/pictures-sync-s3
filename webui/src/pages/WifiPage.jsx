@@ -1,4 +1,19 @@
 import { useState, useEffect, useCallback } from 'react'
+
+function describeError(err) {
+  if (!err) return 'Unknown error'
+  const msg = err.message || String(err)
+  if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('ERR_NETWORK')) {
+    return 'Device unreachable — is it powered on and connected to the network?'
+  }
+  if (msg.includes('ERR_CONNECTION_REFUSED')) {
+    return 'Connection refused — the web server may not be running'
+  }
+  if (msg.includes('timeout')) {
+    return 'Request timed out — the device may be unreachable'
+  }
+  return msg
+}
 import { useDevice } from '../DeviceContext.jsx'
 import { useToast } from '../components/Toast.jsx'
 import {
@@ -237,7 +252,7 @@ export default function WifiPage() {
       const data = await getWifiStatus(deviceUrl)
       setStatus(data)
     } catch (err) {
-      toast.error(`Failed to load WiFi status: ${err.message}`)
+      toast.error(`Could not load WiFi status: ${describeError(err)}`)
     }
   }, [deviceUrl, toast])
 
@@ -246,7 +261,7 @@ export default function WifiPage() {
       const data = await getWifiNetworks(deviceUrl)
       setSavedNetworks(Array.isArray(data) ? data : [])
     } catch (err) {
-      toast.error(`Failed to load saved networks: ${err.message}`)
+      toast.error(`Could not load saved networks: ${describeError(err)}`)
     }
   }, [deviceUrl, toast])
 
@@ -265,7 +280,7 @@ export default function WifiPage() {
       setShowScanned(true)
       toast.info(`Found ${Array.isArray(data) ? data.length : 0} networks`)
     } catch (err) {
-      toast.error(`Scan failed: ${err.message}`)
+      toast.error(`Scan failed: ${describeError(err)}`)
     } finally {
       setScanning(false)
     }
@@ -278,7 +293,7 @@ export default function WifiPage() {
       await fetchStatus()
       await fetchSavedNetworks()
     } catch (err) {
-      toast.error(`Connection failed: ${err.message}`)
+      toast.error(`Connection failed: ${describeError(err)}`)
     }
   }
 
@@ -289,7 +304,7 @@ export default function WifiPage() {
       await fetchStatus()
       await fetchSavedNetworks()
     } catch (err) {
-      toast.error(`Disconnect failed: ${err.message}`)
+      toast.error(`Disconnect failed: ${describeError(err)}`)
     }
   }
 
@@ -299,7 +314,7 @@ export default function WifiPage() {
       const ssids = newNetworks.map((n) => n.ssid)
       await reorderWifi(deviceUrl, ssids)
     } catch (err) {
-      toast.error(`Reorder failed: ${err.message}`)
+      toast.error(`Reorder failed: ${describeError(err)}`)
       await fetchSavedNetworks()
     }
   }

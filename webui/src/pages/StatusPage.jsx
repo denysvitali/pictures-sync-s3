@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useDevice } from '../DeviceContext.jsx'
 import { useToast } from '../components/Toast.jsx'
 import { getStatus, getHistory, startSync, cancelSync } from '../api.js'
@@ -21,6 +21,24 @@ function formatBytes(bytes) {
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
   const i = Math.floor(Math.log(bytes) / Math.log(1024))
   return `${(bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0)} ${units[i]}`
+}
+
+function describeError(err) {
+  if (!err) return 'Unknown error'
+  const msg = err.message || String(err)
+  if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('ERR_NETWORK')) {
+    return 'Device unreachable — is it powered on and connected to the network?'
+  }
+  if (msg.includes('ERR_CONNECTION_REFUSED')) {
+    return 'Connection refused — the web server may not be running on this device'
+  }
+  if (msg.includes('ERR_CONNECTION_TIMED_OUT') || msg.includes('timeout')) {
+    return 'Request timed out — the device may be slow or unreachable'
+  }
+  if (msg.includes('401') || msg.includes('403') || msg.toLowerCase().includes('unauthorized')) {
+    return 'Authentication failed — check the device credentials'
+  }
+  return msg
 }
 
 function formatDuration(seconds) {
@@ -310,10 +328,12 @@ export default function StatusPage() {
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState(false)
   const [error, setError] = useState(null)
+  const consecutiveErrorsRef = useRef(0)
+  const timerRef = useRef(null)
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (isAutoRefresh = false) => {
     if (!deviceUrl) return
-    setLoading(true)
+    if (!isAutoRefresh) setLoading(true)
     setError(null)
     try {
       const [statusData, historyData] = await Promise.all([
@@ -322,9 +342,14 @@ export default function StatusPage() {
       ])
       setStatus(statusData)
       setHistory(Array.isArray(historyData) ? historyData : [])
+      consecutiveErrorsRef.current = 0
     } catch (err) {
-      setError(err.message || 'Failed to load status')
-      toast.error('Failed to load device status')
+      const detailed = describeError(err)
+      setError(detailed)
+      consecutiveErrorsRef.current++
+      if (!isAutoRefresh) {
+        toast.error(`Could not reach device: ${detailed}`)
+      }
     } finally {
       setLoading(false)
     }
@@ -334,11 +359,23 @@ export default function StatusPage() {
     fetchData()
   }, [fetchData])
 
-  // Auto-refresh while syncing
+  // Auto-refresh while syncing with exponential backoff on errors
   useEffect(() => {
     if (!status || status.status !== 'syncing') return
-    const interval = setInterval(fetchData, 3000)
-    return () => clearInterval(interval)
+
+    const scheduleNext = () => {
+      const errors = consecutiveErrorsRef.current
+      const delay = errors === 0 ? 3000 : Math.min(3000 * Math.pow(2, errors - 1), 30000)
+      timerRef.current = setTimeout(async () => {
+        await fetchData(true)
+        if (consecutiveErrorsRef.current < 5) {
+          scheduleNext()
+        }
+      }, delay)
+    }
+
+    scheduleNext()
+    return () => clearTimeout(timerRef.current)
   }, [status?.status, fetchData])
 
   const handleStartSync = async () => {
@@ -348,7 +385,7 @@ export default function StatusPage() {
       toast.success('Sync started')
       await fetchData()
     } catch (err) {
-      toast.error(err.message || 'Failed to start sync')
+      toast.error(`Failed to start sync: ${describeError(err)}`)
     } finally {
       setActionLoading(false)
     }
@@ -361,7 +398,7 @@ export default function StatusPage() {
       toast.info('Sync cancelled')
       await fetchData()
     } catch (err) {
-      toast.error(err.message || 'Failed to cancel sync')
+      toast.error(`Failed to cancel sync: ${describeError(err)}`)
     } finally {
       setActionLoading(false)
     }
@@ -376,10 +413,13 @@ export default function StatusPage() {
       <div className="flex flex-col items-center justify-center min-h-[50vh] text-center px-4">
         <Icon name="exclamation-triangle" className="w-12 h-12 text-danger mb-4" />
         <h2 className="text-lg font-semibold text-surface-200 mb-2">Connection Error</h2>
-        <p className="text-sm text-surface-400 mb-4 max-w-xs">{error}</p>
-        <Button variant="secondary" onClick={fetchData}>
+        <p className="text-sm text-surface-400 mb-2 max-w-xs">{error}</p>
+        <p className="text-xs text-surface-500 mb-4 max-w-xs">
+          Make sure the device is powered on, connected to the network, and the web server is running.
+        </p>
+        <Button variant="secondary" onClick={() => fetchData()}>
           <Icon name="arrow-path" className="w-4 h-4" />
-          Retry
+          Try Again
         </Button>
       </div>
     )
@@ -393,13 +433,24 @@ export default function StatusPage() {
         <Button
           variant="ghost"
           size="sm"
-          onClick={fetchData}
+          onClick={() => fetchData()}
           loading={loading}
         >
           <Icon name="arrow-path" className="w-4 h-4" />
           Refresh
         </Button>
       </div>
+
+      {/* Warning when auto-refresh keeps failing */}
+      {error && consecutiveErrorsRef.current > 0 && (
+        <div className="flex items-start gap-3 px-4 py-3 rounded-lg bg-warning/10 border border-warning/20">
+          <Icon name="exclamation-triangle" className="w-5 h-5 text-warning shrink-0 mt-0.5" />
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-warning">Connection issues detected</p>
+            <p className="text-xs text-surface-400 mt-1">{error}</p>
+          </div>
+        </div>
+      )}
 
       {/* Sync controls */}
       {status && (
