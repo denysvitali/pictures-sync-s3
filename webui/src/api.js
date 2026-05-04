@@ -21,9 +21,7 @@ function buildUrl(baseUrl, path, query = null) {
 
   if (query && typeof query === 'object') {
     Object.entries(query).forEach(([key, value]) => {
-      if (value === undefined || value === null || value === '') {
-        return
-      }
+      if (value === undefined || value === null || value === '') return
       if (Array.isArray(value)) {
         value.forEach((entry) => {
           if (entry !== undefined && entry !== null) {
@@ -47,11 +45,7 @@ async function parseResponse(response) {
     if (contentType.includes('application/json')) {
       try {
         const error = JSON.parse(raw)
-        throw new Error(
-          error?.error ||
-            error?.message ||
-            `Request failed (${response.status})`
-        )
+        throw new Error(error?.error || error?.message || `Request failed (${response.status})`)
       } catch (parseError) {
         if (parseError instanceof Error && parseError.message.includes('Request failed')) {
           throw parseError
@@ -62,40 +56,29 @@ async function parseResponse(response) {
     throw new Error(raw || `Request failed (${response.status})`)
   }
 
-  if (!contentType.includes('application/json')) {
-    return raw
-  }
+  if (!contentType.includes('application/json')) return raw
 
   try {
     return JSON.parse(raw)
-  } catch (err) {
+  } catch {
     return raw
   }
 }
 
 function bodyPayload(payload) {
-  if (payload === null || payload === undefined) {
-    return undefined
-  }
-  if (typeof payload === 'string') {
-    return payload
-  }
+  if (payload === null || payload === undefined) return undefined
+  if (typeof payload === 'string') return payload
   return JSON.stringify(payload)
 }
 
 export async function apiRequest(path, options = {}) {
-  const {
-    deviceUrl,
-    query,
-    method = 'GET',
-    headers = {},
-    body,
-    ...fetchOptions
-  } = options
+  const { deviceUrl, query, method = 'GET', headers = {}, body, ...fetchOptions } = options
 
   const resolvedBody = bodyPayload(body)
   const requestHeaders = {
-    ...(resolvedBody !== undefined && !(resolvedBody instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
+    ...(resolvedBody !== undefined && !(resolvedBody instanceof FormData)
+      ? { 'Content-Type': 'application/json' }
+      : {}),
     ...headers
   }
 
@@ -110,91 +93,52 @@ export async function apiRequest(path, options = {}) {
   return parseResponse(response)
 }
 
-export const getStatus = (deviceUrl) => apiRequest('/api/status', { deviceUrl })
-export const getVersion = (deviceUrl) => apiRequest('/api/version', { deviceUrl })
-export const getHistory = (deviceUrl) => apiRequest('/api/history', { deviceUrl })
-export const getWifiStatus = (deviceUrl) => apiRequest('/api/wifi/status', { deviceUrl })
-export const getWifiNetworks = (deviceUrl) => apiRequest('/api/wifi/networks', { deviceUrl })
-export const startSync = (deviceUrl) => apiRequest('/api/sync/start', { deviceUrl, method: 'POST' })
-export const cancelSync = (deviceUrl) => apiRequest('/api/sync/cancel', { deviceUrl, method: 'POST' })
-export const scanWifi = (deviceUrl, sortBy) =>
-  apiRequest('/api/wifi/scan', {
-    deviceUrl,
-    method: 'POST',
-    body: { sort_by: sortBy }
-  })
-export const connectWifi = (deviceUrl, ssid, password = '') =>
-  apiRequest('/api/wifi/connect', {
-    deviceUrl,
-    method: 'POST',
-    body: { ssid, password }
-  })
-export const disconnectWifi = (deviceUrl, ssid) =>
-  apiRequest('/api/wifi/disconnect', {
-    deviceUrl,
-    method: 'POST',
-    body: { ssid }
-  })
-export const reorderWifi = (deviceUrl, ssids) =>
-  apiRequest('/api/wifi/reorder', {
-    deviceUrl,
-    method: 'POST',
-    body: { ssids }
-  })
-export const getFiles = (deviceUrl, path = '') =>
-  apiRequest('/api/files', { deviceUrl, query: { path } })
-export const getFilesPaginated = (deviceUrl, { path = '', page = 1, pageSize = 50 }) =>
-  apiRequest('/api/files/paginated', {
-    deviceUrl,
-    query: {
-      path,
-      page,
-      page_size: pageSize
-    }
-  })
-export const getConfig = (deviceUrl) => apiRequest('/api/config', { deviceUrl })
-export const getBreakglassAuthorizedKeys = (deviceUrl) =>
-  apiRequest('/api/breakglass/authorized-keys', { deviceUrl })
-export const saveBreakglassAuthorizedKeys = (deviceUrl, authorizedKeys) =>
+export const getStatus = (d) => apiRequest('/api/status', { deviceUrl: d })
+export const getVersion = (d) => apiRequest('/api/version', { deviceUrl: d })
+export const getHistory = (d) => apiRequest('/api/history', { deviceUrl: d })
+export const getWifiStatus = (d) => apiRequest('/api/wifi/status', { deviceUrl: d })
+export const getWifiNetworks = (d) => apiRequest('/api/wifi/networks', { deviceUrl: d })
+export const startSync = (d) => apiRequest('/api/sync/start', { deviceUrl: d, method: 'POST' })
+export const cancelSync = (d) => apiRequest('/api/sync/cancel', { deviceUrl: d, method: 'POST' })
+export const scanWifi = (d, sortBy) =>
+  apiRequest('/api/wifi/scan', { deviceUrl: d, method: 'POST', body: { sort_by: sortBy } })
+export const connectWifi = (d, ssid, password = '') =>
+  apiRequest('/api/wifi/connect', { deviceUrl: d, method: 'POST', body: { ssid, password } })
+export const disconnectWifi = (d, ssid) =>
+  apiRequest('/api/wifi/disconnect', { deviceUrl: d, method: 'POST', body: { ssid } })
+export const reorderWifi = (d, ssids) =>
+  apiRequest('/api/wifi/reorder', { deviceUrl: d, method: 'POST', body: { ssids } })
+export const getFiles = (d, path = '') =>
+  apiRequest('/api/files', { deviceUrl: d, query: { path } })
+export const getFilesPaginated = (d, { path = '', page = 1, pageSize = 50 }) =>
+  apiRequest('/api/files/paginated', { deviceUrl: d, query: { path, page, page_size: pageSize } })
+export const getConfig = (d) => apiRequest('/api/config', { deviceUrl: d })
+export const getBreakglassAuthorizedKeys = (d) =>
+  apiRequest('/api/breakglass/authorized-keys', { deviceUrl: d })
+export const saveBreakglassAuthorizedKeys = (d, authorizedKeys) =>
   apiRequest('/api/breakglass/authorized-keys', {
-    deviceUrl,
-    method: 'POST',
-    body: { authorized_keys: authorizedKeys }
+    deviceUrl: d, method: 'POST', body: { authorized_keys: authorizedKeys }
   })
-export const getSettings = (deviceUrl) => apiRequest('/api/settings', { deviceUrl })
-export const saveSettings = (deviceUrl, payload) =>
-  apiRequest('/api/settings', {
-    deviceUrl,
-    method: 'POST',
-    body: payload
-  })
-export const changeGokrazyPassword = (deviceUrl, currentPassword, newPassword) =>
+export const getSettings = (d) => apiRequest('/api/settings', { deviceUrl: d })
+export const saveSettings = (d, payload) =>
+  apiRequest('/api/settings', { deviceUrl: d, method: 'POST', body: payload })
+export const changeGokrazyPassword = (d, currentPassword, newPassword) =>
   apiRequest('/api/auth/password', {
-    deviceUrl,
-    method: 'POST',
-    body: {
-      current_password: currentPassword,
-      new_password: newPassword
-    }
+    deviceUrl: d, method: 'POST',
+    body: { current_password: currentPassword, new_password: newPassword }
   })
-export const testConfig = (deviceUrl) =>
-  apiRequest('/api/config/test', {
-    deviceUrl,
-    method: 'POST'
-  })
-export const getB2Regions = (deviceUrl) => apiRequest('/api/config/b2/regions', { deviceUrl })
-export const saveB2Config = (deviceUrl, payload) =>
-  apiRequest('/api/config/b2', {
-    deviceUrl,
-    method: 'POST',
-    body: payload
-  })
-export const getOtaStatus = (deviceUrl) => apiRequest('/api/ota/status', { deviceUrl })
-export const installOta = (deviceUrl) =>
-  apiRequest('/api/ota/install', {
-    deviceUrl,
-    method: 'POST'
-  })
-
-export const getFileViewUrl = (deviceUrl, filePath) =>
-  `${normalizeBaseUrl(deviceUrl)}/api/files/view?path=${encodeURIComponent(filePath || '')}`
+export const testConfig = (d) =>
+  apiRequest('/api/config/test', { deviceUrl: d, method: 'POST' })
+export const getB2Regions = (d) => apiRequest('/api/config/b2/regions', { deviceUrl: d })
+export const saveB2Config = (d, payload) =>
+  apiRequest('/api/config/b2', { deviceUrl: d, method: 'POST', body: payload })
+export const getOtaStatus = (d) => apiRequest('/api/ota/status', { deviceUrl: d })
+export const installOta = (d) =>
+  apiRequest('/api/ota/install', { deviceUrl: d, method: 'POST' })
+export const getDevices = (d) => apiRequest('/api/devices', { deviceUrl: d })
+export const selectDevice = (d, deviceId) =>
+  apiRequest('/api/devices/select', { deviceUrl: d, method: 'POST', body: { device_id: deviceId } })
+export const getFileViewUrl = (d, filePath) =>
+  `${normalizeBaseUrl(d)}/api/files/view?path=${encodeURIComponent(filePath || '')}`
+export const getThumbnailUrl = (d, filePath) =>
+  `${normalizeBaseUrl(d)}/api/thumbnail?path=${encodeURIComponent(filePath || '')}`
