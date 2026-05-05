@@ -3,10 +3,8 @@ package main
 import (
 	"compress/gzip"
 	"context"
-	"crypto/tls"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -40,11 +38,12 @@ func newRootCommand() *cobra.Command {
 	opts := options{
 		targetURL: envDefault("OTA_GOKRAZY_UPDATE_URL", ota.DefaultUpdateURL),
 		timeout:   30 * time.Minute,
+		insecure:  envBool(ota.UpdateInsecureEnv, false),
 	}
 
 	cmd := &cobra.Command{
 		// #nosec G101 -- example placeholder password in usage string
-		Use: "ota-upload --image photo-backup-rpi4b-root.squashfs.gz --target https://gokrazy:password@device/",
+		Use:   "ota-upload --image photo-backup-rpi4b-root.squashfs.gz --target https://gokrazy:password@device/",
 		Short: "Upload a gzipped gokrazy root image to a running device",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return run(cmd.Context(), opts)
@@ -81,13 +80,7 @@ func run(ctx context.Context, opts options) error {
 	defer cancel()
 
 	baseURL := ensureTrailingSlash(strings.TrimSpace(opts.targetURL))
-	client := &http.Client{Timeout: opts.timeout}
-	if opts.insecure {
-		client.Transport = &http.Transport{
-			// #nosec G402 -- explicit CLI opt-in for self-signed gokrazy devices
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}
-	}
+	client := ota.NewUpdateHTTPClient(baseURL, opts.timeout, opts.insecure)
 	target, err := updater.NewTarget(ctx, baseURL, client)
 	if err != nil {
 		return fmt.Errorf("connect to gokrazy updater: %w", err)
@@ -147,6 +140,21 @@ func envDefault(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func envBool(key string, fallback bool) bool {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	switch strings.ToLower(value) {
+	case "1", "true", "t", "yes", "y", "on":
+		return true
+	case "0", "false", "f", "no", "n", "off":
+		return false
+	default:
+		return fallback
+	}
 }
 
 type progressReader struct {

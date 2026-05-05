@@ -127,15 +127,22 @@ func TestShouldSkipUpdateTLSVerify(t *testing.T) {
 	}
 }
 
-func TestGokrazyUpdateClientSkipsTLSVerifyOnlyForHTTPSLoopback(t *testing.T) {
-	client := gokrazyUpdateClient("https://127.0.0.1/update/", time.Minute)
+func TestNewUpdateHTTPClientSkipsTLSVerifyForHTTPSLoopback(t *testing.T) {
+	client := NewUpdateHTTPClient("https://127.0.0.1/update/", time.Minute, false)
 	if !transportSkipsTLSVerify(client.Transport) {
 		t.Fatal("loopback HTTPS client should skip TLS verification")
 	}
 
-	client = gokrazyUpdateClient("https://photo-backup.local/update/", time.Minute)
+	client = NewUpdateHTTPClient("https://photo-backup.local/update/", time.Minute, false)
 	if transportSkipsTLSVerify(client.Transport) {
 		t.Fatal("remote HTTPS client should not skip TLS verification")
+	}
+}
+
+func TestNewUpdateHTTPClientSkipsTLSVerifyWhenExplicitlyConfigured(t *testing.T) {
+	client := NewUpdateHTTPClient("https://photo-backup.local/update/", time.Minute, true)
+	if !transportSkipsTLSVerify(client.Transport) {
+		t.Fatal("explicitly insecure HTTPS client should skip TLS verification")
 	}
 }
 
@@ -171,6 +178,26 @@ func TestGokrazyInstallerKeepsTLSVerifyForRemoteHTTPSClient(t *testing.T) {
 	}
 	if transportSkipsTLSVerify(client.Transport) {
 		t.Fatal("remote HTTPS installer client should not skip TLS verification")
+	}
+}
+
+func TestGokrazyInstallerSkipsTLSVerifyForExplicitRemoteHTTPSClient(t *testing.T) {
+	base := &http.Client{Timeout: time.Second}
+	installer := GokrazyInstaller{
+		BaseURL:            "https://photo-backup.local/",
+		HTTPClient:         base,
+		InsecureSkipVerify: true,
+	}
+
+	client := installer.httpClient(installer.BaseURL)
+	if client == base {
+		t.Fatal("explicitly insecure remote HTTPS client should be cloned before changing transport")
+	}
+	if !transportSkipsTLSVerify(client.Transport) {
+		t.Fatal("explicitly insecure remote HTTPS installer client should skip TLS verification")
+	}
+	if base.Transport != nil {
+		t.Fatal("installer should not mutate the caller-provided client")
 	}
 }
 

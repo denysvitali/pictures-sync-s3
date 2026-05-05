@@ -29,6 +29,8 @@ const (
 	DefaultAssetName    = "photo-backup-rpi4b-root.squashfs.gz"
 	FlashAssetName      = "photo-backup-rpi4b.img.gz"
 	DefaultGitHubAPIURL = "https://api.github.com"
+	// UpdateInsecureEnv enables TLS verification bypass for self-signed gokrazy updater endpoints.
+	UpdateInsecureEnv = "OTA_GOKRAZY_INSECURE"
 	// #nosec G101 -- default gokrazy updater URL with well-known local device password
 	DefaultUpdateURL = "http://gokrazy:photo-backup@127.0.0.1/"
 
@@ -40,8 +42,9 @@ type Installer interface {
 }
 
 type GokrazyInstaller struct {
-	BaseURL    string
-	HTTPClient *http.Client
+	BaseURL            string
+	HTTPClient         *http.Client
+	InsecureSkipVerify bool
 }
 
 func (i GokrazyInstaller) InstallRoot(ctx context.Context, r io.Reader) error {
@@ -73,7 +76,7 @@ func (i GokrazyInstaller) httpClient(baseURL string) *http.Client {
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Minute}
 	}
-	return loopbackInsecureTLSClient(client, baseURL)
+	return configureUpdateHTTPClient(client, baseURL, i.InsecureSkipVerify)
 }
 
 type Manager struct {
@@ -136,13 +139,18 @@ func NewManager() *Manager {
 	}
 
 	httpClient := &http.Client{Timeout: 30 * time.Minute}
+	insecureUpdate := envBool(UpdateInsecureEnv, false)
 	mgr := &Manager{
-		Owner:          envDefault("OTA_GITHUB_OWNER", DefaultOwner),
-		Repo:           envDefault("OTA_GITHUB_REPO", DefaultRepo),
-		AssetName:      envDefault("OTA_RELEASE_ASSET", DefaultAssetName),
-		APIURL:         envDefault("OTA_GITHUB_API_URL", DefaultGitHubAPIURL),
-		HTTPClient:     httpClient,
-		Installer:      GokrazyInstaller{BaseURL: updateURL, HTTPClient: gokrazyUpdateClient(updateURL, 30*time.Minute)},
+		Owner:      envDefault("OTA_GITHUB_OWNER", DefaultOwner),
+		Repo:       envDefault("OTA_GITHUB_REPO", DefaultRepo),
+		AssetName:  envDefault("OTA_RELEASE_ASSET", DefaultAssetName),
+		APIURL:     envDefault("OTA_GITHUB_API_URL", DefaultGitHubAPIURL),
+		HTTPClient: httpClient,
+		Installer: GokrazyInstaller{
+			BaseURL:            updateURL,
+			HTTPClient:         NewUpdateHTTPClient(updateURL, 30*time.Minute, insecureUpdate),
+			InsecureSkipVerify: insecureUpdate,
+		},
 		status:         Status{State: "idle"},
 		installHistory: make([]InstallHistoryEntry, 0),
 	}
@@ -415,7 +423,12 @@ func (m *Manager) installer() Installer {
 		return m.Installer
 	}
 	updateURL := defaultUpdateURLFromPassword()
-	return GokrazyInstaller{BaseURL: updateURL, HTTPClient: gokrazyUpdateClient(updateURL, 30*time.Minute)}
+	insecureUpdate := envBool(UpdateInsecureEnv, false)
+	return GokrazyInstaller{
+		BaseURL:            updateURL,
+		HTTPClient:         NewUpdateHTTPClient(updateURL, 30*time.Minute, insecureUpdate),
+		InsecureSkipVerify: insecureUpdate,
+	}
 }
 
 func (m *Manager) owner() string {
@@ -447,6 +460,21 @@ func envDefault(key, fallback string) string {
 	return valueDefault(os.Getenv(key), fallback)
 }
 
+func envBool(key string, fallback bool) bool {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	switch strings.ToLower(value) {
+	case "1", "true", "t", "yes", "y", "on":
+		return true
+	case "0", "false", "f", "no", "n", "off":
+		return false
+	default:
+		return fallback
+	}
+}
+
 func valueDefault(value, fallback string) string {
 	if strings.TrimSpace(value) == "" {
 		return fallback
@@ -454,12 +482,13 @@ func valueDefault(value, fallback string) string {
 	return strings.TrimSpace(value)
 }
 
-func gokrazyUpdateClient(rawURL string, timeout time.Duration) *http.Client {
-	return loopbackInsecureTLSClient(&http.Client{Timeout: timeout}, rawURL)
+// NewUpdateHTTPClient returns an HTTP client configured for gokrazy updater uploads.
+func NewUpdateHTTPClient(rawURL string, timeout time.Duration, insecureSkipVerify bool) *http.Client {
+	return configureUpdateHTTPClient(&http.Client{Timeout: timeout}, rawURL, insecureSkipVerify)
 }
 
-func loopbackInsecureTLSClient(client *http.Client, rawURL string) *http.Client {
-	if !shouldSkipUpdateTLSVerify(rawURL) {
+func configureUpdateHTTPClient(client *http.Client, rawURL string, insecureSkipVerify bool) *http.Client {
+	if !insecureSkipVerify && !shouldSkipUpdateTLSVerify(rawURL) {
 		return client
 	}
 
@@ -479,7 +508,7 @@ func loopbackInsecureTLSClient(client *http.Client, rawURL string) *http.Client 
 	if transport.TLSClientConfig != nil {
 		tlsConfig = transport.TLSClientConfig.Clone()
 	}
-	// #nosec G402 -- loopback-only gokrazy updater uses self-signed TLS
+	// #nosec G402 -- explicit OTA updater option; loopback gokrazy updater uses self-signed TLS
 	tlsConfig.InsecureSkipVerify = true
 	transport.TLSClientConfig = tlsConfig
 	cloned.Transport = transport

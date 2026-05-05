@@ -528,6 +528,8 @@ Required for `ota-release`:
      -image photo-backup-rpi4b-root.squashfs.gz
    ```
    Use `-insecure` when connecting to a self-signed HTTPS gokrazy endpoint by IP address.
+   The web UI updater uses the same client behavior; set `OTA_GOKRAZY_INSECURE=true`
+   with `OTA_GOKRAZY_UPDATE_URL=https://...` for self-signed non-loopback updater endpoints.
 
    The `replace` directive in `~/gokrazy/<instance-name>/go.mod` ensures your local changes are always used.
    For local OTA image builds, `scripts/build-ota-image.sh` auto-detects a sibling `../gokrazy` checkout; otherwise set `GOKRAZY_MODULE_REPLACE=/path/to/gokrazy` so the image uses the runtime fork that honors persistent TLS certificates.
