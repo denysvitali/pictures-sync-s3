@@ -31,20 +31,20 @@ import { Icon } from '../components/Icons.jsx'
 import { PageLoader } from '../components/LoadingSpinner.jsx'
 
 function signalIcon(strength) {
-  if (strength >= 70) return 'signal-strong'
-  if (strength >= 40) return 'signal-medium'
+  if (strength >= -50) return 'signal-strong'
+  if (strength >= -70) return 'signal-medium'
   return 'signal-weak'
 }
 
 function signalLabel(strength) {
-  if (strength >= 70) return 'Strong'
-  if (strength >= 40) return 'Medium'
+  if (strength >= -50) return 'Strong'
+  if (strength >= -70) return 'Medium'
   return 'Weak'
 }
 
 function signalVariant(strength) {
-  if (strength >= 70) return 'success'
-  if (strength >= 40) return 'warning'
+  if (strength >= -50) return 'success'
+  if (strength >= -70) return 'warning'
   return 'danger'
 }
 

@@ -28,7 +28,8 @@ var (
 // ScanResult represents a scanned WiFi network
 type ScanResult struct {
 	SSID      string `json:"ssid"`
-	Signal    int    `json:"signal"` // Signal strength in dBm
+	Signal    int    `json:"signal"`    // Signal strength in dBm
+	Frequency int    `json:"frequency"` // Frequency in MHz
 	Encrypted bool   `json:"encrypted"`
 }
 
@@ -168,7 +169,8 @@ func processAccessPoints(accessPoints []*wifi.BSS, networksMap map[string]ScanRe
 
 		result := ScanResult{
 			SSID:      ap.SSID,
-			Signal:    0, // No signal data available in BSS scan results
+			Signal:    int(ap.Signal) / 100, // convert mBm to dBm
+			Frequency: ap.Frequency,
 			Encrypted: encrypted,
 		}
 
