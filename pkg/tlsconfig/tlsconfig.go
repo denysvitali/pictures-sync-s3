@@ -7,6 +7,14 @@ import (
 	"os"
 )
 
+var (
+	rootCertFile    = "/etc/ssl/gokrazy-web.pem"
+	rootKeyFile     = "/etc/ssl/gokrazy-web.key.pem"
+	rootUsePermFile = "/etc/ssl/gokrazy-web.use-perm"
+	permCertFile    = "/perm/ssl/gokrazy-web.pem"
+	permKeyFile     = "/perm/ssl/gokrazy-web.key.pem"
+)
+
 // Config provides TLS configuration for the webui server
 type Config struct {
 	// CertFile is the path to the TLS certificate
@@ -22,39 +30,43 @@ type Config struct {
 // DefaultConfig returns a secure default TLS configuration
 func DefaultConfig() *Config {
 	return &Config{
-		CertFile:           "/etc/ssl/gokrazy-web.pem",
-		KeyFile:            "/etc/ssl/gokrazy-web.key.pem",
+		CertFile:           rootCertFile,
+		KeyFile:            rootKeyFile,
 		InsecureSkipVerify: false,
 		MinVersion:         tls.VersionTLS12,
 	}
 }
 
-// ResolveConfig returns a TLS config pointing at the first available
-// certificate pair. It prefers the legacy /etc/ssl location and
-// falls back to /perm/ssl for persistent storage deployments.
+// ResolveConfig returns a TLS config pointing at the appropriate certificate
+// pair for the current gokrazy image. When gokrazy's root marker asks for
+// persistent TLS storage, the /perm certificate pair is preferred.
 func ResolveConfig() *Config {
 	cfg := DefaultConfig()
-	candidates := []Config{
-		{
-			CertFile:           "/etc/ssl/gokrazy-web.pem",
-			KeyFile:            "/etc/ssl/gokrazy-web.key.pem",
-			InsecureSkipVerify: cfg.InsecureSkipVerify,
-			MinVersion:         cfg.MinVersion,
-		},
-		{
-			CertFile:           "/perm/ssl/gokrazy-web.pem",
-			KeyFile:            "/perm/ssl/gokrazy-web.key.pem",
-			InsecureSkipVerify: cfg.InsecureSkipVerify,
-			MinVersion:         cfg.MinVersion,
-		},
+	root := Config{
+		CertFile:           rootCertFile,
+		KeyFile:            rootKeyFile,
+		InsecureSkipVerify: cfg.InsecureSkipVerify,
+		MinVersion:         cfg.MinVersion,
+	}
+	perm := Config{
+		CertFile:           permCertFile,
+		KeyFile:            permKeyFile,
+		InsecureSkipVerify: cfg.InsecureSkipVerify,
+		MinVersion:         cfg.MinVersion,
 	}
 
-	for _, candidate := range candidates {
-		c := candidate
-		if c.CertificatesExist() {
-			return &c
-		}
+	if fileExists(rootUsePermFile) && perm.CertificatesExist() {
+		return &perm
 	}
+
+	if root.CertificatesExist() {
+		return &root
+	}
+
+	if perm.CertificatesExist() {
+		return &perm
+	}
+
 	return cfg
 }
 
@@ -104,10 +116,11 @@ func (c *Config) NewTLSConfig() (*tls.Config, error) {
 
 // CertificatesExist checks if the configured certificate files exist
 func (c *Config) CertificatesExist() bool {
-	if _, err := os.Stat(c.CertFile); err != nil {
-		return false
-	}
-	if _, err := os.Stat(c.KeyFile); err != nil {
+	return fileExists(c.CertFile) && fileExists(c.KeyFile)
+}
+
+func fileExists(path string) bool {
+	if _, err := os.Stat(path); err != nil {
 		return false
 	}
 	return true

@@ -43,7 +43,7 @@ func (m *Manager) calculateProgress(stats *accounting.StatsInfo, totalFiles int,
 	var currentFileSize int64
 
 	// Try to get remote stats which includes current transfers and checks
-	if remoteStats, err := stats.RemoteStats(true); err == nil {
+	if remoteStats, err := stats.RemoteStats(false); err == nil {
 		// First try transferring files (higher priority)
 		if transferring, ok := remoteStats["transferring"].([]interface{}); ok && len(transferring) > 0 {
 			if transfer, ok := transferring[0].(map[string]interface{}); ok {

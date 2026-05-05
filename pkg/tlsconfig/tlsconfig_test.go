@@ -99,6 +99,74 @@ func TestDefaultConfig(t *testing.T) {
 	}
 }
 
+func TestResolveConfigPrefersRootByDefault(t *testing.T) {
+	tmpDir := t.TempDir()
+	rootDir := filepath.Join(tmpDir, "root")
+	permDir := filepath.Join(tmpDir, "perm")
+	setTestTLSPaths(t, rootDir, permDir)
+	writeTestCertPair(t, rootCertFile, rootKeyFile)
+	writeTestCertPair(t, permCertFile, permKeyFile)
+
+	cfg := ResolveConfig()
+	if cfg.CertFile != rootCertFile {
+		t.Errorf("Expected root cert file %q, got %q", rootCertFile, cfg.CertFile)
+	}
+	if cfg.KeyFile != rootKeyFile {
+		t.Errorf("Expected root key file %q, got %q", rootKeyFile, cfg.KeyFile)
+	}
+}
+
+func TestResolveConfigUsesPermWhenGokrazyMarkerExists(t *testing.T) {
+	tmpDir := t.TempDir()
+	rootDir := filepath.Join(tmpDir, "root")
+	permDir := filepath.Join(tmpDir, "perm")
+	setTestTLSPaths(t, rootDir, permDir)
+	writeTestCertPair(t, rootCertFile, rootKeyFile)
+	writeTestCertPair(t, permCertFile, permKeyFile)
+	writeTestFile(t, rootUsePermFile)
+
+	cfg := ResolveConfig()
+	if cfg.CertFile != permCertFile {
+		t.Errorf("Expected perm cert file %q, got %q", permCertFile, cfg.CertFile)
+	}
+	if cfg.KeyFile != permKeyFile {
+		t.Errorf("Expected perm key file %q, got %q", permKeyFile, cfg.KeyFile)
+	}
+}
+
+func TestResolveConfigFallsBackToRootWhenPermMarkerHasNoPermPair(t *testing.T) {
+	tmpDir := t.TempDir()
+	rootDir := filepath.Join(tmpDir, "root")
+	permDir := filepath.Join(tmpDir, "perm")
+	setTestTLSPaths(t, rootDir, permDir)
+	writeTestCertPair(t, rootCertFile, rootKeyFile)
+	writeTestFile(t, rootUsePermFile)
+
+	cfg := ResolveConfig()
+	if cfg.CertFile != rootCertFile {
+		t.Errorf("Expected root cert file %q, got %q", rootCertFile, cfg.CertFile)
+	}
+	if cfg.KeyFile != rootKeyFile {
+		t.Errorf("Expected root key file %q, got %q", rootKeyFile, cfg.KeyFile)
+	}
+}
+
+func TestResolveConfigFallsBackToPermWithoutRootPair(t *testing.T) {
+	tmpDir := t.TempDir()
+	rootDir := filepath.Join(tmpDir, "root")
+	permDir := filepath.Join(tmpDir, "perm")
+	setTestTLSPaths(t, rootDir, permDir)
+	writeTestCertPair(t, permCertFile, permKeyFile)
+
+	cfg := ResolveConfig()
+	if cfg.CertFile != permCertFile {
+		t.Errorf("Expected perm cert file %q, got %q", permCertFile, cfg.CertFile)
+	}
+	if cfg.KeyFile != permKeyFile {
+		t.Errorf("Expected perm key file %q, got %q", permKeyFile, cfg.KeyFile)
+	}
+}
+
 func TestCertificatesExist(t *testing.T) {
 	// Create temporary directory for test certificates
 	tmpDir, err := os.MkdirTemp("", "tls-test-*")
@@ -143,6 +211,46 @@ func TestCertificatesExist(t *testing.T) {
 	os.Remove(certPath)
 	if cfg.CertificatesExist() {
 		t.Error("Expected CertificatesExist to return false when cert is missing")
+	}
+}
+
+func setTestTLSPaths(t *testing.T, rootDir, permDir string) {
+	t.Helper()
+
+	origRootCertFile := rootCertFile
+	origRootKeyFile := rootKeyFile
+	origRootUsePermFile := rootUsePermFile
+	origPermCertFile := permCertFile
+	origPermKeyFile := permKeyFile
+
+	rootCertFile = filepath.Join(rootDir, "ssl", "gokrazy-web.pem")
+	rootKeyFile = filepath.Join(rootDir, "ssl", "gokrazy-web.key.pem")
+	rootUsePermFile = filepath.Join(rootDir, "ssl", "gokrazy-web.use-perm")
+	permCertFile = filepath.Join(permDir, "ssl", "gokrazy-web.pem")
+	permKeyFile = filepath.Join(permDir, "ssl", "gokrazy-web.key.pem")
+
+	t.Cleanup(func() {
+		rootCertFile = origRootCertFile
+		rootKeyFile = origRootKeyFile
+		rootUsePermFile = origRootUsePermFile
+		permCertFile = origPermCertFile
+		permKeyFile = origPermKeyFile
+	})
+}
+
+func writeTestCertPair(t *testing.T, certPath, keyPath string) {
+	t.Helper()
+	writeTestFile(t, certPath)
+	writeTestFile(t, keyPath)
+}
+
+func writeTestFile(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("Failed to create test directory: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("test"), 0644); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
 	}
 }
 

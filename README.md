@@ -87,9 +87,23 @@ Supporting packages:
 ### Prerequisites
 
 1. Install Go (1.21 or later)
-2. Install gok CLI tool:
+2. Install the forked gok CLI tool. The forked tools and runtime are required
+   for persistent self-signed TLS certificates:
    ```bash
-   go install github.com/gokrazy/tools/cmd/gok@main
+   git clone https://github.com/denysvitali/gokrazy-tools.git /tmp/gokrazy-tools
+   git -C /tmp/gokrazy-tools fetch --depth=1 origin 242f3106842c380a1c9a4a4473e3e3c7090f29f2
+   git -C /tmp/gokrazy-tools checkout --detach FETCH_HEAD
+
+   git clone https://github.com/denysvitali/gokrazy-internal.git /tmp/gokrazy-internal
+   git -C /tmp/gokrazy-internal fetch --depth=1 origin 516186dbfc01bdae7730e451d2b8a7c7a24e5452
+   git -C /tmp/gokrazy-internal checkout --detach FETCH_HEAD
+
+   go -C /tmp/gokrazy-tools mod edit -replace=github.com/gokrazy/internal=/tmp/gokrazy-internal
+   go -C /tmp/gokrazy-tools install ./cmd/gok
+
+   git clone https://github.com/denysvitali/gokrazy.git ../gokrazy
+   git -C ../gokrazy fetch --depth=1 origin cf5d4d8891039b441392ea3676f594e6d9588477
+   git -C ../gokrazy checkout --detach FETCH_HEAD
    ```
 
 ### Initial Setup
@@ -108,11 +122,12 @@ Supporting packages:
    The script will:
    - Create a new gokrazy instance in `~/gokrazy/<instance-name>`
    - Add all required packages
-   - Create `go.mod` with replace directive pointing to your local code
+   - Create `go.mod` with replace directives pointing to your local code and the Gokrazy runtime fork
    - Configure hostname and Tailscale (optional)
    - Set up WiFi (optional)
 
    **Note**: The key to making this work with a private repository is the `replace` directive in `~/gokrazy/<instance-name>/go.mod` that tells gokrazy to use your local code instead of fetching from GitHub.
+   The TLS certificate persistence fix also depends on a `replace github.com/gokrazy/gokrazy => <fork checkout>` directive. `./setup-gokrazy.sh` auto-detects a sibling `../gokrazy` checkout or uses `GOKRAZY_MODULE_REPLACE=/path/to/gokrazy`.
 
 3. Alternatively, manually configure the instance:
 
@@ -123,7 +138,8 @@ Supporting packages:
      "Update": {
        "HTTPPort": "80",
        "HTTPSPort": "443",
-       "UseTLS": "self-signed"
+       "UseTLS": "self-signed",
+       "TLSCertificateStorage": "perm-self-signed"
      },
      "Packages": [
        "github.com/gokrazy/fbstatus",
@@ -514,6 +530,7 @@ Required for `ota-release`:
    Use `-insecure` when connecting to a self-signed HTTPS gokrazy endpoint by IP address.
 
    The `replace` directive in `~/gokrazy/<instance-name>/go.mod` ensures your local changes are always used.
+   For local OTA image builds, `scripts/build-ota-image.sh` auto-detects a sibling `../gokrazy` checkout; otherwise set `GOKRAZY_MODULE_REPLACE=/path/to/gokrazy` so the image uses the runtime fork that honors persistent TLS certificates.
 
 ## Security Considerations
 

@@ -22,6 +22,8 @@ jobs:
     env:
       GOKRAZY_INSTANCE: photo-backup
       GOKRAZY_PARENT_DIR: ${{ github.workspace }}/gokrazy
+      GOKRAZY_REPOSITORY: denysvitali/gokrazy
+      GOKRAZY_REF: cf5d4d8891039b441392ea3676f594e6d9588477
       GOKRAZY_TOOLS_REPOSITORY: denysvitali/gokrazy-tools
       GOKRAZY_TOOLS_REF: 242f3106842c380a1c9a4a4473e3e3c7090f29f2
       GOKRAZY_INTERNAL_REPOSITORY: denysvitali/gokrazy-internal
@@ -80,6 +82,12 @@ jobs:
           go -C /tmp/gokrazy-tools mod edit -replace=github.com/gokrazy/internal=/tmp/gokrazy-internal
           go -C /tmp/gokrazy-tools install ./cmd/gok
 
+      - name: Checkout Gokrazy runtime fork
+        run: |
+          git clone --depth=1 "https://github.com/${GOKRAZY_REPOSITORY}.git" /tmp/gokrazy
+          git -C /tmp/gokrazy fetch --depth=1 origin "${GOKRAZY_REF}"
+          git -C /tmp/gokrazy checkout --detach FETCH_HEAD
+
       - name: Add Go bin to PATH
         run: |
           echo "PATH=$PATH:$(go env GOPATH)/bin" >> "$GITHUB_ENV"
@@ -126,6 +134,7 @@ jobs:
           GOKRAZY_IMAGE_MODE: full
           TARGET_STORAGE_BYTES: ${{ env.TARGET_STORAGE_BYTES }}
           HOSTAPD_BINARY: ${{ steps.hostapd.outputs.hostapd_binary }}
+          GOKRAZY_MODULE_REPLACE: /tmp/gokrazy
         run: |
           make ota
 
@@ -138,6 +147,7 @@ jobs:
           IMAGE_NAME: photo-backup-rpi4b-root.squashfs
           GOKRAZY_IMAGE_MODE: ota
           HOSTAPD_BINARY: ${{ steps.hostapd.outputs.hostapd_binary }}
+          GOKRAZY_MODULE_REPLACE: /tmp/gokrazy
         run: |
           make ota
 

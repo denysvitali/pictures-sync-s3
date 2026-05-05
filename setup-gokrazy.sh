@@ -13,7 +13,7 @@ echo ""
 # Check if gok is installed
 if ! command -v gok &> /dev/null; then
     echo "Error: gok command not found!"
-    echo "Please install it with: go install github.com/gokrazy/tools/cmd/gok@main"
+    echo "Please install the forked gok CLI with the commands in README.md"
     exit 1
 fi
 
@@ -34,6 +34,18 @@ HOSTAPD_BINARY=${HOSTAPD_BINARY:-$(command -v hostapd || true)}
 if [ -z "$HOSTAPD_BINARY" ] || [ ! -x "$HOSTAPD_BINARY" ]; then
     echo "Error: HOSTAPD_BINARY must point to an executable hostapd binary for the target architecture"
     exit 1
+fi
+
+GOKRAZY_MODULE_REPLACE=${GOKRAZY_MODULE_REPLACE:-}
+if [ -z "$GOKRAZY_MODULE_REPLACE" ] && [ -f "$SCRIPT_DIR/../gokrazy/go.mod" ]; then
+    GOKRAZY_MODULE_REPLACE="$SCRIPT_DIR/../gokrazy"
+fi
+if [ -n "$GOKRAZY_MODULE_REPLACE" ]; then
+    if [ ! -f "$GOKRAZY_MODULE_REPLACE/go.mod" ]; then
+        echo "Error: GOKRAZY_MODULE_REPLACE must point to a github.com/gokrazy/gokrazy checkout"
+        exit 1
+    fi
+    GOKRAZY_MODULE_REPLACE="$(cd "$GOKRAZY_MODULE_REPLACE" && pwd -P)"
 fi
 
 # Note: Remote name and path are now configured via web UI and persisted to /perm/pictures-sync/settings.json
@@ -64,6 +76,14 @@ replace github.com/denysvitali/pictures-sync-s3 => $ABSOLUTE_PROJECT_PATH
 EOF
 
 echo "go.mod created with replace directive pointing to: $ABSOLUTE_PROJECT_PATH"
+if [ -n "$GOKRAZY_MODULE_REPLACE" ]; then
+    cat >> "$INSTANCE_DIR/go.mod" <<EOF
+replace github.com/gokrazy/gokrazy => $GOKRAZY_MODULE_REPLACE
+EOF
+    echo "go.mod created with gokrazy runtime replace directive pointing to: $GOKRAZY_MODULE_REPLACE"
+else
+    echo "Warning: GOKRAZY_MODULE_REPLACE is not set; persistent TLS certificate support requires a gokrazy runtime fork with TLS storage markers"
+fi
 echo ""
 
 # Add public packages only (private packages will be added via config.json)

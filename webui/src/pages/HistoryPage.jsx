@@ -15,7 +15,7 @@ function describeError(err) {
   return msg
 }
 import { useDevice } from '../DeviceContext.jsx'
-import { getHistory } from '../api.js'
+import { getHistory, getStatus } from '../api.js'
 import { Card, CardHeader, CardTitle } from '../components/Card.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
 import { Button } from '../components/Button.jsx'
@@ -46,6 +46,23 @@ function formatDuration(seconds) {
   const s = totalSeconds % 60
   if (h > 0) return `${h}h ${m}m`
   return `${m}m ${s}s`
+}
+
+function entryStart(entry) {
+  return entry.start_time || entry.timestamp || null
+}
+
+function entryDuration(entry) {
+  if (entry.duration != null) return entry.duration
+  if (!entry.start_time || !entry.end_time) return null
+  const start = new Date(entry.start_time).getTime()
+  const end = new Date(entry.end_time).getTime()
+  if (isNaN(start) || isNaN(end) || end < start) return null
+  return (end - start) / 1000
+}
+
+function entryFileCount(entry) {
+  return entry.files_synced ?? entry.files_total ?? entry.photos_synced ?? null
 }
 
 function statusConfig(status) {
@@ -89,7 +106,7 @@ function HistoryEntry({ entry }) {
           </div>
           <div className="min-w-0">
             <div className="text-sm font-medium text-surface-100 truncate">
-              {formatTimestamp(entry.timestamp)}
+              {formatTimestamp(entryStart(entry))}
             </div>
             {entry.card_id && (
               <div className="text-xs text-surface-500 truncate">
@@ -102,14 +119,14 @@ function HistoryEntry({ entry }) {
         <div className="flex items-center gap-6 shrink-0">
           <div className="text-right min-w-[60px]">
             <div className="text-sm font-medium text-surface-200">
-              {entry.photos_synced != null ? entry.photos_synced.toLocaleString() : '--'}
+              {entryFileCount(entry) != null ? entryFileCount(entry).toLocaleString() : '--'}
             </div>
-            <div className="text-[10px] text-surface-500 uppercase tracking-wider">photos</div>
+            <div className="text-[10px] text-surface-500 uppercase tracking-wider">files</div>
           </div>
 
           <div className="text-right min-w-[50px]">
             <div className="text-sm text-surface-300">
-              {formatDuration(entry.duration)}
+              {formatDuration(entryDuration(entry))}
             </div>
             <div className="text-[10px] text-surface-500 uppercase tracking-wider">time</div>
           </div>
@@ -136,7 +153,7 @@ function HistoryEntry({ entry }) {
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2">
               <span className="text-sm font-medium text-surface-100 truncate">
-                {formatTimestamp(entry.timestamp)}
+                {formatTimestamp(entryStart(entry))}
               </span>
               <StatusBadge variant={cfg.variant} pulse={cfg.pulse}>
                 {cfg.label}
@@ -144,10 +161,10 @@ function HistoryEntry({ entry }) {
             </div>
             <div className="flex items-center gap-4 mt-1.5 text-xs text-surface-400">
               <span>
-                {entry.photos_synced != null ? `${entry.photos_synced.toLocaleString()} photos` : '-- photos'}
+                {entryFileCount(entry) != null ? `${entryFileCount(entry).toLocaleString()} files` : '-- files'}
               </span>
               <span className="text-surface-600">|</span>
-              <span>{formatDuration(entry.duration)}</span>
+              <span>{formatDuration(entryDuration(entry))}</span>
               {entry.card_id && (
                 <>
                   <span className="text-surface-600">|</span>
@@ -198,12 +215,21 @@ export default function HistoryPage() {
     else setLoading(true)
 
     try {
-      const data = await getHistory(deviceUrl)
-      const entries = Array.isArray(data) ? data : []
+      const [historyData, statusData] = await Promise.all([
+        getHistory(deviceUrl),
+        getStatus(deviceUrl),
+      ])
+      const entries = Array.isArray(historyData) ? [...historyData] : []
+      if (statusData?.current_sync) {
+        entries.unshift({
+          ...statusData.current_sync,
+          status: statusData.current_sync.status || statusData.status || 'syncing',
+        })
+      }
       // Sort newest first
       entries.sort((a, b) => {
-        const ta = new Date(a.timestamp || 0).getTime()
-        const tb = new Date(b.timestamp || 0).getTime()
+        const ta = new Date(entryStart(a) || 0).getTime()
+        const tb = new Date(entryStart(b) || 0).getTime()
         return tb - ta
       })
       setHistory(entries)
@@ -232,12 +258,12 @@ export default function HistoryPage() {
       const q = search.trim().toLowerCase()
       result = result.filter((e) => {
         const searchable = [
-          formatTimestamp(e.timestamp),
+          formatTimestamp(entryStart(e)),
           e.status,
           e.card_id,
           e.remote,
           e.error,
-          String(e.photos_synced),
+          String(entryFileCount(e)),
         ].filter(Boolean).join(' ').toLowerCase()
         return searchable.includes(q)
       })

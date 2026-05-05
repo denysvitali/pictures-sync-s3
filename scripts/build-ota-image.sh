@@ -4,6 +4,7 @@ set -euo pipefail
 
 GOKRAZY_INSTANCE="${GOKRAZY_INSTANCE:-photo-backup}"
 GOKRAZY_PARENT_DIR="${GOKRAZY_PARENT_DIR:-$HOME/.gokrazy/$GOKRAZY_INSTANCE}"
+GOKRAZY_MODULE_REPLACE="${GOKRAZY_MODULE_REPLACE:-}"
 IMAGE_DIR="${IMAGE_DIR:-$PWD/ota}"
 IMAGE_NAME="${IMAGE_NAME:-photo-backup-ota.squashfs}"
 GOKRAZY_IMAGE_MODE="${GOKRAZY_IMAGE_MODE:-ota}"
@@ -11,6 +12,14 @@ TARGET_STORAGE_BYTES="${TARGET_STORAGE_BYTES:-}"
 IMAGE_PATH="${IMAGE_DIR}/${IMAGE_NAME}"
 HOSTAPD_BINARY="${HOSTAPD_BINARY:-}"
 BUILD_DATE="${BUILD_DATE:-$(date -u '+%Y-%m-%dT%H:%M:%SZ')}"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+INSTANCE_DIR="$GOKRAZY_PARENT_DIR/$GOKRAZY_INSTANCE"
+
+export GOKRAZY_PARENT_DIR
+
+if [ -z "$GOKRAZY_MODULE_REPLACE" ] && [ -f "$REPO_DIR/../gokrazy/go.mod" ]; then
+  GOKRAZY_MODULE_REPLACE="$REPO_DIR/../gokrazy"
+fi
 
 if [ -n "${VERSION:-}" ]; then
   BUILD_VERSION="$VERSION"
@@ -34,14 +43,37 @@ if [ -z "$HOSTAPD_BINARY" ] || [ ! -x "$HOSTAPD_BINARY" ]; then
   exit 1
 fi
 
+if [ -n "$GOKRAZY_MODULE_REPLACE" ]; then
+  if [ ! -f "$GOKRAZY_MODULE_REPLACE/go.mod" ]; then
+    echo "Error: GOKRAZY_MODULE_REPLACE must point to a github.com/gokrazy/gokrazy checkout"
+    exit 1
+  fi
+  GOKRAZY_MODULE_REPLACE="$(cd "$GOKRAZY_MODULE_REPLACE" && pwd -P)"
+fi
+
 mkdir -p "$GOKRAZY_PARENT_DIR"
 mkdir -p "$IMAGE_DIR"
 
-if [ -d "$GOKRAZY_PARENT_DIR/$GOKRAZY_INSTANCE" ]; then
-  rm -rf "$GOKRAZY_PARENT_DIR/$GOKRAZY_INSTANCE"
+if [ -d "$INSTANCE_DIR" ]; then
+  rm -rf "$INSTANCE_DIR"
 fi
 
 gok -i "$GOKRAZY_INSTANCE" new
+
+cat > "$INSTANCE_DIR/go.mod" <<EOF
+module gokrazy-instance
+
+go 1.26
+
+replace github.com/denysvitali/pictures-sync-s3 => $REPO_DIR
+EOF
+
+if [ -n "$GOKRAZY_MODULE_REPLACE" ]; then
+  cat >> "$INSTANCE_DIR/go.mod" <<EOF
+replace github.com/gokrazy/gokrazy => $GOKRAZY_MODULE_REPLACE
+EOF
+fi
+
 gok -i "$GOKRAZY_INSTANCE" add github.com/gokrazy/fbstatus
 gok -i "$GOKRAZY_INSTANCE" add github.com/gokrazy/mkfs
 gok -i "$GOKRAZY_INSTANCE" add github.com/gokrazy/wifi
@@ -54,7 +86,7 @@ gok -i "$GOKRAZY_INSTANCE" add ./cmd/pictures-sync
 gok -i "$GOKRAZY_INSTANCE" add ./cmd/webui
 gok -i "$GOKRAZY_INSTANCE" add ./cmd/provision-ap
 
-cat > "$GOKRAZY_PARENT_DIR/$GOKRAZY_INSTANCE/config.json" <<EOF
+cat > "$INSTANCE_DIR/config.json" <<EOF
 {
   "Hostname": "$GOKRAZY_INSTANCE",
   "Update": {

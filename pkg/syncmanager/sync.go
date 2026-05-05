@@ -55,6 +55,9 @@ func (m *Manager) Sync(sourcePath, cardID string, totalFiles int, totalBytes int
 
 	// Create context with cancel
 	ctx, cancel := context.WithCancel(context.Background())
+	ctx = accounting.WithStatsGroup(ctx, fmt.Sprintf("pictures-sync-%d", time.Now().UnixNano()))
+	stats := accounting.Stats(ctx)
+
 	m.mu.Lock()
 	m.cancelFunc = cancel
 	m.mu.Unlock()
@@ -77,11 +80,7 @@ func (m *Manager) Sync(sourcePath, cardID string, totalFiles int, totalBytes int
 	ci.StatsOneLine = true
 	ci.Progress = true
 	ci.Transfers = m.transfers // Upload multiple files in parallel for better performance
-	ci.Checkers = m.checkers    // Use multiple checkers to compare files in parallel
-
-	// Create context-specific accounting stats (required for proper check/transfer tracking)
-	// NewStats creates a new StatsInfo and embeds it in the context
-	stats := accounting.NewStats(ctx)
+	ci.Checkers = m.checkers   // Use multiple checkers to compare files in parallel
 
 	// Start progress monitoring
 	done := make(chan struct{})

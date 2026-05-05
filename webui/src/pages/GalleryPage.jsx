@@ -16,7 +16,7 @@ function describeError(err) {
 }
 import { useDevice } from '../DeviceContext.jsx'
 import { useToast } from '../components/Toast.jsx'
-import { getFilesPaginated, getFilePublicLink, getThumbnailUrl, getSDCardFiles, getSDCardPreviewUrl } from '../api.js'
+import { getFilesPaginated, getFilePublicLink, getThumbnailUrl, getSDCardFiles, getSDCardPreviewUrl, getStatus } from '../api.js'
 import { Card } from '../components/Card.jsx'
 import { Button } from '../components/Button.jsx'
 import { Icon } from '../components/Icons.jsx'
@@ -65,7 +65,8 @@ export default function GalleryPage() {
   const toast = useToast()
 
   const [source, setSource] = useState('cloud')
-  const [currentPath, setCurrentPath] = useState('')
+  const [cloudPath, setCloudPath] = useState('')
+  const [sdcardPath, setSdcardPath] = useState('')
   const [files, setFiles] = useState([])
   const [allSDCardFiles, setAllSDCardFiles] = useState([])
   const [total, setTotal] = useState(0)
@@ -73,15 +74,42 @@ export default function GalleryPage() {
   const [loading, setLoading] = useState(true)
   const [imagePreview, setImagePreview] = useState(null)
   const [showThumbnails, setShowThumbnails] = useState(false)
+  const [deviceStatus, setDeviceStatus] = useState(null)
 
+  const currentPath = source === 'sdcard' ? sdcardPath : cloudPath
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total])
   const segments = useMemo(() => buildPathSegments(currentPath), [currentPath])
+  const thumbnailsAllowed = showThumbnails && source === 'sdcard' && deviceStatus?.status !== 'syncing'
+
+  const setSourcePath = useCallback((nextPath) => {
+    if (source === 'sdcard') setSdcardPath(nextPath)
+    else setCloudPath(nextPath)
+  }, [source])
+
+  const fetchDeviceStatus = useCallback(async () => {
+    if (!deviceUrl) return null
+    try {
+      const status = await getStatus(deviceUrl)
+      setDeviceStatus(status)
+      return status
+    } catch {
+      setDeviceStatus(null)
+      return null
+    }
+  }, [deviceUrl])
 
   const fetchFiles = useCallback(async () => {
     if (!deviceUrl) return
     setLoading(true)
     try {
+      const status = await fetchDeviceStatus()
       if (source === 'sdcard') {
+        if (status && !status.sdcard_mounted) {
+          setAllSDCardFiles([])
+          setFiles([])
+          setTotal(0)
+          return
+        }
         const data = await getSDCardFiles(deviceUrl, currentPath || 'DCIM')
         const fileArr = Array.isArray(data?.files) ? data.files : []
         fileArr.sort((a, b) => {
@@ -115,21 +143,20 @@ export default function GalleryPage() {
     } finally {
       setLoading(false)
     }
-  }, [deviceUrl, currentPath, page, source])
+  }, [deviceUrl, currentPath, page, source, fetchDeviceStatus])
 
   useEffect(() => {
     fetchFiles()
   }, [fetchFiles])
 
   const navigateTo = useCallback((path) => {
-    setCurrentPath(path)
+    setSourcePath(path)
     setPage(1)
     setFiles([])
-  }, [])
+  }, [setSourcePath])
 
   const handleSourceChange = useCallback((newSource) => {
     setSource(newSource)
-    setCurrentPath('')
     setPage(1)
     setFiles([])
   }, [])
@@ -260,18 +287,23 @@ export default function GalleryPage() {
           </button>
         </div>
         {source === 'sdcard' && (
-          <button
-            onClick={() => setShowThumbnails((enabled) => !enabled)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-              showThumbnails
-                ? 'bg-brand-600 text-white shadow'
-                : 'bg-surface-800 text-surface-300 hover:text-surface-100'
-            }`}
-            aria-pressed={showThumbnails}
-          >
-            <Icon name="image" className="w-4 h-4" />
-            Thumbnails
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowThumbnails((enabled) => !enabled)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                showThumbnails
+                  ? 'bg-brand-600 text-white shadow'
+                  : 'bg-surface-800 text-surface-300 hover:text-surface-100'
+              }`}
+              aria-pressed={showThumbnails}
+            >
+              <Icon name="image" className="w-4 h-4" />
+              Thumbnails
+            </button>
+            {showThumbnails && deviceStatus?.status === 'syncing' && (
+              <span className="text-xs text-surface-500">Paused during sync</span>
+            )}
+          </div>
         )}
       </div>
 
@@ -351,7 +383,7 @@ export default function GalleryPage() {
                 onImageClick={handleImageClick}
                 onImagePreview={handleFilePreview}
                 onFileDownload={handleFileDownload}
-                showThumbnail={showThumbnails && source === 'sdcard'}
+                showThumbnail={thumbnailsAllowed}
               />
             ))}
           </div>
