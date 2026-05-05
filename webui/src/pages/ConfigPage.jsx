@@ -1,4 +1,25 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useDevice } from '../DeviceContext.jsx'
+import { useToast } from '../components/Toast.jsx'
+import { Card, CardHeader, CardTitle } from '../components/Card.jsx'
+import { StatusBadge } from '../components/StatusBadge.jsx'
+import { Button } from '../components/Button.jsx'
+import { Icon } from '../components/Icons.jsx'
+import { LoadingSpinner } from '../components/LoadingSpinner.jsx'
+import {
+  getConfig,
+  saveConfig,
+  testConfig,
+  getB2Regions,
+  saveB2Config,
+  getSettings,
+  saveSettings,
+  changeGokrazyPassword,
+  getBreakglassAuthorizedKeys,
+  saveBreakglassAuthorizedKeys,
+  getOtaStatus,
+  installOta,
+} from '../api.js'
 
 function describeError(err) {
   if (!err) return 'Unknown error'
@@ -14,26 +35,6 @@ function describeError(err) {
   }
   return msg
 }
-import { useDevice } from '../DeviceContext.jsx'
-import { useToast } from '../components/Toast.jsx'
-import { Card, CardHeader, CardTitle } from '../components/Card.jsx'
-import { StatusBadge } from '../components/StatusBadge.jsx'
-import { Button } from '../components/Button.jsx'
-import { Icon } from '../components/Icons.jsx'
-import { LoadingSpinner } from '../components/LoadingSpinner.jsx'
-import {
-  getConfig,
-  testConfig,
-  getB2Regions,
-  saveB2Config,
-  getSettings,
-  saveSettings,
-  changeGokrazyPassword,
-  getBreakglassAuthorizedKeys,
-  saveBreakglassAuthorizedKeys,
-  getOtaStatus,
-  installOta,
-} from '../api.js'
 
 // ---------------------------------------------------------------------------
 // Accordion wrapper
@@ -177,6 +178,9 @@ function RemoteStorageSection() {
   const { deviceUrl } = useDevice()
   const toast = useToast()
   const [config, setConfig] = useState(null)
+  const [editing, setEditing] = useState(false)
+  const [draftConfig, setDraftConfig] = useState('')
+  const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
   const [loading, setLoading] = useState(true)
 
@@ -215,6 +219,26 @@ function RemoteStorageSection() {
     }
   }, [deviceUrl, toast])
 
+  const handleSaveConfig = useCallback(async () => {
+    if (!draftConfig.trim()) {
+      toast.error('rclone.conf content is required')
+      return
+    }
+
+    setSaving(true)
+    try {
+      await saveConfig(deviceUrl, draftConfig)
+      toast.success('Remote config saved')
+      setEditing(false)
+      setDraftConfig('')
+      window.dispatchEvent(new Event('rclone-config-changed'))
+    } catch (err) {
+      toast.error(describeError(err) || 'Failed to save remote config')
+    } finally {
+      setSaving(false)
+    }
+  }, [deviceUrl, draftConfig, toast])
+
   return (
     <AccordionSection title="Remote Storage" icon="cloud" defaultOpen badge={
       loading ? null : (
@@ -229,7 +253,7 @@ function RemoteStorageSection() {
         </div>
       ) : (
         <div className="space-y-3">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-3">
             <div>
               <p className="text-sm text-surface-200">
                 {config?.configured ? 'Remote backend is configured' : 'No remote backend configured'}
@@ -244,21 +268,51 @@ function RemoteStorageSection() {
                 <p className="text-xs text-surface-400 mt-1">Path: {config.remote_path}</p>
               )}
             </div>
-            <Button
-              variant="secondary"
-              size="sm"
-              loading={testing}
-              onClick={handleTest}
-              disabled={!config?.configured}
-            >
-              <Icon name="arrow-path" className="w-4 h-4" />
-              Test Connection
-            </Button>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setEditing((v) => !v)}
+                disabled={saving}
+              >
+                <Icon name="pencil" className="w-4 h-4" />
+                {editing ? 'Cancel' : 'Edit Config'}
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={testing}
+                onClick={handleTest}
+                disabled={!config?.configured || saving}
+              >
+                <Icon name="arrow-path" className="w-4 h-4" />
+                Test Connection
+              </Button>
+            </div>
           </div>
           {config?.config_redacted && (
             <pre className="max-h-56 overflow-auto rounded-lg border border-surface-700 bg-surface-900 p-3 text-xs text-surface-200 whitespace-pre-wrap break-words">
               {config.config_redacted}
             </pre>
+          )}
+          {editing && (
+            <div className="rounded-lg border border-surface-700 bg-surface-900/60 p-3">
+              <Field label="rclone.conf" hint="Paste the complete config. Redacted secrets cannot be saved.">
+                <textarea
+                  value={draftConfig}
+                  onChange={(e) => setDraftConfig(e.target.value)}
+                  placeholder={'[b2]\ntype = b2\naccount = <application_key_id>\nkey = <application_key>'}
+                  disabled={saving}
+                  rows={8}
+                  className={`${inputClass} resize-y font-mono text-xs`}
+                />
+              </Field>
+              <div className="flex justify-end pt-1">
+                <Button variant="primary" size="sm" loading={saving} onClick={handleSaveConfig}>
+                  Save Config
+                </Button>
+              </div>
+            </div>
           )}
         </div>
       )}
@@ -298,12 +352,6 @@ function B2SetupSection() {
     if (!region) { toast.error('Region is required'); return }
 
     const bucketName = bucket.trim()
-    const selectedRegion = regions.find((r) => {
-      const value = typeof r === 'string' ? r : r.id || r.name || r.value
-      return value === region
-    })
-    const endpoint = typeof selectedRegion === 'object' ? selectedRegion.endpoint : undefined
-
     setSaving(true)
     try {
       const res = await saveB2Config(deviceUrl, {
@@ -312,7 +360,6 @@ function B2SetupSection() {
         application_key: appKey.trim(),
         remote_name: 'b2',
         remote_path: `${bucketName}/photos`,
-        endpoint,
         region,
       })
       if (res?.success === false) {

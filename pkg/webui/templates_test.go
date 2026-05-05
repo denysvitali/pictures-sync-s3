@@ -19,7 +19,7 @@ func TestHandleSPAServesEmbeddedIndex(t *testing.T) {
 	if contentType := rec.Header().Get("Content-Type"); !strings.Contains(contentType, "text/html") {
 		t.Fatalf("Content-Type = %q, want text/html", contentType)
 	}
-	if body := rec.Body.String(); strings.Contains(body, "SPA index not found") || !strings.Contains(body, "<!doctype html>") {
+	if body := rec.Body.String(); strings.Contains(body, "SPA index not found") || !strings.Contains(strings.ToLower(body), "<!doctype html>") {
 		t.Fatalf("HandleSPA body does not look like embedded index.html: %q", body)
 	}
 }

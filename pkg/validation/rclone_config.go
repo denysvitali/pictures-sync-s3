@@ -150,6 +150,10 @@ func ValidateRcloneConfig(data []byte) (*ValidationResult, error) {
 		if err := validateRemoteFields(section); err != nil {
 			result.Errors = append(result.Errors, fmt.Errorf("section [%s]: %w", section.Name, err))
 		} else {
+			if err := validateBackendSpecificFields(section); err != nil {
+				result.Errors = append(result.Errors, fmt.Errorf("section [%s]: %w", section.Name, err))
+				continue
+			}
 			validRemoteCount++
 			result.Remotes = append(result.Remotes, section.Name)
 		}
@@ -270,6 +274,17 @@ func validateRemoteFields(section Section) error {
 	return nil
 }
 
+func validateBackendSpecificFields(section Section) error {
+	remoteType := strings.ToLower(strings.TrimSpace(section.Fields["type"]))
+	endpoint := strings.ToLower(strings.TrimSpace(section.Fields["endpoint"]))
+
+	if remoteType == "b2" && strings.Contains(endpoint, "://s3.") && strings.Contains(endpoint, ".backblazeb2.com") {
+		return fmt.Errorf("native B2 remotes must not use Backblaze S3 endpoints; remove 'endpoint' or use type = s3")
+	}
+
+	return nil
+}
+
 // checkSuspiciousContent scans for malicious patterns
 func checkSuspiciousContent(section Section) []string {
 	warnings := make([]string, 0)
@@ -324,50 +339,50 @@ func isValidKeyName(name string) bool {
 func isValidRemoteType(remoteType string) bool {
 	validTypes := map[string]bool{
 		// Cloud storage providers
-		"s3":                     true,
-		"b2":                     true,
-		"gcs":                    true,
-		"google cloud storage":   true, // Alternative name for GCS
-		"azureblob":              true,
-		"swift":                  true,
-		"drive":                  true,
-		"onedrive":               true,
-		"dropbox":                true,
-		"box":                    true,
-		"googlephotos":           true,
-		"google photos":          true, // Alternative name
-		"mega":                   true,
-		"pcloud":                 true,
-		"koofr":                  true,
-		"putio":                  true,
-		"premiumizeme":           true,
-		"sugarsync":              true,
-		"jottacloud":             true,
-		"seafile":                true,
-		"storj":                  true,
-		"fichier":                true,
-		"qingstor":               true,
-		"internetarchive":        true,
+		"s3":                   true,
+		"b2":                   true,
+		"gcs":                  true,
+		"google cloud storage": true, // Alternative name for GCS
+		"azureblob":            true,
+		"swift":                true,
+		"drive":                true,
+		"onedrive":             true,
+		"dropbox":              true,
+		"box":                  true,
+		"googlephotos":         true,
+		"google photos":        true, // Alternative name
+		"mega":                 true,
+		"pcloud":               true,
+		"koofr":                true,
+		"putio":                true,
+		"premiumizeme":         true,
+		"sugarsync":            true,
+		"jottacloud":           true,
+		"seafile":              true,
+		"storj":                true,
+		"fichier":              true,
+		"qingstor":             true,
+		"internetarchive":      true,
 
 		// Network/local storage
-		"sftp":                   true,
-		"ftp":                    true,
-		"ftps":                   true,
-		"webdav":                 true,
-		"http":                   true,
+		"sftp":   true,
+		"ftp":    true,
+		"ftps":   true,
+		"webdav": true,
+		"http":   true,
 
 		// Virtual/special
-		"crypt":                  true,
-		"compress":               true,
-		"chunker":                true,
-		"union":                  true,
-		"cache":                  true,
-		"combine":                true,
-		"alias":                  true,
+		"crypt":    true,
+		"compress": true,
+		"chunker":  true,
+		"union":    true,
+		"cache":    true,
+		"combine":  true,
+		"alias":    true,
 
 		// Enterprise
-		"hdfs":                   true,
-		"smb":                    true,
+		"hdfs": true,
+		"smb":  true,
 	}
 
 	return validTypes[strings.ToLower(remoteType)]

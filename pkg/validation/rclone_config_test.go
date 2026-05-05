@@ -255,7 +255,8 @@ endpoint = https://s3.amazonaws.com
 		{
 			name: "legitimate Backblaze URL",
 			config: `[b2backup]
-type = b2
+type = s3
+provider = Other
 endpoint = https://s3.us-west-002.backblazeb2.com
 `,
 			expectWarnings: false,
@@ -514,6 +515,7 @@ func TestValidateRcloneConfig_RealWorldConfigs(t *testing.T) {
 		name    string
 		config  string
 		wantErr bool
+		errMsg  string
 	}{
 		{
 			name: "AWS S3 with all standard fields",
@@ -542,6 +544,17 @@ upload_cutoff = 200M
 chunk_size = 96M
 `,
 			wantErr: false,
+		},
+		{
+			name: "Backblaze B2 native config rejects S3 endpoint",
+			config: `[b2]
+type = b2
+account = 0123456789abcdef0123456789abcdef01234567
+key = K001abcdefghijklmnopqrstuvwxyz123456789AB
+endpoint = https://s3.eu-central-003.backblazeb2.com
+`,
+			wantErr: true,
+			errMsg:  "native B2 remotes must not use Backblaze S3 endpoints",
 		},
 		{
 			name: "MinIO S3-compatible",
@@ -587,6 +600,12 @@ token = {"access_token":"ya29.abc123","token_type":"Bearer","refresh_token":"1//
 			if tt.wantErr {
 				if err == nil && (result == nil || result.Valid) {
 					t.Error("expected error but got none")
+				}
+				if tt.errMsg != "" && result != nil {
+					got := fmt.Sprint(result.Errors)
+					if !strings.Contains(got, tt.errMsg) {
+						t.Fatalf("expected error containing %q, got %v", tt.errMsg, result.Errors)
+					}
 				}
 			} else {
 				if err != nil {

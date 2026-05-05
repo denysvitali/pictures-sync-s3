@@ -29,6 +29,35 @@ func DefaultConfig() *Config {
 	}
 }
 
+// ResolveConfig returns a TLS config pointing at the first available
+// certificate pair. It prefers the legacy /etc/ssl location and
+// falls back to /perm/ssl for persistent storage deployments.
+func ResolveConfig() *Config {
+	cfg := DefaultConfig()
+	candidates := []Config{
+		{
+			CertFile:           "/etc/ssl/gokrazy-web.pem",
+			KeyFile:            "/etc/ssl/gokrazy-web.key.pem",
+			InsecureSkipVerify: cfg.InsecureSkipVerify,
+			MinVersion:         cfg.MinVersion,
+		},
+		{
+			CertFile:           "/perm/ssl/gokrazy-web.pem",
+			KeyFile:            "/perm/ssl/gokrazy-web.key.pem",
+			InsecureSkipVerify: cfg.InsecureSkipVerify,
+			MinVersion:         cfg.MinVersion,
+		},
+	}
+
+	for _, candidate := range candidates {
+		c := candidate
+		if c.CertificatesExist() {
+			return &c
+		}
+	}
+	return cfg
+}
+
 // NewTLSConfig creates a tls.Config from the provided Config
 // For internal/development deployments with self-signed certificates,
 // this configures TLS to work properly with all clients including Tailscale
@@ -87,7 +116,7 @@ func (c *Config) CertificatesExist() bool {
 // LoadOrDefault attempts to load certificates and returns whether TLS should be used
 // Returns (tlsConfig, useTLS, error)
 func LoadOrDefault() (*tls.Config, bool, error) {
-	cfg := DefaultConfig()
+	cfg := ResolveConfig()
 
 	// Check if certificates exist
 	if !cfg.CertificatesExist() {

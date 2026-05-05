@@ -115,6 +115,13 @@ export const getSDCardFiles = (d, path = 'DCIM') =>
 export const getSDCardPreviewUrl = (d, filePath) =>
   `${normalizeBaseUrl(d)}/api/sdcard/preview?path=${encodeURIComponent(filePath || '')}`
 export const getConfig = (d) => apiRequest('/api/config', { deviceUrl: d })
+export const saveConfig = (d, configText) =>
+  apiRequest('/api/config', {
+    deviceUrl: d,
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: configText
+  })
 export const getBreakglassAuthorizedKeys = (d) =>
   apiRequest('/api/breakglass/authorized-keys', { deviceUrl: d })
 export const saveBreakglassAuthorizedKeys = (d, authorizedKeys) =>

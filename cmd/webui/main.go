@@ -294,8 +294,8 @@ func main() {
 		log.Println("TLS configuration: Self-signed certificates accepted for internal use")
 		log.Println("Note: This configuration is secure for internal networks (Tailscale, local LAN)")
 
-		// Get cert and key paths from default config
-		cfg := tlsconfig.DefaultConfig()
+		// Get cert and key paths from resolved config
+		cfg := tlsconfig.ResolveConfig()
 		if err := server.ListenAndServeTLS(cfg.CertFile, cfg.KeyFile); err != nil {
 			log.Fatalf("Failed to start HTTPS server: %v", err)
 		}
