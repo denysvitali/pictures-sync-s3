@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"context"
 	"log"
 	"net/http"
+	"time"
 )
 
 // HandleStatus returns current system status
@@ -12,12 +14,16 @@ func (ctx *Context) HandleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Reload state from disk to get latest updates from pictures-sync service
-	if err := ctx.StateMgr.Reload(); err != nil {
-		log.Printf("Failed to reload state: %v", err)
+	requestCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	status, err := ctx.daemonClient().RequestStatus(requestCtx)
+	if err != nil {
+		log.Printf("Failed to get daemon status: %v", err)
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
 	}
 
-	status := ctx.StateMgr.GetState()
 	JSONResponse(w, status)
 }
 
@@ -28,6 +34,15 @@ func (ctx *Context) HandleHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	history := ctx.StateMgr.GetHistory()
+	requestCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	history, err := ctx.daemonClient().RequestHistory(requestCtx)
+	if err != nil {
+		log.Printf("Failed to get daemon history: %v", err)
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+
 	JSONResponse(w, history)
 }

@@ -26,6 +26,7 @@ func BenchmarkHandleStatusLoad(b *testing.B) {
 
 	ctx := &Context{
 		StateMgr: stateMgr,
+		Daemon:   &mockDaemonClient{stateMgr: stateMgr},
 	}
 
 	b.ResetTimer()
@@ -51,6 +52,7 @@ func BenchmarkHandleStatusParallel(b *testing.B) {
 
 	ctx := &Context{
 		StateMgr: stateMgr,
+		Daemon:   &mockDaemonClient{stateMgr: stateMgr},
 	}
 
 	b.ResetTimer()
@@ -89,6 +91,7 @@ func BenchmarkHandleHistory(b *testing.B) {
 
 	ctx := &Context{
 		StateMgr: stateMgr,
+		Daemon:   &mockDaemonClient{stateMgr: stateMgr},
 	}
 
 	b.ResetTimer()
@@ -125,6 +128,7 @@ func BenchmarkHandleHistoryLarge(b *testing.B) {
 
 	ctx := &Context{
 		StateMgr: stateMgr,
+		Daemon:   &mockDaemonClient{stateMgr: stateMgr},
 	}
 
 	b.ResetTimer()
@@ -213,6 +217,7 @@ func BenchmarkConcurrentEndpoints(b *testing.B) {
 
 	ctx := &Context{
 		StateMgr: stateMgr,
+		Daemon:   &mockDaemonClient{stateMgr: stateMgr},
 	}
 
 	b.ResetTimer()
@@ -264,6 +269,7 @@ func LoadTestStatus(t *testing.T, concurrency, requests int) {
 
 	ctx := &Context{
 		StateMgr: stateMgr,
+		Daemon:   &mockDaemonClient{stateMgr: stateMgr},
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(ctx.HandleStatus))
@@ -355,6 +361,7 @@ func BenchmarkEndToEndRequest(b *testing.B) {
 
 	ctx := &Context{
 		StateMgr: stateMgr,
+		Daemon:   &mockDaemonClient{stateMgr: stateMgr},
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(ctx.HandleStatus))
@@ -385,6 +392,7 @@ func BenchmarkResponseParsing(b *testing.B) {
 
 	ctx := &Context{
 		StateMgr: stateMgr,
+		Daemon:   &mockDaemonClient{stateMgr: stateMgr},
 	}
 
 	// Get a sample response
@@ -413,6 +421,7 @@ func BenchmarkMethodValidation(b *testing.B) {
 
 	ctx := &Context{
 		StateMgr: stateMgr,
+		Daemon:   &mockDaemonClient{stateMgr: stateMgr},
 	}
 
 	b.Run("valid_method", func(b *testing.B) {
@@ -446,6 +455,7 @@ func BenchmarkStateReload(b *testing.B) {
 
 	ctx := &Context{
 		StateMgr: stateMgr,
+		Daemon:   &mockDaemonClient{stateMgr: stateMgr},
 	}
 
 	// Simulate state updates happening in background
@@ -494,6 +504,7 @@ func TestStressEndpoints(t *testing.T) {
 
 	ctx := &Context{
 		StateMgr: stateMgr,
+		Daemon:   &mockDaemonClient{stateMgr: stateMgr},
 	}
 
 	const (
@@ -600,7 +611,7 @@ func BenchmarkSettingsOperations(b *testing.B) {
 		}
 	})
 
-b.Run("get_remote", func(b *testing.B) {
+	b.Run("get_remote", func(b *testing.B) {
 		s, err := settings.LoadFrom(tmpDir + "/settings.json")
 		if err != nil {
 			b.Fatal(err)
@@ -637,6 +648,7 @@ func TestTimeoutBehavior(t *testing.T) {
 
 	ctx := &Context{
 		StateMgr: stateMgr,
+		Daemon:   &mockDaemonClient{stateMgr: stateMgr},
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(ctx.HandleStatus))

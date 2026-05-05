@@ -195,6 +195,7 @@ func main() {
 	ctx := &handlers.Context{
 		StateMgr:      stateMgr,
 		SyncMgr:       syncMgr,
+		Daemon:        handlers.DaemonControlClient{},
 		WiFiMgr:       wifiMgr,
 		AppSettings:   appSettings,
 		SSRFValidator: ssrfValidator,

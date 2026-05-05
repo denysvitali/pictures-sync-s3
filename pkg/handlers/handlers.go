@@ -9,7 +9,10 @@ import (
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/auth"
 	"github.com/denysvitali/pictures-sync-s3/pkg/captiveportal"
+	"github.com/denysvitali/pictures-sync-s3/pkg/daemoncontrol"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ota"
+	"github.com/denysvitali/pictures-sync-s3/pkg/sdcardbrowser"
+	"github.com/denysvitali/pictures-sync-s3/pkg/sdmonitor"
 	"github.com/denysvitali/pictures-sync-s3/pkg/settings"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ssrf"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
@@ -39,6 +42,16 @@ type ManualSyncRequester interface {
 	RequestCancelSync(context.Context) error
 }
 
+type DaemonClient interface {
+	ManualSyncRequester
+	RequestStatus(context.Context) (state.CurrentState, error)
+	RequestHistory(context.Context) ([]state.SyncRecord, error)
+	RequestDevices(context.Context) ([]sdmonitor.DeviceInfo, error)
+	RequestSDCardFiles(context.Context, string) (*sdcardbrowser.FileList, error)
+	RequestSDCardPreview(context.Context, string) (*sdcardbrowser.Preview, error)
+	RequestSDCardThumbnail(context.Context, string) (*sdcardbrowser.Preview, error)
+}
+
 type DaemonControlFunc struct {
 	ManualSync func(context.Context, string) error
 	CancelSync func(context.Context) error
@@ -52,11 +65,49 @@ func (f DaemonControlFunc) RequestCancelSync(ctx context.Context) error {
 	return f.CancelSync(ctx)
 }
 
+type DaemonControlClient struct{}
+
+func (DaemonControlClient) RequestManualSync(ctx context.Context, devicePath string) error {
+	if devicePath != "" {
+		return daemoncontrol.RequestManualSyncWithPath(ctx, devicePath)
+	}
+	return daemoncontrol.RequestManualSync(ctx)
+}
+
+func (DaemonControlClient) RequestCancelSync(ctx context.Context) error {
+	return daemoncontrol.RequestCancelSync(ctx)
+}
+
+func (DaemonControlClient) RequestStatus(ctx context.Context) (state.CurrentState, error) {
+	return daemoncontrol.RequestStatus(ctx)
+}
+
+func (DaemonControlClient) RequestHistory(ctx context.Context) ([]state.SyncRecord, error) {
+	return daemoncontrol.RequestHistory(ctx)
+}
+
+func (DaemonControlClient) RequestDevices(ctx context.Context) ([]sdmonitor.DeviceInfo, error) {
+	return daemoncontrol.RequestDevices(ctx)
+}
+
+func (DaemonControlClient) RequestSDCardFiles(ctx context.Context, path string) (*sdcardbrowser.FileList, error) {
+	return daemoncontrol.RequestSDCardFiles(ctx, path)
+}
+
+func (DaemonControlClient) RequestSDCardPreview(ctx context.Context, path string) (*sdcardbrowser.Preview, error) {
+	return daemoncontrol.RequestSDCardPreview(ctx, path)
+}
+
+func (DaemonControlClient) RequestSDCardThumbnail(ctx context.Context, path string) (*sdcardbrowser.Preview, error) {
+	return daemoncontrol.RequestSDCardThumbnail(ctx, path)
+}
+
 // Context holds dependencies for all handlers
 type Context struct {
 	StateMgr      *state.Manager
 	SyncMgr       SyncManager
 	ManualSync    ManualSyncRequester
+	Daemon        DaemonClient
 	WiFiMgr       wifimanager.WiFiManager
 	AppSettings   *settings.Settings
 	SSRFValidator *ssrf.Validator
@@ -67,6 +118,20 @@ type Context struct {
 
 func (ctx *Context) VersionInfo() version.Info {
 	return version.Get()
+}
+
+func (ctx *Context) daemonClient() DaemonClient {
+	if ctx.Daemon != nil {
+		return ctx.Daemon
+	}
+	return DaemonControlClient{}
+}
+
+func (ctx *Context) manualSyncClient() ManualSyncRequester {
+	if ctx.ManualSync != nil {
+		return ctx.ManualSync
+	}
+	return ctx.daemonClient()
 }
 
 // JSONResponse writes a JSON response

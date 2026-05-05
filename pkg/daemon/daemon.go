@@ -12,6 +12,7 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/daemoncontrol"
 	"github.com/denysvitali/pictures-sync-s3/pkg/events"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ledcontroller"
+	"github.com/denysvitali/pictures-sync-s3/pkg/sdcardbrowser"
 	"github.com/denysvitali/pictures-sync-s3/pkg/sdmonitor"
 	"github.com/denysvitali/pictures-sync-s3/pkg/settings"
 	"github.com/denysvitali/pictures-sync-s3/pkg/signals"
@@ -212,7 +213,16 @@ func (s *Service) Run() error {
 	defer controlCancel()
 
 	go func() {
-		if err := daemoncontrol.Serve(controlCtx, s.handleManualSyncCommand, s.handleCancelSyncCommand); err != nil {
+		if err := daemoncontrol.ServeWithHandlers(controlCtx, daemoncontrol.Handlers{
+			ManualSync:      s.handleManualSyncCommand,
+			CancelSync:      s.handleCancelSyncCommand,
+			Status:          s.handleStatusCommand,
+			History:         s.handleHistoryCommand,
+			Devices:         s.handleDevicesCommand,
+			SDCardFiles:     s.handleSDCardFilesCommand,
+			SDCardPreview:   s.handleSDCardPreviewCommand,
+			SDCardThumbnail: s.handleSDCardThumbnailCommand,
+		}); err != nil {
 			log.Printf("Daemon control server stopped: %v", err)
 		}
 	}()
@@ -229,6 +239,11 @@ func (s *Service) Run() error {
 
 	// Set initial status
 	log.Println("Setting initial status to idle...")
+	if !s.monitor.IsCardMounted() {
+		if err := s.stateMgr.SetSDCard(false, ""); err != nil {
+			log.Printf("Warning: Failed to clear stale SD card state: %v", err)
+		}
+	}
 	s.stateMgr.SetStatus(state.StatusIdle)
 
 	// Note: No need to manually check for already-mounted cards here.
@@ -319,6 +334,101 @@ func (s *Service) handleCancelSyncCommand(ctx context.Context) daemoncontrol.Res
 	s.stateMgr.SetStatus(state.StatusIdle)
 
 	return daemoncontrol.OK("Sync cancelled")
+}
+
+func (s *Service) handleStatusCommand(ctx context.Context) daemoncontrol.Response {
+	if ctx.Err() != nil {
+		return daemoncontrol.Error(daemoncontrol.CodeUnavailable, "pictures-sync daemon is shutting down")
+	}
+
+	return daemoncontrol.OKData("status", s.stateMgr.GetState())
+}
+
+func (s *Service) handleHistoryCommand(ctx context.Context) daemoncontrol.Response {
+	if ctx.Err() != nil {
+		return daemoncontrol.Error(daemoncontrol.CodeUnavailable, "pictures-sync daemon is shutting down")
+	}
+
+	return daemoncontrol.OKData("history", s.stateMgr.GetHistory())
+}
+
+func (s *Service) handleDevicesCommand(ctx context.Context) daemoncontrol.Response {
+	if ctx.Err() != nil {
+		return daemoncontrol.Error(daemoncontrol.CodeUnavailable, "pictures-sync daemon is shutting down")
+	}
+
+	devices, err := sdmonitor.ListAllStorageDevices()
+	if err != nil {
+		return daemoncontrol.Error(daemoncontrol.CodeInternalError, fmt.Sprintf("failed to list devices: %v", err))
+	}
+
+	stateDevices := make([]state.DeviceInfo, len(devices))
+	for i, d := range devices {
+		stateDevices[i] = state.DeviceInfo{
+			DevicePath:  d.DevicePath,
+			DeviceName:  d.DeviceName,
+			Size:        d.Size,
+			SizeHuman:   d.SizeHuman,
+			IsUSB:       d.IsUSB,
+			IsMounted:   d.IsMounted,
+			MountPath:   d.MountPath,
+			HasDCIM:     d.HasDCIM,
+			VolumeLabel: d.VolumeLabel,
+		}
+	}
+	if err := s.stateMgr.SetAvailableDevices(stateDevices); err != nil {
+		log.Printf("Warning: Failed to update daemon device state: %v", err)
+	}
+
+	return daemoncontrol.OKData("devices", devices)
+}
+
+func (s *Service) handleSDCardFilesCommand(ctx context.Context, requestedPath string) daemoncontrol.Response {
+	if ctx.Err() != nil {
+		return daemoncontrol.Error(daemoncontrol.CodeUnavailable, "pictures-sync daemon is shutting down")
+	}
+	if !s.monitor.IsCardMounted() {
+		return daemoncontrol.Error(daemoncontrol.CodeNoSDCardMounted, "no SD card mounted")
+	}
+
+	result, err := sdcardbrowser.ListFiles(s.monitor.GetMountPath(), requestedPath)
+	if err != nil {
+		return daemoncontrol.Error(daemoncontrol.CodeInternalError, err.Error())
+	}
+
+	return daemoncontrol.OKData("sdcard files", result)
+}
+
+func (s *Service) handleSDCardPreviewCommand(ctx context.Context, requestedPath string) daemoncontrol.Response {
+	if ctx.Err() != nil {
+		return daemoncontrol.Error(daemoncontrol.CodeUnavailable, "pictures-sync daemon is shutting down")
+	}
+	if !s.monitor.IsCardMounted() {
+		return daemoncontrol.Error(daemoncontrol.CodeNoSDCardMounted, "no SD card mounted")
+	}
+
+	result, err := sdcardbrowser.ReadPreview(s.monitor.GetMountPath(), requestedPath)
+	if err != nil {
+		return daemoncontrol.Error(daemoncontrol.CodeInternalError, err.Error())
+	}
+
+	return daemoncontrol.OKData("sdcard preview", result)
+}
+
+func (s *Service) handleSDCardThumbnailCommand(ctx context.Context, requestedPath string) daemoncontrol.Response {
+	if ctx.Err() != nil {
+		return daemoncontrol.Error(daemoncontrol.CodeUnavailable, "pictures-sync daemon is shutting down")
+	}
+	if !s.monitor.IsCardMounted() {
+		return daemoncontrol.Error(daemoncontrol.CodeNoSDCardMounted, "no SD card mounted")
+	}
+
+	result, err := sdcardbrowser.ReadThumbnail(s.monitor.GetMountPath(), requestedPath)
+	if err != nil {
+		return daemoncontrol.Error(daemoncontrol.CodeInternalError, err.Error())
+	}
+
+	return daemoncontrol.OKData("sdcard thumbnail", result)
 }
 
 // Shutdown gracefully shuts down the daemon

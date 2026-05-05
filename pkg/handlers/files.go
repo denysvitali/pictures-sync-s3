@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -10,13 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/denysvitali/pictures-sync-s3/pkg/state"
-	"github.com/disintegration/imaging"
+	"github.com/denysvitali/pictures-sync-s3/pkg/daemoncontrol"
 	exif "github.com/dsoprea/go-exif/v3"
 	exifcommon "github.com/dsoprea/go-exif/v3/common"
 )
-
-var thumbnailGenerationSlots = make(chan struct{}, 2)
 
 // HandleFileCards returns list of card IDs
 func (ctx *Context) HandleFileCards(w http.ResponseWriter, r *http.Request) {
@@ -203,89 +202,23 @@ func (ctx *Context) HandleThumbnail(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[Gallery] thumbnail start path=%q remote=%s", requestedPath, r.RemoteAddr)
 
-	// Security: Reject absolute paths and directory traversal attempts
-	if filepath.IsAbs(requestedPath) || strings.Contains(requestedPath, "..") {
-		log.Printf("[Gallery] thumbnail denied path=%q reason=invalid_path duration=%s", requestedPath, time.Since(start))
-		http.Error(w, "access denied", http.StatusForbidden)
-		return
-	}
+	requestCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
 
-	// Security: Properly validate path to prevent traversal attacks
-	mountPath := state.MountDir
-
-	// Clean the mount path and ensure it ends with separator
-	cleanMountPath := filepath.Clean(mountPath)
-	if !strings.HasSuffix(cleanMountPath, string(os.PathSeparator)) {
-		cleanMountPath += string(os.PathSeparator)
-	}
-
-	// Join mount path with requested path and clean the result
-	// This resolves any .. or . in the path
-	fullPath := filepath.Join(mountPath, filepath.Clean("/"+requestedPath))
-	cleanFullPath := filepath.Clean(fullPath)
-
-	// Verify the cleaned path is still within the mount directory
-	if !strings.HasPrefix(cleanFullPath, cleanMountPath) {
-		log.Printf("[Gallery] thumbnail denied path=%q reason=outside_mount duration=%s", requestedPath, time.Since(start))
-		http.Error(w, "access denied", http.StatusForbidden)
-		return
-	}
-
-	// Use the validated path
-	filePath := cleanFullPath
-
-	// Check if file is a JPEG
-	ext := strings.ToLower(filepath.Ext(filePath))
-	if ext != ".jpg" && ext != ".jpeg" {
-		log.Printf("[Gallery] thumbnail rejected path=%q ext=%q duration=%s", requestedPath, ext, time.Since(start))
-		http.Error(w, "only JPEG images supported", http.StatusBadRequest)
-		return
-	}
-
-	fileInfo, err := os.Stat(filePath)
+	preview, err := ctx.daemonClient().RequestSDCardThumbnail(requestCtx, requestedPath)
 	if err != nil {
-		log.Printf("[Gallery] thumbnail stat failed path=%q duration=%s error=%v", requestedPath, time.Since(start), err)
-		http.Error(w, fmt.Sprintf("failed to open image: %v", err), http.StatusInternalServerError)
+		statusCode := daemonHTTPStatus(err)
+		log.Printf("[Gallery] thumbnail failed path=%q duration=%s error=%v", requestedPath, time.Since(start), err)
+		http.Error(w, daemonErrorMessage(err), statusCode)
 		return
 	}
 
-	queueStart := time.Now()
-	select {
-	case thumbnailGenerationSlots <- struct{}{}:
-		defer func() { <-thumbnailGenerationSlots }()
-	case <-r.Context().Done():
-		log.Printf("[Gallery] thumbnail canceled path=%q queued=%s duration=%s error=%v", requestedPath, time.Since(queueStart), time.Since(start), r.Context().Err())
-		http.Error(w, "request canceled", http.StatusServiceUnavailable)
-		return
-	}
-
-	queued := time.Since(queueStart)
-	decodeStart := time.Now()
-	// #nosec G304 -- filePath is validated against mount directory and traversal is blocked above
-	img, err := imaging.Open(filePath)
-	if err != nil {
-		log.Printf("[Gallery] thumbnail decode failed path=%q size=%d queued=%s duration=%s error=%v", requestedPath, fileInfo.Size(), queued, time.Since(start), err)
-		http.Error(w, fmt.Sprintf("failed to decode image: %v", err), http.StatusInternalServerError)
-		return
-	}
-	decodeDuration := time.Since(decodeStart)
-
-	// Resize to thumbnail (max 200px, preserve aspect ratio)
-	resizeStart := time.Now()
-	thumbnail := imaging.Fit(img, 200, 200, imaging.Lanczos)
-	resizeDuration := time.Since(resizeStart)
-
-	// Encode as JPEG and send
-	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Content-Type", preview.ContentType)
 	w.Header().Set("Cache-Control", "public, max-age=3600")
-
-	encodeStart := time.Now()
-	if err := imaging.Encode(w, thumbnail, imaging.JPEG, imaging.JPEGQuality(80)); err != nil {
-		log.Printf("[Gallery] thumbnail encode failed path=%q size=%d queued=%s decode=%s resize=%s encode=%s duration=%s error=%v", requestedPath, fileInfo.Size(), queued, decodeDuration, resizeDuration, time.Since(encodeStart), time.Since(start), err)
-		return
+	if _, err := w.Write(preview.Data); err != nil {
+		log.Printf("[Gallery] thumbnail write failed path=%q duration=%s error=%v", requestedPath, time.Since(start), err)
 	}
-
-	log.Printf("[Gallery] thumbnail complete path=%q size=%d queued=%s decode=%s resize=%s encode=%s duration=%s", requestedPath, fileInfo.Size(), queued, decodeDuration, resizeDuration, time.Since(encodeStart), time.Since(start))
+	log.Printf("[Gallery] thumbnail complete path=%q size=%d duration=%s", requestedPath, len(preview.Data), time.Since(start))
 }
 
 // SDCardFileInfo contains file metadata including EXIF data
@@ -316,86 +249,20 @@ func (ctx *Context) HandleSDCardFiles(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[Gallery] list sdcard start path=%q remote=%s", requestedPath, r.RemoteAddr)
 
-	// Security: Reject absolute paths and directory traversal attempts
-	if filepath.IsAbs(requestedPath) || strings.Contains(requestedPath, "..") {
-		log.Printf("[Gallery] list sdcard denied path=%q reason=invalid_path duration=%s", requestedPath, time.Since(start))
-		JSONResponse(w, map[string]interface{}{
-			"error": "access denied",
-		})
-		return
-	}
+	requestCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
 
-	// Security: Validate path
-	mountPath := state.MountDir
-	cleanMountPath := filepath.Clean(mountPath)
-	if !strings.HasSuffix(cleanMountPath, string(os.PathSeparator)) {
-		cleanMountPath += string(os.PathSeparator)
-	}
-
-	fullPath := filepath.Join(mountPath, filepath.Clean("/"+requestedPath))
-	cleanFullPath := filepath.Clean(fullPath)
-
-	if !strings.HasPrefix(cleanFullPath, cleanMountPath) {
-		log.Printf("[Gallery] list sdcard denied path=%q reason=outside_mount duration=%s", requestedPath, time.Since(start))
-		JSONResponse(w, map[string]interface{}{
-			"error": "access denied",
-		})
-		return
-	}
-
-	// Check if SD card is mounted
-	currentState := ctx.StateMgr.GetState()
-	if !currentState.SDCardMounted {
-		log.Printf("[Gallery] list sdcard failed path=%q reason=no_sdcard duration=%s", requestedPath, time.Since(start))
-		JSONResponse(w, map[string]interface{}{
-			"error": "no SD card mounted",
-		})
-		return
-	}
-
-	// Read directory
-	entries, err := os.ReadDir(cleanFullPath)
+	result, err := ctx.daemonClient().RequestSDCardFiles(requestCtx, requestedPath)
 	if err != nil {
 		log.Printf("[Gallery] list sdcard failed path=%q duration=%s error=%v", requestedPath, time.Since(start), err)
 		JSONResponse(w, map[string]interface{}{
-			"error": fmt.Sprintf("failed to read directory: %v", err),
+			"error": daemonErrorMessage(err),
 		})
 		return
 	}
 
-	// Build file list with metadata
-	var files []SDCardFileInfo
-	for _, entry := range entries {
-		info, err := entry.Info()
-		if err != nil {
-			continue
-		}
-
-		fileInfo := SDCardFileInfo{
-			Name:    entry.Name(),
-			Path:    filepath.Join(requestedPath, entry.Name()),
-			Size:    info.Size(),
-			ModTime: info.ModTime(),
-			IsDir:   entry.IsDir(),
-		}
-
-		// Check if it's an image (skip EXIF extraction for listing — too slow on large directories)
-		if !entry.IsDir() {
-			ext := strings.ToLower(filepath.Ext(entry.Name()))
-			if ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".webp" {
-				fileInfo.IsImage = true
-			}
-		}
-
-		files = append(files, fileInfo)
-	}
-
-	log.Printf("[Gallery] list sdcard complete path=%q entries=%d files=%d duration=%s", requestedPath, len(entries), len(files), time.Since(start))
-
-	JSONResponse(w, map[string]interface{}{
-		"files": files,
-		"path":  requestedPath,
-	})
+	log.Printf("[Gallery] list sdcard complete path=%q files=%d duration=%s", requestedPath, len(result.Files), time.Since(start))
+	JSONResponse(w, result)
 }
 
 // extractEXIF extracts EXIF metadata from an image file
@@ -527,46 +394,38 @@ func (ctx *Context) HandleSDCardPreview(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Security: Reject absolute paths and directory traversal attempts
-	if filepath.IsAbs(requestedPath) || strings.Contains(requestedPath, "..") {
-		http.Error(w, "access denied", http.StatusForbidden)
+	requestCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	preview, err := ctx.daemonClient().RequestSDCardPreview(requestCtx, requestedPath)
+	if err != nil {
+		http.Error(w, daemonErrorMessage(err), daemonHTTPStatus(err))
 		return
 	}
 
-	// Security: Validate path
-	mountPath := state.MountDir
-	cleanMountPath := filepath.Clean(mountPath)
-	if !strings.HasSuffix(cleanMountPath, string(os.PathSeparator)) {
-		cleanMountPath += string(os.PathSeparator)
-	}
-
-	fullPath := filepath.Join(mountPath, filepath.Clean("/"+requestedPath))
-	cleanFullPath := filepath.Clean(fullPath)
-
-	if !strings.HasPrefix(cleanFullPath, cleanMountPath) {
-		http.Error(w, "access denied", http.StatusForbidden)
-		return
-	}
-
-	// Check if file is an image
-	ext := strings.ToLower(filepath.Ext(cleanFullPath))
-	var contentType string
-	switch ext {
-	case ".jpg", ".jpeg":
-		contentType = "image/jpeg"
-	case ".png":
-		contentType = "image/png"
-	case ".gif":
-		contentType = "image/gif"
-	case ".webp":
-		contentType = "image/webp"
-	default:
-		http.Error(w, "unsupported file type", http.StatusBadRequest)
-		return
-	}
-
-	// Serve the file
-	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Type", preview.ContentType)
 	w.Header().Set("Cache-Control", "public, max-age=3600")
-	http.ServeFile(w, r, cleanFullPath)
+	if _, err := w.Write(preview.Data); err != nil {
+		log.Printf("[Gallery] sdcard preview write failed path=%q error=%v", requestedPath, err)
+	}
+}
+
+func daemonErrorMessage(err error) string {
+	var commandErr *daemoncontrol.CommandError
+	if errors.As(err, &commandErr) && commandErr.Message != "" {
+		return commandErr.Message
+	}
+	return err.Error()
+}
+
+func daemonHTTPStatus(err error) int {
+	message := daemonErrorMessage(err)
+	switch message {
+	case "access denied":
+		return http.StatusForbidden
+	case "unsupported file type", "path parameter required", "no SD card mounted":
+		return http.StatusBadRequest
+	default:
+		return http.StatusInternalServerError
+	}
 }

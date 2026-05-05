@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/daemoncontrol"
-	"github.com/denysvitali/pictures-sync-s3/pkg/sdmonitor"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 )
 
@@ -21,7 +20,10 @@ func (ctx *Context) HandleDevices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	devices, err := sdmonitor.ListAllStorageDevices()
+	requestCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	devices, err := ctx.daemonClient().RequestDevices(requestCtx)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to list devices: %v", err), http.StatusInternalServerError)
 		return
@@ -72,13 +74,7 @@ func (ctx *Context) HandleDeviceSelect(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Manual device selection: %s", req.DevicePath)
 
-	requester := ctx.ManualSync
-	if requester == nil {
-		requester = DaemonControlFunc{
-			ManualSync: daemoncontrol.RequestManualSyncWithPath,
-			CancelSync: daemoncontrol.RequestCancelSync,
-		}
-	}
+	requester := ctx.manualSyncClient()
 
 	requestCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
@@ -118,15 +114,7 @@ func (ctx *Context) HandleSyncStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	requester := ctx.ManualSync
-	if requester == nil {
-		requester = DaemonControlFunc{
-			ManualSync: func(ctx context.Context, _ string) error {
-				return daemoncontrol.RequestManualSync(ctx)
-			},
-			CancelSync: daemoncontrol.RequestCancelSync,
-		}
-	}
+	requester := ctx.manualSyncClient()
 
 	requestCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
@@ -160,15 +148,7 @@ func (ctx *Context) HandleSyncCancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	requester := ctx.ManualSync
-	if requester == nil {
-		requester = DaemonControlFunc{
-			ManualSync: func(ctx context.Context, _ string) error {
-				return daemoncontrol.RequestManualSync(ctx)
-			},
-			CancelSync: daemoncontrol.RequestCancelSync,
-		}
-	}
+	requester := ctx.manualSyncClient()
 
 	requestCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()

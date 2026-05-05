@@ -14,6 +14,8 @@ import (
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/captiveportal"
 	"github.com/denysvitali/pictures-sync-s3/pkg/daemoncontrol"
+	"github.com/denysvitali/pictures-sync-s3/pkg/sdcardbrowser"
+	"github.com/denysvitali/pictures-sync-s3/pkg/sdmonitor"
 	"github.com/denysvitali/pictures-sync-s3/pkg/settings"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ssrf"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
@@ -70,6 +72,72 @@ func (m *mockWiFiManager) GetCurrentConnection() (*wifimanager.ConnectionInfo, e
 	return &wifimanager.ConnectionInfo{SSID: "TestNetwork", Signal: -40}, nil
 }
 
+type mockDaemonClient struct {
+	stateMgr      *state.Manager
+	manualSyncErr error
+	cancelSyncErr error
+}
+
+func (m *mockDaemonClient) RequestManualSync(context.Context, string) error {
+	return m.manualSyncErr
+}
+
+func (m *mockDaemonClient) RequestCancelSync(context.Context) error {
+	return m.cancelSyncErr
+}
+
+func (m *mockDaemonClient) RequestStatus(context.Context) (state.CurrentState, error) {
+	return m.stateMgr.GetState(), nil
+}
+
+func (m *mockDaemonClient) RequestHistory(context.Context) ([]state.SyncRecord, error) {
+	return m.stateMgr.GetHistory(), nil
+}
+
+func (m *mockDaemonClient) RequestDevices(context.Context) ([]sdmonitor.DeviceInfo, error) {
+	currentState := m.stateMgr.GetState()
+	if !currentState.SDCardMounted {
+		return nil, nil
+	}
+	return []sdmonitor.DeviceInfo{{
+		DevicePath: "/dev/sda1",
+		DeviceName: "sda1",
+		IsMounted:  true,
+		MountPath:  currentState.SDCardPath,
+		HasDCIM:    true,
+	}}, nil
+}
+
+func (m *mockDaemonClient) RequestSDCardFiles(_ context.Context, path string) (*sdcardbrowser.FileList, error) {
+	if !m.stateMgr.GetState().SDCardMounted {
+		return nil, &daemoncontrol.CommandError{
+			Code:    daemoncontrol.CodeNoSDCardMounted,
+			Message: "no SD card mounted",
+		}
+	}
+	return sdcardbrowser.ListFiles(state.MountDir, path)
+}
+
+func (m *mockDaemonClient) RequestSDCardPreview(_ context.Context, path string) (*sdcardbrowser.Preview, error) {
+	if !m.stateMgr.GetState().SDCardMounted {
+		return nil, &daemoncontrol.CommandError{
+			Code:    daemoncontrol.CodeNoSDCardMounted,
+			Message: "no SD card mounted",
+		}
+	}
+	return sdcardbrowser.ReadPreview(state.MountDir, path)
+}
+
+func (m *mockDaemonClient) RequestSDCardThumbnail(_ context.Context, path string) (*sdcardbrowser.Preview, error) {
+	if !m.stateMgr.GetState().SDCardMounted {
+		return nil, &daemoncontrol.CommandError{
+			Code:    daemoncontrol.CodeNoSDCardMounted,
+			Message: "no SD card mounted",
+		}
+	}
+	return sdcardbrowser.ReadThumbnail(state.MountDir, path)
+}
+
 // setupTestContext creates a test context with mock dependencies
 func setupTestContext(t *testing.T) (*Context, func()) {
 	t.Helper()
@@ -100,9 +168,22 @@ func setupTestContext(t *testing.T) (*Context, func()) {
 		publicLink: "https://storage.example.com/presigned/file1.jpg",
 	}
 
+	mockDaemon := &mockDaemonClient{
+		stateMgr: stateMgr,
+		manualSyncErr: &daemoncontrol.CommandError{
+			Code:    daemoncontrol.CodeNoSDCardMounted,
+			Message: "no SD card mounted",
+		},
+		cancelSyncErr: &daemoncontrol.CommandError{
+			Code:    daemoncontrol.CodeSyncAlreadyActive,
+			Message: "no sync in progress",
+		},
+	}
+
 	ctx := &Context{
 		StateMgr: stateMgr,
 		SyncMgr:  mockSync,
+		Daemon:   mockDaemon,
 		ManualSync: DaemonControlFunc{
 			ManualSync: func(context.Context, string) error {
 				return &daemoncontrol.CommandError{
