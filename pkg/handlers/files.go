@@ -301,18 +301,10 @@ func (ctx *Context) HandleSDCardFiles(w http.ResponseWriter, r *http.Request) {
 			IsDir:   entry.IsDir(),
 		}
 
-		// Check if it's an image and extract EXIF
+		// Check if it's an image (skip EXIF extraction for listing — too slow on large directories)
 		if !entry.IsDir() {
 			ext := strings.ToLower(filepath.Ext(entry.Name()))
-			if ext == ".jpg" || ext == ".jpeg" {
-				fileInfo.IsImage = true
-
-				// Extract EXIF data
-				filePath := filepath.Join(cleanFullPath, entry.Name())
-				if exifData := extractEXIF(filePath); exifData != nil {
-					fileInfo.EXIF = exifData
-				}
-			} else if ext == ".png" || ext == ".gif" || ext == ".webp" {
+			if ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".webp" {
 				fileInfo.IsImage = true
 			}
 		}
