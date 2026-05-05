@@ -182,31 +182,24 @@ func (ctx *Context) HandleConfigB2(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		Account    string `json:"account_id"`
-		Key        string `json:"application_key"`
-		Bucket     string `json:"bucket_name"`
-		RemoteName string `json:"remote_name"`
-		RemotePath string `json:"remote_path"`
-		Endpoint   string `json:"endpoint"`
-	}
+	var req b2ConfigRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
 
-	b2cfg := &validation.B2Config{
-		Account:    req.Account,
-		Key:        req.Key,
-		Bucket:     req.Bucket,
-		RemoteName: req.RemoteName,
-		RemotePath: req.RemotePath,
-		Endpoint:   req.Endpoint,
+	b2cfg, remoteName, remotePath, err := req.toB2Config()
+	if err != nil {
+		logConfigChange(r, "b2_validation_failed", err.Error())
+		w.WriteHeader(http.StatusBadRequest)
+		JSONResponse(w, map[string]any{"success": false, "error": err.Error()})
+		return
 	}
 
 	configBytes, err := validation.BuildB2RcloneConfig(b2cfg)
 	if err != nil {
 		logConfigChange(r, "b2_validation_failed", err.Error())
+		w.WriteHeader(http.StatusBadRequest)
 		JSONResponse(w, map[string]any{"success": false, "error": err.Error()})
 		return
 	}
@@ -221,6 +214,7 @@ func (ctx *Context) HandleConfigB2(w http.ResponseWriter, r *http.Request) {
 			errMsg = result.Errors[0].Error()
 		}
 		logConfigChange(r, "b2_validation_failed", errMsg)
+		w.WriteHeader(http.StatusBadRequest)
 		JSONResponse(w, map[string]any{"success": false, "error": errMsg})
 		return
 	}
@@ -236,15 +230,6 @@ func (ctx *Context) HandleConfigB2(w http.ResponseWriter, r *http.Request) {
 		logConfigChange(r, "b2_write_error", err.Error())
 		http.Error(w, fmt.Sprintf("Failed to write config: %v", err), http.StatusInternalServerError)
 		return
-	}
-
-	remoteName := strings.TrimSpace(req.RemoteName)
-	if remoteName == "" {
-		remoteName = "b2"
-	}
-	remotePath := strings.TrimSpace(req.RemotePath)
-	if remotePath == "" {
-		remotePath = "/photos"
 	}
 
 	// Update settings
@@ -266,7 +251,7 @@ func (ctx *Context) HandleConfigB2(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logConfigChange(r, "b2_success", fmt.Sprintf("Configured B2 remote '%s' with bucket '%s'", remoteName, req.Bucket))
+	logConfigChange(r, "b2_success", fmt.Sprintf("Configured B2 remote '%s' with bucket '%s'", remoteName, b2cfg.Bucket))
 	JSONResponse(w, map[string]any{
 		"success":     true,
 		"remote_name": remoteName,
@@ -387,6 +372,86 @@ func (ctx *Context) HandleSettings(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+type b2ConfigRequest struct {
+	Account     string `json:"account_id"`
+	KeyID       string `json:"key_id"`
+	Key         string `json:"application_key"`
+	AppKey      string `json:"app_key"`
+	Bucket      string `json:"bucket_name"`
+	BucketAlias string `json:"bucket"`
+	RemoteName  string `json:"remote_name"`
+	RemotePath  string `json:"remote_path"`
+	Endpoint    string `json:"endpoint"`
+	Region      string `json:"region"`
+}
+
+func (req b2ConfigRequest) toB2Config() (*validation.B2Config, string, string, error) {
+	account := strings.TrimSpace(req.Account)
+	if account == "" {
+		account = strings.TrimSpace(req.KeyID)
+	}
+
+	key := strings.TrimSpace(req.Key)
+	if key == "" {
+		key = strings.TrimSpace(req.AppKey)
+	}
+
+	bucket := strings.TrimSpace(req.Bucket)
+	if bucket == "" {
+		bucket = strings.TrimSpace(req.BucketAlias)
+	}
+
+	remoteName := strings.TrimSpace(req.RemoteName)
+	if remoteName == "" {
+		remoteName = "b2"
+	}
+
+	remotePath := strings.TrimSpace(req.RemotePath)
+	if remotePath == "" && bucket != "" {
+		remotePath = fmt.Sprintf("%s/photos", strings.Trim(bucket, "/"))
+	}
+
+	endpoint, err := resolveB2Endpoint(req.Endpoint, req.Region)
+	if err != nil {
+		return nil, "", "", err
+	}
+
+	cfg := &validation.B2Config{
+		Account:    account,
+		Key:        key,
+		Bucket:     bucket,
+		RemoteName: remoteName,
+		RemotePath: remotePath,
+		Endpoint:   endpoint,
+	}
+
+	return cfg, remoteName, remotePath, nil
+}
+
+func resolveB2Endpoint(endpoint, region string) (string, error) {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint != "" {
+		return endpoint, nil
+	}
+
+	region = strings.TrimSpace(region)
+	if region == "" {
+		return "", nil
+	}
+
+	if strings.HasPrefix(region, "https://") || strings.HasPrefix(region, "http://") {
+		return region, nil
+	}
+
+	for _, knownRegion := range validation.B2Regions {
+		if region == knownRegion.ID || region == knownRegion.Name {
+			return knownRegion.Endpoint, nil
+		}
+	}
+
+	return "", fmt.Errorf("unknown B2 region: %s", region)
 }
 
 func configureTailscale(authKey string) error {

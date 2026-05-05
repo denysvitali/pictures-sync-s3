@@ -279,22 +279,39 @@ function B2SetupSection() {
     if (!appKey.trim()) { toast.error('Application key is required'); return }
     if (!region) { toast.error('Region is required'); return }
 
+    const bucketName = bucket.trim()
+    const selectedRegion = regions.find((r) => {
+      const value = typeof r === 'string' ? r : r.id || r.name || r.value
+      return value === region
+    })
+    const endpoint = typeof selectedRegion === 'object' ? selectedRegion.endpoint : undefined
+
     setSaving(true)
     try {
-      await saveB2Config(deviceUrl, {
-        bucket: bucket.trim(),
-        key_id: keyId.trim(),
-        app_key: appKey.trim(),
+      const res = await saveB2Config(deviceUrl, {
+        bucket_name: bucketName,
+        account_id: keyId.trim(),
+        application_key: appKey.trim(),
+        remote_name: 'b2',
+        remote_path: `${bucketName}/photos`,
+        endpoint,
         region,
       })
-      toast.success('Backblaze B2 configuration saved')
+      if (res?.success === false) {
+        throw new Error(res.error || 'Failed to save B2 configuration')
+      }
+      if (res?.warning) {
+        toast.warning(res.warning)
+      } else {
+        toast.success('Backblaze B2 configuration saved')
+      }
       setAppKey('')
     } catch (err) {
       toast.error(describeError(err) || 'Failed to save B2 configuration')
     } finally {
       setSaving(false)
     }
-  }, [deviceUrl, bucket, keyId, appKey, region, toast])
+  }, [deviceUrl, bucket, keyId, appKey, region, regions, toast])
 
   return (
     <AccordionSection title="Backblaze B2 Quick Setup" icon="cloud">

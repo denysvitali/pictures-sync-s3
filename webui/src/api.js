@@ -43,15 +43,13 @@ async function parseResponse(response) {
 
   if (!response.ok) {
     if (contentType.includes('application/json')) {
+      let error = null
       try {
-        const error = JSON.parse(raw)
-        throw new Error(error?.error || error?.message || `Request failed (${response.status})`)
-      } catch (parseError) {
-        if (parseError instanceof Error && parseError.message.includes('Request failed')) {
-          throw parseError
-        }
-        throw new Error(raw || `Request failed (${response.status})`)
+        error = JSON.parse(raw)
+      } catch {
+        // Fall back to the raw response body below.
       }
+      throw new Error(error?.error || error?.message || raw || `Request failed (${response.status})`)
     }
     throw new Error(raw || `Request failed (${response.status})`)
   }
