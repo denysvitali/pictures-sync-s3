@@ -180,14 +180,24 @@ function RemoteStorageSection() {
   const [testing, setTesting] = useState(false)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    let cancelled = false
+  const loadConfig = useCallback((cancelledRef = { current: false }) => {
+    setLoading(true)
     getConfig(deviceUrl)
-      .then((data) => { if (!cancelled) setConfig(data) })
+      .then((data) => { if (!cancelledRef.current) setConfig(data) })
       .catch(() => {})
-      .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
+      .finally(() => { if (!cancelledRef.current) setLoading(false) })
   }, [deviceUrl])
+
+  useEffect(() => {
+    const cancelledRef = { current: false }
+    loadConfig(cancelledRef)
+    const onConfigChanged = () => loadConfig(cancelledRef)
+    window.addEventListener('rclone-config-changed', onConfigChanged)
+    return () => {
+      cancelledRef.current = true
+      window.removeEventListener('rclone-config-changed', onConfigChanged)
+    }
+  }, [loadConfig])
 
   const handleTest = useCallback(async () => {
     setTesting(true)
@@ -196,7 +206,7 @@ function RemoteStorageSection() {
       if (res?.success) {
         toast.success(res.message || 'Connection test passed')
       } else {
-        toast.error(res?.message || 'Connection test failed')
+        toast.error(res?.error || res?.message || 'Connection test failed')
       }
     } catch (err) {
       toast.error(describeError(err) || 'Connection test failed')
@@ -224,11 +234,14 @@ function RemoteStorageSection() {
               <p className="text-sm text-surface-200">
                 {config?.configured ? 'Remote backend is configured' : 'No remote backend configured'}
               </p>
-              {config?.remote && (
+              {config?.configured && (config?.remote_name || config?.remotes?.length > 0) && (
                 <p className="text-xs text-surface-400 mt-1">
-                  Remote: {config.remote}
+                  Remote: {config.remote_name || config.remotes[0]}
                   {config?.provider ? ` (${config.provider})` : ''}
                 </p>
+              )}
+              {config?.configured && config?.remote_path && (
+                <p className="text-xs text-surface-400 mt-1">Path: {config.remote_path}</p>
               )}
             </div>
             <Button
@@ -242,6 +255,11 @@ function RemoteStorageSection() {
               Test Connection
             </Button>
           </div>
+          {config?.config_redacted && (
+            <pre className="max-h-56 overflow-auto rounded-lg border border-surface-700 bg-surface-900 p-3 text-xs text-surface-200 whitespace-pre-wrap break-words">
+              {config.config_redacted}
+            </pre>
+          )}
         </div>
       )}
     </AccordionSection>
@@ -306,6 +324,7 @@ function B2SetupSection() {
         toast.success('Backblaze B2 configuration saved')
       }
       setAppKey('')
+      window.dispatchEvent(new Event('rclone-config-changed'))
     } catch (err) {
       toast.error(describeError(err) || 'Failed to save B2 configuration')
     } finally {

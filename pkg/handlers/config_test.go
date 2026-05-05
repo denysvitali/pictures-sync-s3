@@ -117,3 +117,26 @@ func TestHandleConfigB2ValidationFailureUsesBadRequest(t *testing.T) {
 		t.Fatalf("unexpected error response: %v", response["error"])
 	}
 }
+
+func TestRedactRcloneConfig(t *testing.T) {
+	config := []byte(`[b2]
+type = b2
+account = account-id
+key = application-key
+endpoint = https://s3.us-west-004.backblazeb2.com
+`)
+
+	redacted, provider := redactRcloneConfig(config)
+	if provider != "b2" {
+		t.Fatalf("provider = %q, want b2", provider)
+	}
+	if strings.Contains(redacted, "application-key") {
+		t.Fatalf("redacted config leaked secret: %s", redacted)
+	}
+	if !strings.Contains(redacted, "account = account-id") {
+		t.Fatalf("redacted config should keep non-secret fields: %s", redacted)
+	}
+	if !strings.Contains(redacted, "key = [redacted]") {
+		t.Fatalf("redacted config missing redacted key: %s", redacted)
+	}
+}

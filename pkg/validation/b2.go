@@ -27,12 +27,12 @@ var bucketNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9\-]*[a-z0-9]$`)
 
 // B2Config contains Backblaze B2 configuration fields
 type B2Config struct {
-	Account       string
-	Key           string
-	Bucket        string
-	RemoteName    string
-	RemotePath    string
-	Endpoint      string
+	Account    string
+	Key        string
+	Bucket     string
+	RemoteName string
+	RemotePath string
+	Endpoint   string
 }
 
 // ValidateB2Config validates B2 configuration fields
@@ -137,10 +137,9 @@ func BuildB2RcloneConfig(cfg *B2Config) ([]byte, error) {
 	fmt.Fprintf(&b, "type = b2\n")
 	fmt.Fprintf(&b, "account = %s\n", strings.TrimSpace(cfg.Account))
 	fmt.Fprintf(&b, "key = %s\n", strings.TrimSpace(cfg.Key))
-
-	if cfg.Endpoint != "" {
-		fmt.Fprintf(&b, "endpoint = %s\n", strings.TrimSpace(cfg.Endpoint))
-	}
+	// The native rclone B2 backend normally discovers the correct API endpoint
+	// from the application key. S3-compatible bucket endpoints do not belong in
+	// this field and cause opaque HTML 400 responses during authorization.
 
 	return []byte(b.String()), nil
 }

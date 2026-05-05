@@ -187,12 +187,12 @@ func TestBuildB2RcloneConfig(t *testing.T) {
 	}
 }
 
-func TestBuildB2RcloneConfigWithEndpoint(t *testing.T) {
+func TestBuildB2RcloneConfigIgnoresEndpoint(t *testing.T) {
 	cfg := &B2Config{
-		Account:    "acc",
-		Key:        "key",
-		Bucket:     "bucket",
-		Endpoint:   "https://s3.us-west-001.backblazeb2.com",
+		Account:  "acc",
+		Key:      "key",
+		Bucket:   "bucket",
+		Endpoint: "https://s3.us-west-001.backblazeb2.com",
 	}
 
 	data, err := BuildB2RcloneConfig(cfg)
@@ -201,7 +201,7 @@ func TestBuildB2RcloneConfigWithEndpoint(t *testing.T) {
 	}
 
 	configStr := string(data)
-	if !strings.Contains(configStr, "endpoint = https://s3.us-west-001.backblazeb2.com") {
-		t.Errorf("config missing endpoint: %s", configStr)
+	if strings.Contains(configStr, "endpoint") {
+		t.Errorf("native B2 config should not include endpoint: %s", configStr)
 	}
 }

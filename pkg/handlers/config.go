@@ -26,7 +26,6 @@ var tailscaleCommandContext = exec.CommandContext
 func (ctx *Context) HandleConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		// Return current config status (but NOT the content with credentials)
 		hasConfig, err := state.EnsureRcloneConfig()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -34,12 +33,27 @@ func (ctx *Context) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 
 		remotes, _ := ctx.SyncMgr.ListRemotes()
-		JSONResponse(w, map[string]any{
+		response := map[string]any{
 			"configured": hasConfig,
 			"remotes":    remotes,
-			// SECURITY: Never return config content - it contains cloud credentials
-			// Users can view/edit config via rclone config commands on the device
-		})
+		}
+		if ctx.AppSettings != nil {
+			response["remote_name"] = ctx.AppSettings.GetRemoteName()
+			response["remote_path"] = ctx.AppSettings.GetRemotePath()
+		}
+		if hasConfig {
+			configBytes, err := os.ReadFile(state.GetRcloneConfigPath())
+			if err != nil {
+				http.Error(w, fmt.Sprintf("Failed to read config: %v", err), http.StatusInternalServerError)
+				return
+			}
+			redactedConfig, provider := redactRcloneConfig(configBytes)
+			response["config_redacted"] = redactedConfig
+			if provider != "" {
+				response["provider"] = provider
+			}
+		}
+		JSONResponse(w, response)
 
 	case http.MethodPost:
 		// Update rclone config with comprehensive validation
@@ -127,6 +141,44 @@ func (ctx *Context) HandleConfigTest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	JSONResponse(w, map[string]any{"success": true})
+}
+
+func redactRcloneConfig(data []byte) (string, string) {
+	secretKeys := map[string]bool{
+		"key":               true,
+		"pass":              true,
+		"password":          true,
+		"token":             true,
+		"client_secret":     true,
+		"secret_access_key": true,
+		"application_key":   true,
+	}
+
+	var provider string
+	lines := strings.Split(string(data), "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, ";") {
+			continue
+		}
+
+		key, _, found := strings.Cut(trimmed, "=")
+		if !found {
+			continue
+		}
+
+		key = strings.TrimSpace(key)
+		if key == "type" && provider == "" {
+			_, value, _ := strings.Cut(trimmed, "=")
+			provider = strings.TrimSpace(value)
+		}
+		if secretKeys[strings.ToLower(key)] {
+			prefix := line[:strings.Index(line, "=")+1]
+			lines[i] = prefix + " [redacted]"
+		}
+	}
+
+	return strings.TrimRight(strings.Join(lines, "\n"), "\n"), provider
 }
 
 func (ctx *Context) HandlePasswordChange(w http.ResponseWriter, r *http.Request) {

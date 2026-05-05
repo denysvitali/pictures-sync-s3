@@ -45,9 +45,16 @@ func (m *Manager) TestConnection() error {
 
 	ctx := context.Background()
 
-	// Try to create the remote filesystem
-	remotePath := m.remoteName + ":"
-	fsys, err := fs.NewFs(ctx, remotePath)
+	m.mu.Lock()
+	remoteName := m.remoteName
+	remotePath := m.remotePath
+	m.mu.Unlock()
+
+	// Try to create the configured destination filesystem. Listing the remote
+	// root can fail for bucket-scoped B2 application keys even when the backup
+	// destination itself is accessible.
+	destination := remoteName + ":" + remotePath
+	fsys, err := fs.NewFs(ctx, destination)
 	if err != nil {
 		return fmt.Errorf("connection test failed: %w", err)
 	}
