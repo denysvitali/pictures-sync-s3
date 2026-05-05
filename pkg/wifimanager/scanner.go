@@ -15,6 +15,10 @@ import (
 )
 
 const (
+	scanTimeout = 10 * time.Second
+)
+
+var (
 	// scanWaitDelay is the wait time after triggering a WiFi scan before attempting to read results.
 	// This allows the wireless driver and kernel to complete the scan operation and populate
 	// the access point list.
@@ -104,34 +108,37 @@ func (m *Manager) ScanNetworks() ([]ScanResult, error) {
 	return results, nil
 }
 
-// scanInterface scans a single WiFi interface for access points
-func scanInterface(cl *wifi.Client, intf *wifi.Interface) ([]*wifi.BSS, error) {
-	// Try getting access points directly (like gokrazy-wifi does)
-	log.Printf("Getting access points from interface %s (no explicit scan)...", intf.Name)
+type scanClient interface {
+	AccessPoints(ifi *wifi.Interface) ([]*wifi.BSS, error)
+	Scan(ctx context.Context, ifi *wifi.Interface) error
+}
+
+// scanInterface scans a single WiFi interface for access points.
+func scanInterface(cl scanClient, intf *wifi.Interface) ([]*wifi.BSS, error) {
+	log.Printf("Triggering WiFi scan on interface %s...", intf.Name)
+	ctx, cancel := context.WithTimeout(context.Background(), scanTimeout)
+	defer cancel()
+
+	if err := cl.Scan(ctx, intf); err != nil {
+		log.Printf("ERROR: Failed to trigger scan on interface %s: %v", intf.Name, err)
+		log.Printf("Falling back to cached access points from interface %s...", intf.Name)
+		accessPoints, accessErr := cl.AccessPoints(intf)
+		if accessErr != nil {
+			log.Printf("ERROR: Failed to get cached access points on interface %s: %v", intf.Name, accessErr)
+			return nil, fmt.Errorf("scan failed: %w; cached access points unavailable: %w", err, accessErr)
+		}
+		return accessPoints, nil
+	}
+
+	log.Printf("Scan completed on interface %s, reading access points...", intf.Name)
+	if scanWaitDelay > 0 {
+		time.Sleep(scanWaitDelay)
+	}
+
 	accessPoints, err := cl.AccessPoints(intf)
 	if err != nil {
-		log.Printf("ERROR: Failed to get access points on interface %s: %v", intf.Name, err)
-
-		// If that fails, try with explicit scan
-		log.Printf("Retrying with explicit scan on interface %s...", intf.Name)
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		scanErr := cl.Scan(ctx, intf)
-		if scanErr != nil {
-			log.Printf("ERROR: Failed to trigger scan on interface %s: %v", intf.Name, scanErr)
-			return nil, fmt.Errorf("scan failed: %w", scanErr)
-		}
-
-		log.Printf("Scan triggered, waiting for completion...")
-		time.Sleep(scanWaitDelay)
-
-		accessPoints, err = cl.AccessPoints(intf)
-		if err != nil {
-			log.Printf("ERROR: Still failed to get access points after explicit scan on interface %s: %v",
-				intf.Name, err)
-			return nil, fmt.Errorf("access points unavailable: %w", err)
-		}
+		log.Printf("ERROR: Failed to get access points after scan on interface %s: %v", intf.Name, err)
+		return nil, fmt.Errorf("access points unavailable after scan: %w", err)
 	}
 
 	return accessPoints, nil
