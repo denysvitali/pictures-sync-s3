@@ -1,7 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useDevice } from '../DeviceContext.jsx'
 import { useToast } from '../components/Toast.jsx'
-import { getStatus, getHistory, startSync, cancelSync } from '../api.js'
+import {
+  getStatus,
+  getHistory,
+  getDevices,
+  startSync,
+  cancelSync,
+  selectDevice,
+} from '../api.js'
 import { Card, CardHeader, CardTitle } from '../components/Card.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
 import { Button } from '../components/Button.jsx'
@@ -21,6 +28,18 @@ function formatBytes(bytes) {
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
   const i = Math.floor(Math.log(bytes) / Math.log(1024))
   return `${(bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0)} ${units[i]}`
+}
+
+function getDeviceDisplayName(device) {
+  const base = device?.volume_label || device?.device_name || device?.device_path || 'Unknown device'
+  const details = []
+
+  if (device?.size_human) details.push(device.size_human)
+  if (device?.is_usb) details.push('USB')
+  if (device?.mount_path) details.push(device.mount_path)
+
+  if (details.length === 0) return base
+  return `${base} (${details.join(' · ')})`
 }
 
 function describeError(err) {
@@ -160,8 +179,14 @@ function StatusRow({ icon, label, value, ok }) {
   )
 }
 
-function DeviceInfoCard({ status }) {
-  const device = status.available_devices?.find((d) => d.is_mounted) || status.available_devices?.[0]
+function DeviceInfoCard({ status, devices, onSelectDevice, isSelecting }) {
+  const deviceList = devices || []
+  const canSelect = (status?.needs_device_select || deviceList.length > 1) && deviceList.length > 0
+  const device = deviceList.find((d) => d.is_mounted) || deviceList[0]
+  const selectedDevice = deviceList.find((d) => d.device_path === status.sdcard_path) || device
+  const selectedDevicePath = canSelect
+    ? (selectedDevice?.device_path || deviceList[0]?.device_path || '')
+    : ''
   const hasCard = status.sdcard_mounted
   const photoCount = status.current_sync?.files_total || status.last_sync?.files_total || 0
 
@@ -210,6 +235,30 @@ function DeviceInfoCard({ status }) {
               <span className="text-sm font-semibold text-surface-100">
                 {photoCount.toLocaleString()}
               </span>
+            </div>
+          )}
+
+          {canSelect && (
+            <div className="pt-2 border-t border-surface-700/50 space-y-2">
+              <label className="block text-xs text-surface-500">Active storage device</label>
+              <select
+                className="w-full border border-surface-700 rounded-lg bg-surface-800 px-3 py-2 text-sm text-surface-100"
+                value={selectedDevicePath}
+                disabled={isSelecting}
+                onChange={(e) => onSelectDevice?.(e.target.value)}
+              >
+                {deviceList.map((candidate) => (
+                  <option
+                    key={candidate.device_path || candidate.device_name}
+                    value={candidate.device_path}
+                  >
+                    {getDeviceDisplayName(candidate)}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-surface-500">
+                Multiple cards detected. Select the device you want to sync from.
+              </p>
             </div>
           )}
         </div>
@@ -330,8 +379,10 @@ export default function StatusPage() {
 
   const [status, setStatus] = useState(null)
   const [history, setHistory] = useState([])
+  const [devices, setDevices] = useState([])
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState(false)
+  const [selectionLoading, setSelectionLoading] = useState(false)
   const [error, setError] = useState(null)
   const consecutiveErrorsRef = useRef(0)
   const timerRef = useRef(null)
@@ -347,9 +398,16 @@ export default function StatusPage() {
       ])
       setStatus(statusData)
       setHistory(Array.isArray(historyData) ? historyData : [])
+      try {
+        const devicesData = await getDevices(deviceUrl)
+        setDevices(Array.isArray(devicesData) ? devicesData : [])
+      } catch {
+        setDevices([])
+      }
       consecutiveErrorsRef.current = 0
     } catch (err) {
       const detailed = describeError(err)
+      setDevices([])
       setError(detailed)
       consecutiveErrorsRef.current++
       if (!isAutoRefresh) {
@@ -408,6 +466,20 @@ export default function StatusPage() {
       setActionLoading(false)
     }
   }
+
+  const handleSelectDevice = useCallback(async (devicePath) => {
+    if (!deviceUrl || !devicePath) return
+    setSelectionLoading(true)
+    try {
+      await selectDevice(deviceUrl, devicePath)
+      toast.success('Storage device selected')
+      await fetchData()
+    } catch (err) {
+      toast.error(`Failed to select device: ${describeError(err)}`)
+    } finally {
+      setSelectionLoading(false)
+    }
+  }, [deviceUrl, toast, fetchData])
 
   if (loading && !status) {
     return <PageLoader />
@@ -471,7 +543,12 @@ export default function StatusPage() {
       {status && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <SystemStatusCard status={status} />
-          <DeviceInfoCard status={status} />
+          <DeviceInfoCard
+            status={status}
+            devices={devices}
+            onSelectDevice={handleSelectDevice}
+            isSelecting={selectionLoading}
+          />
         </div>
       )}
 

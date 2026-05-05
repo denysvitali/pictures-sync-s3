@@ -89,8 +89,9 @@ func (h *Handler) HandleInserted(event sdmonitor.Event) {
 	go h.processSyncOperation(event)
 }
 
-// HandleManualSync starts the daemon-owned sync workflow for the currently mounted card.
-func (h *Handler) HandleManualSync() error {
+// HandleManualSync starts the daemon-owned sync workflow for the selected card.
+// If devicePath is empty, it uses the currently mounted card.
+func (h *Handler) HandleManualSync(devicePath string) error {
 	if !h.monitor.IsCardMounted() {
 		return fmt.Errorf("no SD card mounted")
 	}
@@ -99,6 +100,9 @@ func (h *Handler) HandleManualSync() error {
 	device := h.monitor.GetCurrentDevice()
 	if device == "" {
 		return fmt.Errorf("no SD card mounted")
+	}
+	if devicePath != "" && devicePath != device {
+		return fmt.Errorf("selected device is not mounted")
 	}
 
 	h.syncStartMu.Lock()

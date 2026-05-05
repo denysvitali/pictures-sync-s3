@@ -271,7 +271,7 @@ func (s *Service) Run() error {
 	}
 }
 
-func (s *Service) handleManualSyncCommand(ctx context.Context) daemoncontrol.Response {
+func (s *Service) handleManualSyncCommand(ctx context.Context, devicePath string) daemoncontrol.Response {
 	if ctx.Err() != nil {
 		return daemoncontrol.Error(daemoncontrol.CodeUnavailable, "pictures-sync daemon is shutting down")
 	}
@@ -283,10 +283,12 @@ func (s *Service) handleManualSyncCommand(ctx context.Context) daemoncontrol.Res
 		return daemoncontrol.Error(daemoncontrol.CodeInternalError, "System time not synchronized - sync disabled")
 	}
 
-	if err := s.cardHandler.HandleManualSync(); err != nil {
+	if err := s.cardHandler.HandleManualSync(devicePath); err != nil {
 		log.Printf("Manual sync command rejected: %v", err)
 		switch err.Error() {
 		case "no SD card mounted":
+			return daemoncontrol.Error(daemoncontrol.CodeNoSDCardMounted, err.Error())
+		case "selected device is not mounted":
 			return daemoncontrol.Error(daemoncontrol.CodeNoSDCardMounted, err.Error())
 		case "sync already in progress or starting":
 			return daemoncontrol.Error(daemoncontrol.CodeSyncAlreadyActive, err.Error())

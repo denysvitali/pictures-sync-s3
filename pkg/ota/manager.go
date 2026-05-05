@@ -12,11 +12,14 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/denysvitali/pictures-sync-s3/pkg/state"
+	"github.com/denysvitali/pictures-sync-s3/pkg/utils"
 	"github.com/gokrazy/updater"
 )
 
@@ -28,6 +31,8 @@ const (
 	DefaultGitHubAPIURL = "https://api.github.com"
 	// #nosec G101 -- default gokrazy updater URL with well-known local device password
 	DefaultUpdateURL = "http://gokrazy:photo-backup@127.0.0.1/"
+
+	maxInstallHistoryEntries = 20
 )
 
 type Installer interface {
@@ -75,8 +80,9 @@ type Manager struct {
 	HTTPClient *http.Client
 	Installer  Installer
 
-	mu     sync.Mutex
-	status Status
+	mu             sync.Mutex
+	status         Status
+	installHistory []InstallHistoryEntry
 }
 
 type Status struct {
@@ -89,6 +95,17 @@ type Status struct {
 	StartedAt   time.Time `json:"started_at,omitempty"`
 	FinishedAt  time.Time `json:"finished_at,omitempty"`
 	Error       string    `json:"error,omitempty"`
+}
+
+type InstallHistoryEntry struct {
+	Release    string    `json:"release"`
+	Asset      string    `json:"asset"`
+	AssetURL   string    `json:"asset_url"`
+	State      string    `json:"state"`
+	Message    string    `json:"message,omitempty"`
+	Error      string    `json:"error,omitempty"`
+	StartedAt  time.Time `json:"started_at,omitempty"`
+	FinishedAt time.Time `json:"finished_at,omitempty"`
 }
 
 type Release struct {
@@ -114,15 +131,18 @@ func NewManager() *Manager {
 	}
 
 	httpClient := &http.Client{Timeout: 30 * time.Minute}
-	return &Manager{
-		Owner:      envDefault("OTA_GITHUB_OWNER", DefaultOwner),
-		Repo:       envDefault("OTA_GITHUB_REPO", DefaultRepo),
-		AssetName:  envDefault("OTA_RELEASE_ASSET", DefaultAssetName),
-		APIURL:     envDefault("OTA_GITHUB_API_URL", DefaultGitHubAPIURL),
-		HTTPClient: httpClient,
-		Installer:  GokrazyInstaller{BaseURL: updateURL, HTTPClient: gokrazyUpdateClient(updateURL, 30*time.Minute)},
-		status:     Status{State: "idle"},
+	mgr := &Manager{
+		Owner:          envDefault("OTA_GITHUB_OWNER", DefaultOwner),
+		Repo:           envDefault("OTA_GITHUB_REPO", DefaultRepo),
+		AssetName:      envDefault("OTA_RELEASE_ASSET", DefaultAssetName),
+		APIURL:         envDefault("OTA_GITHUB_API_URL", DefaultGitHubAPIURL),
+		HTTPClient:     httpClient,
+		Installer:      GokrazyInstaller{BaseURL: updateURL, HTTPClient: gokrazyUpdateClient(updateURL, 30*time.Minute)},
+		status:         Status{State: "idle"},
+		installHistory: make([]InstallHistoryEntry, 0),
 	}
+	_ = mgr.loadInstallHistory()
+	return mgr
 }
 
 func (m *Manager) Status() Status {
@@ -131,7 +151,70 @@ func (m *Manager) Status() Status {
 	return m.status
 }
 
+func (m *Manager) InstallationHistory() []InstallHistoryEntry {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	history := make([]InstallHistoryEntry, len(m.installHistory))
+	copy(history, m.installHistory)
+	return history
+}
+
+func (m *Manager) loadInstallHistory() error {
+	var history []InstallHistoryEntry
+	if err := utils.LoadJSON(m.installHistoryPath(), &history, []InstallHistoryEntry{}); err != nil {
+		return err
+	}
+
+	if len(history) > maxInstallHistoryEntries {
+		history = history[len(history)-maxInstallHistoryEntries:]
+	}
+
+	m.mu.Lock()
+	m.installHistory = history
+	m.mu.Unlock()
+
+	return nil
+}
+
+func (m *Manager) installHistoryPath() string {
+	return filepath.Join(state.PermDir, "ota-install-history.json")
+}
+
+func (m *Manager) recordInstallHistory(entry InstallHistoryEntry) {
+	// Keep history in memory and persist best effort.
+	m.mu.Lock()
+	m.installHistory = append(m.installHistory, entry)
+	if len(m.installHistory) > maxInstallHistoryEntries {
+		m.installHistory = m.installHistory[len(m.installHistory)-maxInstallHistoryEntries:]
+	}
+	history := make([]InstallHistoryEntry, len(m.installHistory))
+	copy(history, m.installHistory)
+	m.mu.Unlock()
+
+	_ = utils.SaveJSON(m.installHistoryPath(), history, 0644)
+}
+
+func (m *Manager) historyFromStatus(status Status) InstallHistoryEntry {
+	return InstallHistoryEntry{
+		Release:    status.Release,
+		Asset:      status.Asset,
+		AssetURL:   status.AssetURL,
+		State:      status.State,
+		Message:    status.Message,
+		Error:      status.Error,
+		StartedAt:  status.StartedAt,
+		FinishedAt: status.FinishedAt,
+	}
+}
+
 func (m *Manager) Start(ctx context.Context) (Status, error) {
+	return m.StartWithRelease(ctx, "")
+}
+
+func (m *Manager) StartWithRelease(ctx context.Context, release string) (Status, error) {
+	release = strings.TrimSpace(release)
+
 	m.mu.Lock()
 	if m.status.State == "checking" || m.status.State == "downloading" || m.status.State == "installing" {
 		status := m.status
@@ -145,13 +228,13 @@ func (m *Manager) Start(ctx context.Context) (Status, error) {
 	runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Hour)
 	go func() {
 		defer cancel()
-		m.run(runCtx)
+		m.run(runCtx, release)
 	}()
 	return status, nil
 }
 
 func (m *Manager) LatestRelease(ctx context.Context) (*Release, *Asset, error) {
-	releases, err := m.fetchReleases(ctx)
+	releases, err := m.AvailableReleases(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -159,28 +242,28 @@ func (m *Manager) LatestRelease(ctx context.Context) (*Release, *Asset, error) {
 		return nil, nil, errors.New("no GitHub releases found")
 	}
 
-	sort.SliceStable(releases, func(i, j int) bool {
-		return releases[i].PublishedAt.After(releases[j].PublishedAt)
-	})
-
-	for i := range releases {
-		release := &releases[i]
-		if release.Draft {
-			continue
-		}
-		if asset := findAsset(release.Assets, m.assetName()); asset != nil {
-			return release, asset, nil
-		}
-		if asset := findAsset(release.Assets, FlashAssetName); asset != nil {
-			return release, nil, fmt.Errorf("latest release %s only contains %s; publish %s for gokrazy OTA", release.TagName, FlashAssetName, m.assetName())
-		}
-	}
-
-	return nil, nil, fmt.Errorf("no release contains %s", m.assetName())
+	return &releases[0], &releases[0].Assets[0], nil
 }
 
-func (m *Manager) run(ctx context.Context) {
-	release, asset, err := m.LatestRelease(ctx)
+func (m *Manager) SelectRelease(ctx context.Context, tag string) (*Release, *Asset, error) {
+	if strings.EqualFold(strings.TrimSpace(tag), "latest") || strings.TrimSpace(tag) == "" {
+		return m.LatestRelease(ctx)
+	}
+
+	releases, err := m.AvailableReleases(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	for i := range releases {
+		if releases[i].TagName == tag {
+			return &releases[i], &releases[i].Assets[0], nil
+		}
+	}
+	return nil, nil, fmt.Errorf("release %q not found", tag)
+}
+
+func (m *Manager) run(ctx context.Context, releaseTag string) {
+	release, asset, err := m.SelectRelease(ctx, releaseTag)
 	if err != nil {
 		m.fail(err)
 		return
@@ -230,6 +313,36 @@ func (m *Manager) run(ctx context.Context) {
 	status.Message = "OTA image installed; reboot requested"
 	status.FinishedAt = time.Now()
 	m.set(status)
+	m.recordInstallHistory(m.historyFromStatus(status))
+}
+
+func (m *Manager) AvailableReleases(ctx context.Context) ([]Release, error) {
+	releases, err := m.fetchReleases(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	sort.SliceStable(releases, func(i, j int) bool {
+		return releases[i].PublishedAt.After(releases[j].PublishedAt)
+	})
+
+	filtered := make([]Release, 0, len(releases))
+	for i := range releases {
+		release := releases[i]
+		if release.Draft {
+			continue
+		}
+		if asset := findAsset(release.Assets, m.assetName()); asset != nil {
+			release.Assets = []Asset{*asset}
+			filtered = append(filtered, release)
+		}
+	}
+
+	if len(filtered) == 0 {
+		return nil, errors.New("no release contains " + m.assetName())
+	}
+
+	return filtered, nil
 }
 
 func (m *Manager) fetchReleases(ctx context.Context) ([]Release, error) {
@@ -282,6 +395,7 @@ func (m *Manager) fail(err error) {
 	status.Message = "OTA installation failed"
 	status.FinishedAt = time.Now()
 	m.set(status)
+	m.recordInstallHistory(m.historyFromStatus(status))
 }
 
 func (m *Manager) client() *http.Client {

@@ -72,12 +72,36 @@ func (ctx *Context) HandleDeviceSelect(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Manual device selection: %s", req.DevicePath)
 
-	// TODO: Trigger sync for the selected device
-	// This needs to be integrated with the main pictures-sync service
+	requester := ctx.ManualSync
+	if requester == nil {
+		requester = DaemonControlFunc{
+			ManualSync: daemoncontrol.RequestManualSyncWithPath,
+			CancelSync: daemoncontrol.RequestCancelSync,
+		}
+	}
+
+	requestCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	log.Printf("Manual device selection requested via WebUI; syncing device: %s", req.DevicePath)
+	if err := requester.RequestManualSync(requestCtx, req.DevicePath); err != nil {
+		statusCode := http.StatusServiceUnavailable
+		var commandErr *daemoncontrol.CommandError
+		if errors.As(err, &commandErr) {
+			switch commandErr.Code {
+			case daemoncontrol.CodeNoSDCardMounted:
+				statusCode = http.StatusBadRequest
+			case daemoncontrol.CodeSyncAlreadyActive:
+				statusCode = http.StatusConflict
+			}
+		}
+		http.Error(w, err.Error(), statusCode)
+		return
+	}
 
 	JSONResponse(w, map[string]string{
 		"status":  "ok",
-		"message": "Device selection received. Integration with sync service pending.",
+		"message": "Manual sync requested for selected device",
 	})
 }
 
@@ -106,7 +130,7 @@ func (ctx *Context) HandleSyncStart(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	log.Println("Manual sync requested via WebUI; forwarding to pictures-sync daemon")
-	if err := requester.RequestManualSync(requestCtx); err != nil {
+	if err := requester.RequestManualSync(requestCtx, ""); err != nil {
 		statusCode := http.StatusServiceUnavailable
 		var commandErr *daemoncontrol.CommandError
 		if errors.As(err, &commandErr) {

@@ -25,7 +25,8 @@ const (
 )
 
 type Request struct {
-	Command string `json:"command"`
+	Command    string `json:"command"`
+	DevicePath string `json:"device_path,omitempty"`
 }
 
 type Response struct {
@@ -46,7 +47,7 @@ func (e *CommandError) Error() string {
 	return e.Code
 }
 
-type ManualSyncHandler func(context.Context) Response
+type ManualSyncHandler func(context.Context, string) Response
 type CancelSyncHandler func(context.Context) Response
 
 func SocketPath() string {
@@ -123,7 +124,7 @@ func handleConn(ctx context.Context, conn net.Conn, handleManualSync ManualSyncH
 
 	switch req.Command {
 	case CommandManualSync:
-		_ = json.NewEncoder(conn).Encode(handleManualSync(ctx))
+		_ = json.NewEncoder(conn).Encode(handleManualSync(ctx, req.DevicePath))
 	case CommandCancelSync:
 		_ = json.NewEncoder(conn).Encode(handleCancelSync(ctx))
 	default:
@@ -132,14 +133,18 @@ func handleConn(ctx context.Context, conn net.Conn, handleManualSync ManualSyncH
 }
 
 func RequestManualSync(ctx context.Context) error {
-	return sendCommand(ctx, CommandManualSync)
+	return sendCommand(ctx, CommandManualSync, "")
+}
+
+func RequestManualSyncWithPath(ctx context.Context, devicePath string) error {
+	return sendCommand(ctx, CommandManualSync, devicePath)
 }
 
 func RequestCancelSync(ctx context.Context) error {
-	return sendCommand(ctx, CommandCancelSync)
+	return sendCommand(ctx, CommandCancelSync, "")
 }
 
-func sendCommand(ctx context.Context, command string) error {
+func sendCommand(ctx context.Context, command string, devicePath string) error {
 	requestCtx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 
@@ -159,7 +164,7 @@ func sendCommand(ctx context.Context, command string) error {
 	}
 	_ = conn.SetDeadline(deadline)
 
-	if err := json.NewEncoder(conn).Encode(Request{Command: command}); err != nil {
+	if err := json.NewEncoder(conn).Encode(Request{Command: command, DevicePath: devicePath}); err != nil {
 		return &CommandError{Code: CodeUnavailable, Message: fmt.Sprintf("send daemon command: %v", err)}
 	}
 

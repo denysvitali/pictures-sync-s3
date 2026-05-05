@@ -104,7 +104,7 @@ func setupTestContext(t *testing.T) (*Context, func()) {
 		StateMgr: stateMgr,
 		SyncMgr:  mockSync,
 		ManualSync: DaemonControlFunc{
-			ManualSync: func(context.Context) error {
+			ManualSync: func(context.Context, string) error {
 				return &daemoncontrol.CommandError{
 					Code:    daemoncontrol.CodeNoSDCardMounted,
 					Message: "no SD card mounted",
@@ -265,6 +265,11 @@ func TestHandleDeviceSelect_POST(t *testing.T) {
 	ctx, cleanup := setupTestContext(t)
 	defer cleanup()
 
+	ctx.ManualSync = DaemonControlFunc{
+		ManualSync: func(context.Context, string) error { return nil },
+		CancelSync: func(context.Context) error { return nil },
+	}
+
 	body := map[string]string{"device_path": "/dev/sda1"}
 	bodyBytes, _ := json.Marshal(body)
 
@@ -311,6 +316,37 @@ func TestHandleDeviceSelect_InvalidJSON(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("Expected status 400, got %d", w.Code)
+	}
+}
+
+func TestHandleDeviceSelect_ForwardsRequestToDaemonWithDevicePath(t *testing.T) {
+	ctx, cleanup := setupTestContext(t)
+	defer cleanup()
+
+	var gotDevicePath string
+	ctx.ManualSync = DaemonControlFunc{
+		ManualSync: func(_ context.Context, devicePath string) error {
+			gotDevicePath = devicePath
+			return nil
+		},
+		CancelSync: func(context.Context) error { return nil },
+	}
+
+	const wantedDevicePath = "/dev/sda1"
+	body := map[string]string{"device_path": wantedDevicePath}
+	bodyBytes, _ := json.Marshal(body)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/devices/select", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	ctx.HandleDeviceSelect(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+	if gotDevicePath != wantedDevicePath {
+		t.Fatalf("Expected device_path %q, got %q", wantedDevicePath, gotDevicePath)
 	}
 }
 
@@ -368,7 +404,7 @@ func TestHandleSyncStart_ForwardsRequestToDaemon(t *testing.T) {
 
 	called := false
 	ctx.ManualSync = DaemonControlFunc{
-		ManualSync: func(context.Context) error {
+		ManualSync: func(context.Context, string) error {
 			called = true
 			return nil
 		},
@@ -411,7 +447,7 @@ func TestHandleSyncCancel_Success(t *testing.T) {
 
 	called := false
 	ctx.ManualSync = DaemonControlFunc{
-		ManualSync: func(context.Context) error { return nil },
+		ManualSync: func(context.Context, string) error { return nil },
 		CancelSync: func(context.Context) error {
 			called = true
 			return nil

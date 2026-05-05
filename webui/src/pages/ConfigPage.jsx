@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useDevice } from '../DeviceContext.jsx'
 import { useToast } from '../components/Toast.jsx'
 import { Card, CardHeader, CardTitle } from '../components/Card.jsx'
@@ -34,6 +34,39 @@ function describeError(err) {
     return 'Request timed out — the device may be unreachable'
   }
   return msg
+}
+
+function formatReleaseDate(value) {
+  const timestamp = Date.parse(value)
+  if (Number.isNaN(timestamp)) return 'Unknown date'
+  return new Date(timestamp).toLocaleString()
+}
+
+function formatReleaseSize(size) {
+  if (!size || size < 0) return '--'
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`
+  return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`
+}
+
+function formatBytes(size) {
+  if (!size || size < 0) return '--'
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`
+  return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`
+}
+
+function formatDate(value) {
+  const timestamp = Date.parse(value)
+  if (Number.isNaN(timestamp)) return 'Unknown time'
+  return new Date(timestamp).toLocaleString()
+}
+
+function formatPartition(partition) {
+  if (!partition) return '--'
+  return `root${partition}`
 }
 
 // ---------------------------------------------------------------------------
@@ -541,6 +574,51 @@ function OtaSection() {
   const [status, setStatus] = useState(null)
   const [loading, setLoading] = useState(true)
   const [installing, setInstalling] = useState(false)
+  const [selectedRelease, setSelectedRelease] = useState('')
+
+  const installationRunning = !!status?.state && ['checking', 'downloading', 'installing'].includes(status.state)
+  const installedVersions = useMemo(
+    () => (Array.isArray(status?.installed_versions) ? status.installed_versions : []),
+    [status?.installed_versions]
+  )
+  const installHistory = useMemo(
+    () => (Array.isArray(status?.install_history) ? status.install_history : []),
+    [status?.install_history]
+  )
+  const activeInfo = status?.ab_partitions?.active_info
+  const inactiveInfo = status?.ab_partitions?.inactive_info
+  const updateInfo = status?.ab_partitions?.update_info
+  const installPartitionLabel = formatPartition(status?.ab_partitions?.update_slot)
+  const activePartitionLabel = formatPartition(status?.ab_partitions?.active)
+  const inactivePartitionLabel = formatPartition(status?.ab_partitions?.inactive)
+
+  const releases = useMemo(() => {
+    if (!Array.isArray(status?.releases)) return []
+    return [...status.releases].sort((a, b) => {
+      const aTs = Date.parse(a?.published_at)
+      const bTs = Date.parse(b?.published_at)
+      if (Number.isNaN(aTs) || Number.isNaN(bTs)) return 0
+      return bTs - aTs
+    })
+  }, [status?.releases])
+
+  const selectedReleaseInfo = useMemo(
+    () => releases.find((release) => release.tag_name === selectedRelease),
+    [releases, selectedRelease]
+  )
+  const canInstall = !!selectedReleaseInfo && !installationRunning && !installing
+
+  const releaseOptions = useMemo(() => {
+    return releases.map((release) => {
+      const label = `${release.tag_name} — ${formatReleaseDate(release.published_at)} (${formatReleaseSize(
+        release.asset_size
+      )})`
+      return {
+        value: release.tag_name,
+        label: release.tag_name === status?.current_version ? `${label} (installed)` : label,
+      }
+    })
+  }, [releases, status?.current_version])
 
   const fetchStatus = useCallback(async () => {
     setLoading(true)
@@ -558,10 +636,51 @@ function OtaSection() {
     fetchStatus()
   }, [fetchStatus])
 
+  useEffect(() => {
+    if (!selectedRelease && releases.length > 0) {
+      setSelectedRelease(releases[0].tag_name)
+      return
+    }
+    if (selectedRelease && !releases.some((release) => release.tag_name === selectedRelease)) {
+      setSelectedRelease(releases[0]?.tag_name || '')
+    }
+  }, [selectedRelease, releases])
+
   const handleInstall = useCallback(async () => {
+    if (!selectedRelease) {
+      toast.error('Select a release to install')
+      return
+    }
+    if (installationRunning) {
+      toast.error('An OTA update is already in progress')
+      return
+    }
+
+    if (!selectedReleaseInfo) {
+      toast.error('Selected release is not available')
+      return
+    }
+
+    const selectedSize = formatBytes(selectedReleaseInfo?.asset_size || 0)
+    const installTarget = status?.ab_partitions?.update_slot
+    const targetLabel = formatPartition(installTarget)
+    const activeLabel = activePartitionLabel
+    const confirmLabel = [
+      `Install ${selectedReleaseInfo.name || selectedRelease}?`,
+      `Version: ${selectedReleaseInfo.tag_name}`,
+      `Active partition now: ${activeLabel}`,
+      `Target partition: ${targetLabel}`,
+      `Estimated size: ${selectedSize}`,
+      'Device will reboot after install.',
+    ].join('\n')
+
+    if (!window.confirm(confirmLabel)) {
+      return
+    }
+
     setInstalling(true)
     try {
-      await installOta(deviceUrl)
+      await installOta(deviceUrl, selectedRelease)
       toast.success('Update installation started')
       fetchStatus()
     } catch (err) {
@@ -569,7 +688,16 @@ function OtaSection() {
     } finally {
       setInstalling(false)
     }
-  }, [deviceUrl, toast, fetchStatus])
+  }, [
+    deviceUrl,
+    selectedRelease,
+    selectedReleaseInfo,
+    installationRunning,
+    activePartitionLabel,
+    status?.ab_partitions?.update_slot,
+    toast,
+    fetchStatus,
+  ])
 
   return (
     <AccordionSection title="OTA Updates" icon="arrow-up-tray" badge={
@@ -583,20 +711,110 @@ function OtaSection() {
         </div>
       ) : (
         <div className="space-y-3">
+          {installedVersions.length ? (
+            <div className="bg-surface-900 rounded-lg p-3">
+              <p className="text-xs text-surface-400 mb-1">Known installed versions</p>
+              <div className="flex flex-wrap gap-2">
+                {installedVersions.map((versionEntry) => (
+                  <StatusBadge
+                    key={versionEntry}
+                    variant={versionEntry === status?.current_version ? 'success' : 'neutral'}
+                  >
+                    {versionEntry}
+                    {versionEntry === status?.current_version ? ' (active)' : ''}
+                  </StatusBadge>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {status?.ab_partitions ? (
+            <div className="grid grid-cols-2 gap-3">
+          <div className="bg-surface-900 rounded-lg p-3">
+                <p className="text-xs text-surface-400 mb-1">A/B Partitions</p>
+                <p className="text-xs text-surface-500">
+                  Active {activePartitionLabel}
+                  {activeInfo?.path ? ` (${activeInfo.path})` : ''}
+                </p>
+                <p className="text-xs text-surface-500 mt-1">
+                  Inactive {inactivePartitionLabel}
+                  {inactiveInfo?.path ? ` (${inactiveInfo.path})` : ''}
+                </p>
+                <p className="text-xs text-surface-500 mt-1">
+                  Next install target {installPartitionLabel}
+                  {updateInfo?.path ? ` (${updateInfo.path})` : ''}
+                </p>
+                {activeInfo?.size_human || inactiveInfo?.size_human ? (
+                  <p className="text-xs text-surface-500 mt-1">
+                    Size estimate: {activeInfo?.size_human || inactiveInfo?.size_human || 'unknown'}
+                  </p>
+                ) : null}
+                <p className="text-xs text-surface-500 mt-1">
+                  Source: {status?.ab_partitions?.source || 'unknown'}
+                </p>
+              </div>
+              <div className="bg-surface-900 rounded-lg p-3">
+                <p className="text-xs text-surface-400 mb-1">Update target</p>
+                <p className="text-xs text-surface-500">
+                  {installPartitionLabel}
+                </p>
+                {updateInfo?.size_human || updateInfo?.size_bytes ? (
+                  <p className="text-xs text-surface-500 mt-1">
+                    Estimated size: {updateInfo?.size_human || formatBytes(updateInfo?.size_bytes || 0)}
+                  </p>
+                ) : null}
+                <p className="text-xs text-surface-500 mt-1">
+                  Update destination is always the inactive partition.
+                </p>
+              </div>
+            </div>
+          ) : null}
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-surface-900 rounded-lg p-3">
               <p className="text-xs text-surface-400 mb-1">Current Version</p>
               <p className="text-sm font-medium text-surface-100">
                 {status?.current_version || 'unknown'}
               </p>
+              {status?.current_commit ? (
+                <p className="text-xs text-surface-500 mt-1 break-all">
+                  {status.current_commit}
+                </p>
+              ) : null}
+              <p className="text-xs text-surface-500 mt-1">
+                {status?.current_build_date || 'Build date unknown'}
+              </p>
             </div>
             <div className="bg-surface-900 rounded-lg p-3">
-              <p className="text-xs text-surface-400 mb-1">Latest Version</p>
+              <p className="text-xs text-surface-400 mb-1">Latest Release</p>
               <p className="text-sm font-medium text-surface-100">
                 {status?.latest_version || 'unknown'}
               </p>
+              <p className="text-xs text-surface-500 mt-1">
+                {status?.releases?.[0] ? formatReleaseDate(status.releases[0].published_at) : 'No release date'}
+              </p>
             </div>
           </div>
+          <Field label="Select release to install">
+            {releaseOptions.length > 0 ? (
+              <SelectInput
+                value={selectedRelease}
+                onChange={setSelectedRelease}
+                options={releaseOptions}
+                disabled={installing}
+              />
+            ) : (
+              <p className="text-xs text-surface-500">No installable releases found</p>
+            )}
+          </Field>
+          {selectedReleaseInfo ? (
+            <p className="text-xs text-surface-500 mt-1">
+              {selectedReleaseInfo.name || selectedReleaseInfo.tag_name}
+            </p>
+          ) : null}
+          {selectedReleaseInfo?.published_at ? (
+            <p className="text-xs text-surface-500 mt-1">
+              Published {formatReleaseDate(selectedReleaseInfo.published_at)}
+            </p>
+          ) : null}
           <div className="flex justify-between items-center pt-1">
             <Button
               variant="ghost"
@@ -605,19 +823,47 @@ function OtaSection() {
               disabled={installing}
             >
               <Icon name="arrow-path" className="w-4 h-4" />
-              Refresh
+              Check for updates
             </Button>
             <Button
               variant="primary"
               size="sm"
               loading={installing}
-              disabled={!status?.update_available}
+              disabled={!canInstall || releaseOptions.length === 0}
+              title={installationRunning ? 'An OTA update is already running' : ''}
               onClick={handleInstall}
             >
               <Icon name="arrow-up-tray" className="w-4 h-4" />
-              Install Update
+              Install Selected Version
             </Button>
           </div>
+          {installHistory.length ? (
+            <div className="bg-surface-900 rounded-lg p-3">
+              <p className="text-xs text-surface-400 mb-2">Recent install history</p>
+              <div className="space-y-2">
+                {installHistory.slice(0, 5).map((entry, idx) => (
+                  <div
+                    key={`${entry.release || 'unknown'}-${entry.started_at || entry.finished_at || idx}`}
+                    className="rounded-md border border-surface-700 bg-surface-950 p-2"
+                  >
+                    <p className="text-xs text-surface-200">{entry.release || 'unknown release'}</p>
+                    <p className="text-xs text-surface-500 mt-1">
+                      {entry.state || 'unknown state'}
+                      {entry.finished_at || entry.started_at
+                        ? ` · ${entry.state === 'installed' ? 'finished' : 'started'} ${formatDate(entry.finished_at || entry.started_at)}`
+                        : ''}
+                    </p>
+                    {entry.error ? <p className="text-xs text-danger mt-1">{entry.error}</p> : null}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {status?.releases?.length ? (
+            <p className="text-xs text-surface-500">
+              {status.releases.length} release{status.releases.length === 1 ? '' : 's'} available
+            </p>
+          ) : null}
         </div>
       )}
     </AccordionSection>

@@ -35,17 +35,17 @@ type SyncManager interface {
 }
 
 type ManualSyncRequester interface {
-	RequestManualSync(context.Context) error
+	RequestManualSync(context.Context, string) error
 	RequestCancelSync(context.Context) error
 }
 
 type DaemonControlFunc struct {
-	ManualSync func(context.Context) error
+	ManualSync func(context.Context, string) error
 	CancelSync func(context.Context) error
 }
 
-func (f DaemonControlFunc) RequestManualSync(ctx context.Context) error {
-	return f.ManualSync(ctx)
+func (f DaemonControlFunc) RequestManualSync(ctx context.Context, devicePath string) error {
+	return f.ManualSync(ctx, devicePath)
 }
 
 func (f DaemonControlFunc) RequestCancelSync(ctx context.Context) error {

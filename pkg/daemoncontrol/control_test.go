@@ -56,7 +56,7 @@ func TestRequestManualSync_OK(t *testing.T) {
 	withTempSocket(t)
 
 	called := false
-	startTestServer(t, func(context.Context) Response {
+	startTestServer(t, func(context.Context, string) Response {
 		called = true
 		return OK("accepted")
 	})
@@ -69,10 +69,33 @@ func TestRequestManualSync_OK(t *testing.T) {
 	}
 }
 
+func TestRequestManualSync_WithDevicePath(t *testing.T) {
+	withTempSocket(t)
+
+	const wantedDevicePath = "/dev/sda1"
+	called := false
+	var requestedPath string
+	startTestServer(t, func(_ context.Context, devicePath string) Response {
+		called = true
+		requestedPath = devicePath
+		return OK("accepted")
+	})
+
+	if err := RequestManualSyncWithPath(context.Background(), wantedDevicePath); err != nil {
+		t.Fatalf("RequestManualSyncWithPath failed: %v", err)
+	}
+	if !called {
+		t.Fatal("Expected manual sync handler to be called")
+	}
+	if requestedPath != wantedDevicePath {
+		t.Fatalf("Expected device path %q, got %q", wantedDevicePath, requestedPath)
+	}
+}
+
 func TestRequestManualSync_ErrorResponse(t *testing.T) {
 	withTempSocket(t)
 
-	startTestServer(t, func(context.Context) Response {
+	startTestServer(t, func(context.Context, string) Response {
 		return Error(CodeNoSDCardMounted, "no SD card mounted")
 	})
 
@@ -114,7 +137,7 @@ func TestRequestCancelSync_OK(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- Serve(ctx, func(context.Context) Response {
+		errCh <- Serve(ctx, func(context.Context, string) Response {
 			return OK("accepted")
 		}, func(context.Context) Response {
 			called = true

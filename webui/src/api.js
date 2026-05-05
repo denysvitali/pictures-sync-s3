@@ -142,11 +142,11 @@ export const getB2Regions = (d) => apiRequest('/api/config/b2/regions', { device
 export const saveB2Config = (d, payload) =>
   apiRequest('/api/config/b2', { deviceUrl: d, method: 'POST', body: payload })
 export const getOtaStatus = (d) => apiRequest('/api/ota/status', { deviceUrl: d })
-export const installOta = (d) =>
-  apiRequest('/api/ota/install', { deviceUrl: d, method: 'POST' })
+export const installOta = (d, releaseTag = null) =>
+  apiRequest('/api/ota/install', { deviceUrl: d, method: 'POST', body: releaseTag ? { release_tag: releaseTag } : undefined })
 export const getDevices = (d) => apiRequest('/api/devices', { deviceUrl: d })
-export const selectDevice = (d, deviceId) =>
-  apiRequest('/api/devices/select', { deviceUrl: d, method: 'POST', body: { device_id: deviceId } })
+export const selectDevice = (d, devicePath) =>
+  apiRequest('/api/devices/select', { deviceUrl: d, method: 'POST', body: { device_path: devicePath } })
 export const getFilePublicLink = (d, filePath) =>
   apiRequest('/api/files/link', { deviceUrl: d, query: { path: filePath } })
 export const getFileViewUrl = (d, filePath) =>
