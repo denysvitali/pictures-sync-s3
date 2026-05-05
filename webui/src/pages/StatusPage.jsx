@@ -30,6 +30,12 @@ function formatBytes(bytes) {
   return `${(bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0)} ${units[i]}`
 }
 
+function formatSpeed(bytesPerSecond) {
+  const speed = Number(bytesPerSecond)
+  if (!Number.isFinite(speed) || speed <= 0) return '--'
+  return `${formatBytes(speed)}/s`
+}
+
 function getDeviceDisplayName(device) {
   const base = device?.volume_label || device?.device_name || device?.device_path || 'Unknown device'
   const details = []
@@ -127,11 +133,14 @@ function SystemStatusCard({ status }) {
                 {status.current_sync.current_file}
               </p>
             )}
-            {status.current_sync.eta && (
-              <p className="text-xs text-surface-500 mt-1">
-                ETA: {status.current_sync.eta}
+            <div className="grid grid-cols-2 gap-2 mt-2 text-xs text-surface-500">
+              <p>
+                Upload: {formatSpeed(status.current_sync.transfer_speed)}
               </p>
-            )}
+              <p className="text-right">
+                ETA: {status.current_sync.eta || '--'}
+              </p>
+            </div>
           </div>
         )}
 
