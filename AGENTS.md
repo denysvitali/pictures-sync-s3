@@ -36,6 +36,7 @@
 - Commit messages in this repo follow a short conventional format like `feat: improve sync` and `feat: improve UI`; keep this style and imperative phrasing.
 - In PRs include: summary, changed files, validation commands run (`go test ./...`, relevant `go build`), and any deployment notes.
 - For UI changes, attach a screenshot or brief UI behavior notes from local webui run.
+- Never commit generated WebUI distribution assets under `pkg/webui/dist/`, under any circumstance. These files are build output, must stay ignored, and must not be force-added even when a UI build regenerates hashed filenames.
 
 ## Security & Configuration Tips
 - Do not commit real credentials (`rclone.conf`, Wi‑Fi passwords, Tailscale keys).

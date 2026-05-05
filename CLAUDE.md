@@ -12,6 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) and agents when work
 5. **Verify First**: Use Read/Glob tools to understand current state before making assumptions
 6. **Document Intent**: When making changes, explain the reasoning and expected impact
 7. **⚠️ NO USELESS DOCUMENTATION**: Do NOT create .md files in the repository root. Only README.md and CLAUDE.md should exist there. Put specific documentation in relevant package directories or skip it entirely if not essential.
+8. **⚠️ NEVER COMMIT WEBUI DIST ASSETS**: Do NOT commit, stage, force-add, or preserve generated files under `pkg/webui/dist/` under any circumstance. These are build artifacts with hashed filenames and must remain out of Git history, even after running a frontend build.
 
 ### 🎯 Task Prioritization (High to Low)
 1. **Security vulnerabilities** (CVSS 7.0+)
