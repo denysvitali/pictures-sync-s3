@@ -1,6 +1,9 @@
 package handlers
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestParseRootPartition(t *testing.T) {
 	tests := []struct {
@@ -55,6 +58,75 @@ func TestIsKnownInstalledVersion(t *testing.T) {
 		t.Run(tt.version, func(t *testing.T) {
 			if got := isKnownInstalledVersion(tt.version); got != tt.want {
 				t.Fatalf("isKnownInstalledVersion(%q) = %t, want %t", tt.version, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsReleaseUpdateAvailable(t *testing.T) {
+	installedAt := time.Date(2026, 5, 5, 19, 9, 27, 0, time.UTC)
+
+	tests := []struct {
+		name           string
+		currentVersion string
+		installedAt    time.Time
+		releaseTag     string
+		publishedAt    time.Time
+		want           bool
+	}{
+		{
+			name:           "same release tag is not an update even if published later",
+			currentVersion: "master-43a8bea96ae3159e179a146a2b86fc7efb8d673e",
+			installedAt:    installedAt,
+			releaseTag:     "master-43a8bea96ae3159e179a146a2b86fc7efb8d673e",
+			publishedAt:    installedAt.Add(55 * time.Second),
+			want:           false,
+		},
+		{
+			name:           "newer different release is an update",
+			currentVersion: "master-old",
+			installedAt:    installedAt,
+			releaseTag:     "master-new",
+			publishedAt:    installedAt.Add(time.Hour),
+			want:           true,
+		},
+		{
+			name:           "older different release is not an update",
+			currentVersion: "master-new",
+			installedAt:    installedAt,
+			releaseTag:     "master-old",
+			publishedAt:    installedAt.Add(-time.Hour),
+			want:           false,
+		},
+		{
+			name:           "different release is an update when build date is unavailable",
+			currentVersion: "dev",
+			releaseTag:     "master-new",
+			publishedAt:    installedAt,
+			want:           true,
+		},
+		{
+			name:           "blank release is not an update when build date is unavailable",
+			currentVersion: "dev",
+			releaseTag:     " ",
+			publishedAt:    installedAt,
+			want:           false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isReleaseUpdateAvailable(tt.currentVersion, tt.installedAt, tt.releaseTag, tt.publishedAt)
+			if got != tt.want {
+				t.Fatalf(
+					"isReleaseUpdateAvailable(%q, %v, %q, %v) = %t, want %t",
+					tt.currentVersion,
+					tt.installedAt,
+					tt.releaseTag,
+					tt.publishedAt,
+					got,
+					tt.want,
+				)
 			}
 		})
 	}

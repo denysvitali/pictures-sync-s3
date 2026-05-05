@@ -121,18 +121,19 @@ func (ctx *Context) HandleOTAStatus(w http.ResponseWriter, r *http.Request) {
 				AssetURL:    asset.BrowserDownloadURL,
 				HTMLURL:     candidate.HTMLURL,
 			}
-			if option.TagName == current.Version {
+			if sameReleaseVersion(option.TagName, current.Version) {
 				option.Installed = true
 			}
 			if response.LatestVersion == "" {
 				response.LatestVersion = option.TagName
 			}
 			if response.UpdateAvailable == false {
-				if installedAt.IsZero() {
-					response.UpdateAvailable = option.TagName != current.Version
-				} else {
-					response.UpdateAvailable = option.PublishedAt.After(installedAt)
-				}
+				response.UpdateAvailable = isReleaseUpdateAvailable(
+					current.Version,
+					installedAt,
+					option.TagName,
+					option.PublishedAt,
+				)
 			}
 
 			response.Releases = append(response.Releases, option)
@@ -176,6 +177,20 @@ func parseBuildDate(buildDate string) time.Time {
 		return time.Time{}
 	}
 	return parsed
+}
+
+func isReleaseUpdateAvailable(currentVersion string, installedAt time.Time, releaseTag string, publishedAt time.Time) bool {
+	if sameReleaseVersion(releaseTag, currentVersion) {
+		return false
+	}
+	if installedAt.IsZero() {
+		return strings.TrimSpace(releaseTag) != ""
+	}
+	return publishedAt.After(installedAt)
+}
+
+func sameReleaseVersion(a, b string) bool {
+	return strings.TrimSpace(a) == strings.TrimSpace(b)
 }
 
 func collectKnownVersions(otaManager *ota.Manager, currentVersion string) []string {
