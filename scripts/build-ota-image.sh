@@ -46,6 +46,7 @@ cat > "$GOKRAZY_PARENT_DIR/$GOKRAZY_INSTANCE/config.json" <<EOF
     "HTTPPort": "80",
     "HTTPSPort": "443",
     "UseTLS": "self-signed",
+    "TLSCertificateStorage": "perm-self-signed",
     "HTTPPassword": "photo-backup"
   },
   "Packages": [

@@ -22,6 +22,10 @@ jobs:
     env:
       GOKRAZY_INSTANCE: photo-backup
       GOKRAZY_PARENT_DIR: ${{ github.workspace }}/gokrazy
+      GOKRAZY_TOOLS_REPOSITORY: denysvitali/gokrazy-tools
+      GOKRAZY_TOOLS_REF: 242f3106842c380a1c9a4a4473e3e3c7090f29f2
+      GOKRAZY_INTERNAL_REPOSITORY: denysvitali/gokrazy-internal
+      GOKRAZY_INTERNAL_REF: 516186dbfc01bdae7730e451d2b8a7c7a24e5452
       IMAGE_NAME: photo-backup-rpi4b.img
       TARGET_STORAGE_BYTES: 2147483648
     steps:
@@ -60,12 +64,21 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/go/bin/gok
-          key: ${{ runner.os }}-${{ runner.arch }}-gokrazy-gok-main-v1
+          key: ${{ runner.os }}-${{ runner.arch }}-gokrazy-gok-${{ env.GOKRAZY_TOOLS_REPOSITORY }}-${{ env.GOKRAZY_TOOLS_REF }}-${{ env.GOKRAZY_INTERNAL_REPOSITORY }}-${{ env.GOKRAZY_INTERNAL_REF }}-v1
 
       - name: Install gokrazy CLI
         if: steps.cache-gok.outputs.cache-hit != 'true'
         run: |
-          go install github.com/gokrazy/tools/cmd/gok@main
+          git clone --depth=1 "https://github.com/${GOKRAZY_TOOLS_REPOSITORY}.git" /tmp/gokrazy-tools
+          git -C /tmp/gokrazy-tools fetch --depth=1 origin "${GOKRAZY_TOOLS_REF}"
+          git -C /tmp/gokrazy-tools checkout --detach FETCH_HEAD
+
+          git clone --depth=1 "https://github.com/${GOKRAZY_INTERNAL_REPOSITORY}.git" /tmp/gokrazy-internal
+          git -C /tmp/gokrazy-internal fetch --depth=1 origin "${GOKRAZY_INTERNAL_REF}"
+          git -C /tmp/gokrazy-internal checkout --detach FETCH_HEAD
+
+          go -C /tmp/gokrazy-tools mod edit -replace=github.com/gokrazy/internal=/tmp/gokrazy-internal
+          go -C /tmp/gokrazy-tools install ./cmd/gok
 
       - name: Add Go bin to PATH
         run: |

@@ -92,7 +92,8 @@ cat > "$CONFIG_FILE" <<EOF
   "Update": {
     "HTTPPort": "80",
     "HTTPSPort": "443",
-    "UseTLS": "self-signed"
+    "UseTLS": "self-signed",
+    "TLSCertificateStorage": "perm-self-signed"
   },
   "Packages": [
     "github.com/gokrazy/fbstatus",
