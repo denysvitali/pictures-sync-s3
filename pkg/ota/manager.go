@@ -50,10 +50,7 @@ func (i GokrazyInstaller) InstallRoot(ctx context.Context, r io.Reader) error {
 		baseURL = DefaultUpdateURL
 	}
 
-	client := i.HTTPClient
-	if client == nil {
-		client = http.DefaultClient
-	}
+	client := i.httpClient(baseURL)
 
 	target, err := updater.NewTarget(ctx, baseURL, client)
 	if err != nil {
@@ -69,6 +66,14 @@ func (i GokrazyInstaller) InstallRoot(ctx context.Context, r io.Reader) error {
 		return fmt.Errorf("reboot: %w", err)
 	}
 	return nil
+}
+
+func (i GokrazyInstaller) httpClient(baseURL string) *http.Client {
+	client := i.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Minute}
+	}
+	return loopbackInsecureTLSClient(client, baseURL)
 }
 
 type Manager struct {
@@ -450,15 +455,35 @@ func valueDefault(value, fallback string) string {
 }
 
 func gokrazyUpdateClient(rawURL string, timeout time.Duration) *http.Client {
-	client := &http.Client{Timeout: timeout}
+	return loopbackInsecureTLSClient(&http.Client{Timeout: timeout}, rawURL)
+}
+
+func loopbackInsecureTLSClient(client *http.Client, rawURL string) *http.Client {
 	if !shouldSkipUpdateTLSVerify(rawURL) {
 		return client
 	}
-	client.Transport = &http.Transport{
-		// #nosec G402 -- loopback-only gokrazy updater uses self-signed TLS
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+
+	cloned := *client
+	var transport *http.Transport
+	if client.Transport == nil {
+		transport = http.DefaultTransport.(*http.Transport).Clone()
+	} else {
+		existing, ok := client.Transport.(*http.Transport)
+		if !ok {
+			return client
+		}
+		transport = existing.Clone()
 	}
-	return client
+
+	tlsConfig := &tls.Config{}
+	if transport.TLSClientConfig != nil {
+		tlsConfig = transport.TLSClientConfig.Clone()
+	}
+	// #nosec G402 -- loopback-only gokrazy updater uses self-signed TLS
+	tlsConfig.InsecureSkipVerify = true
+	transport.TLSClientConfig = tlsConfig
+	cloned.Transport = transport
+	return &cloned
 }
 
 func shouldSkipUpdateTLSVerify(rawURL string) bool {

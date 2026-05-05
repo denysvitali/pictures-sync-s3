@@ -139,6 +139,41 @@ func TestGokrazyUpdateClientSkipsTLSVerifyOnlyForHTTPSLoopback(t *testing.T) {
 	}
 }
 
+func TestGokrazyInstallerSkipsTLSVerifyForLoopbackHTTPSClient(t *testing.T) {
+	base := &http.Client{Timeout: time.Second}
+	installer := GokrazyInstaller{
+		BaseURL:    "https://127.0.0.1/",
+		HTTPClient: base,
+	}
+
+	client := installer.httpClient(installer.BaseURL)
+	if client == base {
+		t.Fatal("loopback HTTPS client should be cloned before changing transport")
+	}
+	if !transportSkipsTLSVerify(client.Transport) {
+		t.Fatal("loopback HTTPS installer client should skip TLS verification")
+	}
+	if base.Transport != nil {
+		t.Fatal("installer should not mutate the caller-provided client")
+	}
+}
+
+func TestGokrazyInstallerKeepsTLSVerifyForRemoteHTTPSClient(t *testing.T) {
+	base := &http.Client{Timeout: time.Second}
+	installer := GokrazyInstaller{
+		BaseURL:    "https://photo-backup.local/",
+		HTTPClient: base,
+	}
+
+	client := installer.httpClient(installer.BaseURL)
+	if client != base {
+		t.Fatal("remote HTTPS installer client should not be replaced")
+	}
+	if transportSkipsTLSVerify(client.Transport) {
+		t.Fatal("remote HTTPS installer client should not skip TLS verification")
+	}
+}
+
 func transportSkipsTLSVerify(transport http.RoundTripper) bool {
 	t, ok := transport.(*http.Transport)
 	if !ok || t.TLSClientConfig == nil {
