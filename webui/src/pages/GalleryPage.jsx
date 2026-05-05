@@ -72,6 +72,7 @@ export default function GalleryPage() {
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [imagePreview, setImagePreview] = useState(null)
+  const [showThumbnails, setShowThumbnails] = useState(false)
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total])
   const segments = useMemo(() => buildPathSegments(currentPath), [currentPath])
@@ -188,7 +189,7 @@ export default function GalleryPage() {
   return (
     <div className="min-h-screen">
       {/* Source toggle */}
-      <div className="flex items-center gap-2 mb-6">
+      <div className="flex items-center justify-between gap-3 mb-6">
         <div className="flex bg-surface-800 rounded-lg p-1">
           <button
             onClick={() => handleSourceChange('cloud')}
@@ -213,6 +214,20 @@ export default function GalleryPage() {
             SD Card
           </button>
         </div>
+        {source === 'sdcard' && (
+          <button
+            onClick={() => setShowThumbnails((enabled) => !enabled)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              showThumbnails
+                ? 'bg-brand-600 text-white shadow'
+                : 'bg-surface-800 text-surface-300 hover:text-surface-100'
+            }`}
+            aria-pressed={showThumbnails}
+          >
+            <Icon name="image" className="w-4 h-4" />
+            Thumbnails
+          </button>
+        )}
       </div>
 
       {/* Full-size image preview overlay */}
@@ -290,6 +305,7 @@ export default function GalleryPage() {
                 onFolderClick={handleFolderClick}
                 onImageClick={handleImageClick}
                 onImagePreview={setImagePreview}
+                showThumbnail={showThumbnails && source === 'sdcard'}
               />
             ))}
           </div>
@@ -373,7 +389,7 @@ function PaginationButton({ page: pageNum, active = false, onClick }) {
   )
 }
 
-function FileCard({ file, deviceUrl, source, onFolderClick, onImageClick, onImagePreview }) {
+function FileCard({ file, deviceUrl, source, onFolderClick, onImageClick, onImagePreview, showThumbnail }) {
   const [thumbLoaded, setThumbLoaded] = useState(false)
   const [thumbError, setThumbError] = useState(false)
   const isImg = !file.is_dir && (source === 'sdcard' ? file.is_image : isImageFile(file.name))
@@ -400,7 +416,7 @@ function FileCard({ file, deviceUrl, source, onFolderClick, onImageClick, onImag
     >
       {/* Thumbnail area */}
       <div className="aspect-square rounded-lg overflow-hidden mb-2.5 bg-surface-900/50 flex items-center justify-center relative">
-        {isImg && !thumbError ? (
+        {isImg && showThumbnail && !thumbError ? (
           <>
             {!thumbLoaded && (
               <div className="absolute inset-0 flex items-center justify-center">
