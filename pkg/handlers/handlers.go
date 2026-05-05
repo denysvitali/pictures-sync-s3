@@ -36,12 +36,20 @@ type SyncManager interface {
 
 type ManualSyncRequester interface {
 	RequestManualSync(context.Context) error
+	RequestCancelSync(context.Context) error
 }
 
-type ManualSyncFunc func(context.Context) error
+type DaemonControlFunc struct {
+	ManualSync func(context.Context) error
+	CancelSync func(context.Context) error
+}
 
-func (f ManualSyncFunc) RequestManualSync(ctx context.Context) error {
-	return f(ctx)
+func (f DaemonControlFunc) RequestManualSync(ctx context.Context) error {
+	return f.ManualSync(ctx)
+}
+
+func (f DaemonControlFunc) RequestCancelSync(ctx context.Context) error {
+	return f.CancelSync(ctx)
 }
 
 // Context holds dependencies for all handlers

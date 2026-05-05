@@ -96,7 +96,10 @@ func (ctx *Context) HandleSyncStart(w http.ResponseWriter, r *http.Request) {
 
 	requester := ctx.ManualSync
 	if requester == nil {
-		requester = ManualSyncFunc(daemoncontrol.RequestManualSync)
+		requester = DaemonControlFunc{
+			ManualSync: daemoncontrol.RequestManualSync,
+			CancelSync: daemoncontrol.RequestCancelSync,
+		}
 	}
 
 	requestCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -131,21 +134,30 @@ func (ctx *Context) HandleSyncCancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !ctx.SyncMgr.IsRunning() {
-		http.Error(w, "No sync in progress", http.StatusBadRequest)
-		return
+	requester := ctx.ManualSync
+	if requester == nil {
+		requester = DaemonControlFunc{
+			ManualSync: daemoncontrol.RequestManualSync,
+			CancelSync: daemoncontrol.RequestCancelSync,
+		}
 	}
 
-	log.Println("Manual sync cancellation requested")
+	requestCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
 
-	if err := ctx.SyncMgr.Cancel(); err != nil {
-		http.Error(w, fmt.Sprintf("Failed to cancel sync: %v", err), http.StatusInternalServerError)
+	log.Println("Manual sync cancellation requested via WebUI; forwarding to pictures-sync daemon")
+	if err := requester.RequestCancelSync(requestCtx); err != nil {
+		statusCode := http.StatusServiceUnavailable
+		var commandErr *daemoncontrol.CommandError
+		if errors.As(err, &commandErr) {
+			switch commandErr.Code {
+			case daemoncontrol.CodeSyncAlreadyActive:
+				statusCode = http.StatusBadRequest
+			}
+		}
+		http.Error(w, err.Error(), statusCode)
 		return
 	}
-
-	// Update state
-	ctx.StateMgr.FinishSync(false, fmt.Errorf("cancelled by user"))
-	ctx.StateMgr.SetStatus(state.StatusIdle)
 
 	JSONResponse(w, map[string]string{
 		"status":  "ok",

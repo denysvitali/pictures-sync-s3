@@ -25,7 +25,9 @@ func startTestServer(t *testing.T, handler ManualSyncHandler) context.CancelFunc
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- Serve(ctx, handler)
+		errCh <- Serve(ctx, handler, func(context.Context) Response {
+			return OK("cancelled")
+		})
 	}()
 
 	deadline := time.Now().Add(time.Second)
@@ -107,5 +109,50 @@ func TestRequestManualSync_Unavailable(t *testing.T) {
 	}
 	if commandErr.Code != CodeUnavailable {
 		t.Fatalf("Expected code %q, got %q", CodeUnavailable, commandErr.Code)
+	}
+}
+
+func TestRequestCancelSync_OK(t *testing.T) {
+	withTempStateDir(t)
+
+	called := false
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- Serve(ctx, func(context.Context) Response {
+			return OK("accepted")
+		}, func(context.Context) Response {
+			called = true
+			return OK("cancelled")
+		})
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		if _, err := os.Stat(SocketPath()); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatal("daemon control socket was not created")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if err := RequestCancelSync(context.Background()); err != nil {
+		t.Fatalf("RequestCancelSync failed: %v", err)
+	}
+	if !called {
+		t.Fatal("Expected cancel sync handler to be called")
+	}
+
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("Serve returned error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Serve did not stop")
 	}
 }

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net"
 	"time"
@@ -211,7 +212,7 @@ func (s *Service) Run() error {
 	defer controlCancel()
 
 	go func() {
-		if err := daemoncontrol.Serve(controlCtx, s.handleManualSyncCommand); err != nil {
+		if err := daemoncontrol.Serve(controlCtx, s.handleManualSyncCommand, s.handleCancelSyncCommand); err != nil {
 			log.Printf("Daemon control server stopped: %v", err)
 		}
 	}()
@@ -295,6 +296,27 @@ func (s *Service) handleManualSyncCommand(ctx context.Context) daemoncontrol.Res
 	}
 
 	return daemoncontrol.OK("Sync start requested")
+}
+
+func (s *Service) handleCancelSyncCommand(ctx context.Context) daemoncontrol.Response {
+	if ctx.Err() != nil {
+		return daemoncontrol.Error(daemoncontrol.CodeUnavailable, "pictures-sync daemon is shutting down")
+	}
+
+	if !s.syncMgr.IsRunning() {
+		return daemoncontrol.Error(daemoncontrol.CodeSyncAlreadyActive, "no sync in progress")
+	}
+
+	log.Println("Manual sync cancellation requested via daemon control")
+	if err := s.syncMgr.Cancel(); err != nil {
+		log.Printf("Manual sync cancellation failed: %v", err)
+		return daemoncontrol.Error(daemoncontrol.CodeInternalError, err.Error())
+	}
+
+	s.stateMgr.FinishSync(false, fmt.Errorf("cancelled by user"))
+	s.stateMgr.SetStatus(state.StatusIdle)
+
+	return daemoncontrol.OK("Sync cancelled")
 }
 
 // Shutdown gracefully shuts down the daemon

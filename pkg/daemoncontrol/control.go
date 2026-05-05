@@ -15,6 +15,7 @@ import (
 
 const (
 	CommandManualSync = "manual_sync"
+	CommandCancelSync = "cancel_sync"
 
 	CodeNoSDCardMounted   = "no_sd_card_mounted"
 	CodeSyncAlreadyActive = "sync_already_active"
@@ -48,6 +49,7 @@ func (e *CommandError) Error() string {
 }
 
 type ManualSyncHandler func(context.Context) Response
+type CancelSyncHandler func(context.Context) Response
 
 func SocketPath() string {
 	return filepath.Join(state.PermDir, socketName)
@@ -61,9 +63,12 @@ func Error(code, message string) Response {
 	return Response{Status: "error", Code: code, Message: message}
 }
 
-func Serve(ctx context.Context, handleManualSync ManualSyncHandler) error {
+func Serve(ctx context.Context, handleManualSync ManualSyncHandler, handleCancelSync CancelSyncHandler) error {
 	if handleManualSync == nil {
 		return errors.New("manual sync handler is required")
+	}
+	if handleCancelSync == nil {
+		return errors.New("cancel sync handler is required")
 	}
 
 	if err := os.MkdirAll(state.PermDir, 0750); err != nil {
@@ -100,11 +105,11 @@ func Serve(ctx context.Context, handleManualSync ManualSyncHandler) error {
 			return fmt.Errorf("accept daemon control connection: %w", err)
 		}
 
-		go handleConn(ctx, conn, handleManualSync)
+		go handleConn(ctx, conn, handleManualSync, handleCancelSync)
 	}
 }
 
-func handleConn(ctx context.Context, conn net.Conn, handleManualSync ManualSyncHandler) {
+func handleConn(ctx context.Context, conn net.Conn, handleManualSync ManualSyncHandler, handleCancelSync CancelSyncHandler) {
 	defer conn.Close()
 
 	_ = conn.SetDeadline(time.Now().Add(requestTimeout))
@@ -118,12 +123,22 @@ func handleConn(ctx context.Context, conn net.Conn, handleManualSync ManualSyncH
 	switch req.Command {
 	case CommandManualSync:
 		_ = json.NewEncoder(conn).Encode(handleManualSync(ctx))
+	case CommandCancelSync:
+		_ = json.NewEncoder(conn).Encode(handleCancelSync(ctx))
 	default:
 		_ = json.NewEncoder(conn).Encode(Error(CodeInternalError, "unknown daemon control command"))
 	}
 }
 
 func RequestManualSync(ctx context.Context) error {
+	return sendCommand(ctx, CommandManualSync)
+}
+
+func RequestCancelSync(ctx context.Context) error {
+	return sendCommand(ctx, CommandCancelSync)
+}
+
+func sendCommand(ctx context.Context, command string) error {
 	requestCtx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 
@@ -143,7 +158,7 @@ func RequestManualSync(ctx context.Context) error {
 	}
 	_ = conn.SetDeadline(deadline)
 
-	if err := json.NewEncoder(conn).Encode(Request{Command: CommandManualSync}); err != nil {
+	if err := json.NewEncoder(conn).Encode(Request{Command: command}); err != nil {
 		return &CommandError{Code: CodeUnavailable, Message: fmt.Sprintf("send daemon command: %v", err)}
 	}
 

@@ -103,12 +103,20 @@ func setupTestContext(t *testing.T) (*Context, func()) {
 	ctx := &Context{
 		StateMgr: stateMgr,
 		SyncMgr:  mockSync,
-		ManualSync: ManualSyncFunc(func(context.Context) error {
-			return &daemoncontrol.CommandError{
-				Code:    daemoncontrol.CodeNoSDCardMounted,
-				Message: "no SD card mounted",
-			}
-		}),
+		ManualSync: DaemonControlFunc{
+			ManualSync: func(context.Context) error {
+				return &daemoncontrol.CommandError{
+					Code:    daemoncontrol.CodeNoSDCardMounted,
+					Message: "no SD card mounted",
+				}
+			},
+			CancelSync: func(context.Context) error {
+				return &daemoncontrol.CommandError{
+					Code:    daemoncontrol.CodeSyncAlreadyActive,
+					Message: "no sync in progress",
+				}
+			},
+		},
 		WiFiMgr:       &mockWiFiManager{},
 		AppSettings:   appSettings,
 		SSRFValidator: ssrf.NewValidator(100, time.Minute),
@@ -359,10 +367,13 @@ func TestHandleSyncStart_ForwardsRequestToDaemon(t *testing.T) {
 	defer cleanup()
 
 	called := false
-	ctx.ManualSync = ManualSyncFunc(func(context.Context) error {
-		called = true
-		return nil
-	})
+	ctx.ManualSync = DaemonControlFunc{
+		ManualSync: func(context.Context) error {
+			called = true
+			return nil
+		},
+		CancelSync: func(context.Context) error { return nil },
+	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/sync/start", nil)
 	w := httptest.NewRecorder()
@@ -398,8 +409,14 @@ func TestHandleSyncCancel_Success(t *testing.T) {
 	ctx, cleanup := setupTestContext(t)
 	defer cleanup()
 
-	mockSync := ctx.SyncMgr.(*mockSyncManager)
-	mockSync.isRunning = true
+	called := false
+	ctx.ManualSync = DaemonControlFunc{
+		ManualSync: func(context.Context) error { return nil },
+		CancelSync: func(context.Context) error {
+			called = true
+			return nil
+		},
+	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/sync/cancel", nil)
 	w := httptest.NewRecorder()
@@ -410,8 +427,8 @@ func TestHandleSyncCancel_Success(t *testing.T) {
 		t.Errorf("Expected status 200, got %d", w.Code)
 	}
 
-	if !mockSync.cancelCalled {
-		t.Error("Expected Cancel() to be called on sync manager")
+	if !called {
+		t.Error("Expected cancel request to be forwarded to daemon")
 	}
 }
 
