@@ -9,8 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"time"
-
-	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 )
 
 const (
@@ -23,7 +21,7 @@ const (
 	CodeInternalError     = "internal_error"
 
 	requestTimeout = 5 * time.Second
-	socketName     = "daemon.sock"
+	socketEnv      = "PICTURES_SYNC_DAEMON_SOCKET"
 )
 
 type Request struct {
@@ -52,7 +50,10 @@ type ManualSyncHandler func(context.Context) Response
 type CancelSyncHandler func(context.Context) Response
 
 func SocketPath() string {
-	return filepath.Join(state.PermDir, socketName)
+	if socketPath := os.Getenv(socketEnv); socketPath != "" {
+		return socketPath
+	}
+	return filepath.Join(os.TempDir(), "pictures-sync", "daemon.sock")
 }
 
 func OK(message string) Response {
@@ -71,11 +72,11 @@ func Serve(ctx context.Context, handleManualSync ManualSyncHandler, handleCancel
 		return errors.New("cancel sync handler is required")
 	}
 
-	if err := os.MkdirAll(state.PermDir, 0750); err != nil {
+	socketPath := SocketPath()
+	if err := os.MkdirAll(filepath.Dir(socketPath), 0755); err != nil {
 		return fmt.Errorf("create daemon control directory: %w", err)
 	}
 
-	socketPath := SocketPath()
 	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove stale daemon control socket: %w", err)
 	}

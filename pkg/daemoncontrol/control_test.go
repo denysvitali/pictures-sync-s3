@@ -3,20 +3,15 @@ package daemoncontrol
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 )
 
-func withTempStateDir(t *testing.T) {
+func withTempSocket(t *testing.T) {
 	t.Helper()
 
-	oldDir := state.GetStateDir()
-	state.SetStateDir(t.TempDir())
-	t.Cleanup(func() {
-		state.SetStateDir(oldDir)
-	})
+	t.Setenv(socketEnv, filepath.Join(t.TempDir(), "daemon.sock"))
 }
 
 func startTestServer(t *testing.T, handler ManualSyncHandler) context.CancelFunc {
@@ -58,7 +53,7 @@ func startTestServer(t *testing.T, handler ManualSyncHandler) context.CancelFunc
 }
 
 func TestRequestManualSync_OK(t *testing.T) {
-	withTempStateDir(t)
+	withTempSocket(t)
 
 	called := false
 	startTestServer(t, func(context.Context) Response {
@@ -75,7 +70,7 @@ func TestRequestManualSync_OK(t *testing.T) {
 }
 
 func TestRequestManualSync_ErrorResponse(t *testing.T) {
-	withTempStateDir(t)
+	withTempSocket(t)
 
 	startTestServer(t, func(context.Context) Response {
 		return Error(CodeNoSDCardMounted, "no SD card mounted")
@@ -96,7 +91,7 @@ func TestRequestManualSync_ErrorResponse(t *testing.T) {
 }
 
 func TestRequestManualSync_Unavailable(t *testing.T) {
-	withTempStateDir(t)
+	withTempSocket(t)
 
 	err := RequestManualSync(context.Background())
 	if err == nil {
@@ -113,7 +108,7 @@ func TestRequestManualSync_Unavailable(t *testing.T) {
 }
 
 func TestRequestCancelSync_OK(t *testing.T) {
-	withTempStateDir(t)
+	withTempSocket(t)
 
 	called := false
 	ctx, cancel := context.WithCancel(context.Background())
