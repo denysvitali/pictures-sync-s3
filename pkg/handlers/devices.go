@@ -121,7 +121,9 @@ func (ctx *Context) HandleSyncStart(w http.ResponseWriter, r *http.Request) {
 	requester := ctx.ManualSync
 	if requester == nil {
 		requester = DaemonControlFunc{
-			ManualSync: daemoncontrol.RequestManualSync,
+			ManualSync: func(ctx context.Context, _ string) error {
+				return daemoncontrol.RequestManualSync(ctx)
+			},
 			CancelSync: daemoncontrol.RequestCancelSync,
 		}
 	}
@@ -161,7 +163,9 @@ func (ctx *Context) HandleSyncCancel(w http.ResponseWriter, r *http.Request) {
 	requester := ctx.ManualSync
 	if requester == nil {
 		requester = DaemonControlFunc{
-			ManualSync: daemoncontrol.RequestManualSync,
+			ManualSync: func(ctx context.Context, _ string) error {
+				return daemoncontrol.RequestManualSync(ctx)
+			},
 			CancelSync: daemoncontrol.RequestCancelSync,
 		}
 	}

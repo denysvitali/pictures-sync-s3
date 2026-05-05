@@ -273,8 +273,9 @@ func getABPartitions() otaABPartitionStatus {
 		} else if activePartition == 3 {
 			inactive = "2"
 		}
+		inactivePartition, _ := strconv.Atoi(inactive)
 
-		inactiveMeta := partitionMetadataFor(inferPartitionPath(activePath, inactive), inactive)
+		inactiveMeta := partitionMetadataFor(inferPartitionPath(activePath, inactive), inactivePartition)
 
 		return otaABPartitionStatus{
 			Active:       active,
