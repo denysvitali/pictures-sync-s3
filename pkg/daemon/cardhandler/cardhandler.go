@@ -89,6 +89,41 @@ func (h *Handler) HandleInserted(event sdmonitor.Event) {
 	go h.processSyncOperation(event)
 }
 
+// HandleManualSync starts the daemon-owned sync workflow for the currently mounted card.
+func (h *Handler) HandleManualSync() error {
+	if !h.monitor.IsCardMounted() {
+		return fmt.Errorf("no SD card mounted")
+	}
+
+	mountPath := h.monitor.GetMountPath()
+	device := h.monitor.GetCurrentDevice()
+	if device == "" {
+		return fmt.Errorf("no SD card mounted")
+	}
+
+	h.syncStartMu.Lock()
+	defer h.syncStartMu.Unlock()
+
+	if h.syncMgr.IsRunning() || h.syncStarting {
+		return fmt.Errorf("sync already in progress or starting")
+	}
+
+	log.Printf("Manual sync accepted by daemon for mounted SD card at: %s", mountPath)
+
+	h.stateMgr.SetSDCard(true, mountPath)
+	h.stateMgr.SetStatus(state.StatusDetected)
+	h.syncStarting = true
+
+	go h.processSyncOperation(sdmonitor.Event{
+		Type:      sdmonitor.EventInserted,
+		DevPath:   device,
+		DevName:   filepath.Base(device),
+		MountPath: mountPath,
+	})
+
+	return nil
+}
+
 // HandleRemoved processes an SD card removal event
 func (h *Handler) HandleRemoved(event sdmonitor.Event) {
 	log.Printf("SD card removed: %s", event.DevName)

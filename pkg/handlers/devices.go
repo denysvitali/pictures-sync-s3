@@ -1,22 +1,17 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
-	"os"
-	"path/filepath"
 	"time"
 
+	"github.com/denysvitali/pictures-sync-s3/pkg/daemoncontrol"
 	"github.com/denysvitali/pictures-sync-s3/pkg/sdmonitor"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
-)
-
-const (
-	// successStatusDuration is how long to keep the success status visible after manual sync completion.
-	// This provides visual feedback to the user via LED patterns before returning to idle state.
-	successStatusDuration = 5 * time.Second
 )
 
 // HandleDevices lists all available storage devices
@@ -99,82 +94,33 @@ func (ctx *Context) HandleSyncStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get current state to check if SD card is mounted
-	currentState := ctx.StateMgr.GetState()
-	if !currentState.SDCardMounted || currentState.SDCardPath == "" {
-		http.Error(w, "No SD card mounted", http.StatusBadRequest)
-		return
+	requester := ctx.ManualSync
+	if requester == nil {
+		requester = ManualSyncFunc(daemoncontrol.RequestManualSync)
 	}
 
-	log.Printf("Manual sync requested for mounted SD card at: %s", currentState.SDCardPath)
+	requestCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
 
-	if _, err := os.Stat(currentState.SDCardPath); err != nil {
-		http.Error(w, fmt.Sprintf("Mounted SD card path is not accessible: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	// Check for DCIM directory before claiming the sync has started.
-	dcimPath := filepath.Join(currentState.SDCardPath, "DCIM")
-	if !sdmonitor.HasDCIM(currentState.SDCardPath) {
-		log.Printf("Manual sync rejected: no DCIM directory found at %s", dcimPath)
-		http.Error(w, "No DCIM directory found on mounted SD card", http.StatusBadRequest)
-		return
-	}
-
-	// Count photos before returning success so the UI sees immediate setup failures.
-	totalFiles, totalBytes, err := sdmonitor.CountPhotos(currentState.SDCardPath)
-	if err != nil {
-		log.Printf("Manual sync rejected: error counting photos: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to count photos on mounted SD card: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	if totalFiles == 0 {
-		log.Printf("Manual sync rejected: no photos found under %s", dcimPath)
-		http.Error(w, "No photos found on mounted SD card", http.StatusBadRequest)
-		return
-	}
-
-	// Get card ID before returning success so read-only or inaccessible cards are reported clearly.
-	cardID, _, err := sdmonitor.GetOrCreateCardID(currentState.SDCardPath, nil)
-	if err != nil {
-		log.Printf("Manual sync rejected: error getting card ID: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to get SD card ID: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	log.Printf("Starting manual sync of %d files (%.2f MB) for card: %s",
-		totalFiles, float64(totalBytes)/(1024*1024), cardID)
-
-	if _, err := ctx.StateMgr.StartSync(cardID, int64(totalFiles), totalBytes); err != nil {
-		log.Printf("Manual sync rejected: error starting sync record: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to start sync: %v", err), http.StatusConflict)
-		return
-	}
-
-	// Trigger sync in a goroutine to avoid blocking the HTTP response
-	go func() {
-		// Perform sync
-		err = ctx.SyncMgr.Sync(dcimPath, cardID, totalFiles, totalBytes)
-
-		if err != nil {
-			log.Printf("Manual sync failed: %v", err)
-			ctx.StateMgr.FinishSync(false, err)
-			ctx.StateMgr.SetStatus(state.StatusError)
-		} else {
-			log.Println("Manual sync completed successfully!")
-			ctx.StateMgr.FinishSync(true, nil)
-			ctx.StateMgr.SetStatus(state.StatusSuccess)
-
-			// Keep success status for a few seconds, then go idle
-			time.Sleep(successStatusDuration)
-			ctx.StateMgr.SetStatus(state.StatusIdle)
+	log.Println("Manual sync requested via WebUI; forwarding to pictures-sync daemon")
+	if err := requester.RequestManualSync(requestCtx); err != nil {
+		statusCode := http.StatusServiceUnavailable
+		var commandErr *daemoncontrol.CommandError
+		if errors.As(err, &commandErr) {
+			switch commandErr.Code {
+			case daemoncontrol.CodeNoSDCardMounted:
+				statusCode = http.StatusBadRequest
+			case daemoncontrol.CodeSyncAlreadyActive:
+				statusCode = http.StatusConflict
+			}
 		}
-	}()
+		http.Error(w, err.Error(), statusCode)
+		return
+	}
 
 	JSONResponse(w, map[string]string{
 		"status":  "ok",
-		"message": "Sync started",
+		"message": "Sync start requested",
 	})
 }
 

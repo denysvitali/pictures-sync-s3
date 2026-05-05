@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log"
@@ -33,10 +34,21 @@ type SyncManager interface {
 	GetPublicLink(path string) (string, error)
 }
 
+type ManualSyncRequester interface {
+	RequestManualSync(context.Context) error
+}
+
+type ManualSyncFunc func(context.Context) error
+
+func (f ManualSyncFunc) RequestManualSync(ctx context.Context) error {
+	return f(ctx)
+}
+
 // Context holds dependencies for all handlers
 type Context struct {
 	StateMgr      *state.Manager
 	SyncMgr       SyncManager
+	ManualSync    ManualSyncRequester
 	WiFiMgr       wifimanager.WiFiManager
 	AppSettings   *settings.Settings
 	SSRFValidator *ssrf.Validator

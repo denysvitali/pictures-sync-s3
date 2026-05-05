@@ -8,6 +8,7 @@ import (
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/captiveportal"
 	"github.com/denysvitali/pictures-sync-s3/pkg/daemon/cardhandler"
+	"github.com/denysvitali/pictures-sync-s3/pkg/daemoncontrol"
 	"github.com/denysvitali/pictures-sync-s3/pkg/events"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ledcontroller"
 	"github.com/denysvitali/pictures-sync-s3/pkg/sdmonitor"
@@ -30,17 +31,17 @@ const (
 
 // Service represents the main photo backup daemon
 type Service struct {
-	eventMgr       *events.Manager
-	stateMgr       *state.Manager
-	settings       *settings.Settings
-	syncMgr        *syncmanager.Manager
-	ledCtrl        *ledcontroller.Controller
-	monitor        *sdmonitor.Monitor
-	cardHandler    *cardhandler.Handler
-	sigHandler     *signals.Handler
-	wifiMgr        *wifimanager.Manager
-	captivePortal  *captiveportal.Authenticator
-	timeSynced     bool // Track if time is properly synced
+	eventMgr      *events.Manager
+	stateMgr      *state.Manager
+	settings      *settings.Settings
+	syncMgr       *syncmanager.Manager
+	ledCtrl       *ledcontroller.Controller
+	monitor       *sdmonitor.Monitor
+	cardHandler   *cardhandler.Handler
+	sigHandler    *signals.Handler
+	wifiMgr       *wifimanager.Manager
+	captivePortal *captiveportal.Authenticator
+	timeSynced    bool // Track if time is properly synced
 }
 
 // Config holds configuration for the daemon service
@@ -206,6 +207,15 @@ func New(cfg Config) (*Service, error) {
 
 // Run starts the daemon and blocks until shutdown signal is received
 func (s *Service) Run() error {
+	controlCtx, controlCancel := context.WithCancel(context.Background())
+	defer controlCancel()
+
+	go func() {
+		if err := daemoncontrol.Serve(controlCtx, s.handleManualSyncCommand); err != nil {
+			log.Printf("Daemon control server stopped: %v", err)
+		}
+	}()
+
 	// Get event channel BEFORE starting monitor to avoid missing events
 	eventChan := s.monitor.Events()
 	log.Printf("Event channel obtained: %p", eventChan)
@@ -233,6 +243,7 @@ func (s *Service) Run() error {
 		select {
 		case <-s.sigHandler.Channel():
 			log.Println("Received shutdown signal, exiting...")
+			controlCancel()
 			return nil
 
 		case event := <-eventChan:
@@ -257,6 +268,33 @@ func (s *Service) Run() error {
 			}
 		}
 	}
+}
+
+func (s *Service) handleManualSyncCommand(ctx context.Context) daemoncontrol.Response {
+	if ctx.Err() != nil {
+		return daemoncontrol.Error(daemoncontrol.CodeUnavailable, "pictures-sync daemon is shutting down")
+	}
+
+	if !s.timeSynced {
+		log.Println("ERROR: Cannot start manual sync - system time is not synchronized!")
+		s.stateMgr.SetStatus(state.StatusError)
+		s.stateMgr.SetError("System time not synchronized - sync disabled")
+		return daemoncontrol.Error(daemoncontrol.CodeInternalError, "System time not synchronized - sync disabled")
+	}
+
+	if err := s.cardHandler.HandleManualSync(); err != nil {
+		log.Printf("Manual sync command rejected: %v", err)
+		switch err.Error() {
+		case "no SD card mounted":
+			return daemoncontrol.Error(daemoncontrol.CodeNoSDCardMounted, err.Error())
+		case "sync already in progress or starting":
+			return daemoncontrol.Error(daemoncontrol.CodeSyncAlreadyActive, err.Error())
+		default:
+			return daemoncontrol.Error(daemoncontrol.CodeInternalError, err.Error())
+		}
+	}
+
+	return daemoncontrol.OK("Sync start requested")
 }
 
 // Shutdown gracefully shuts down the daemon

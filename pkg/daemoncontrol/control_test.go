@@ -1,0 +1,111 @@
+package daemoncontrol
+
+import (
+	"context"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/denysvitali/pictures-sync-s3/pkg/state"
+)
+
+func withTempStateDir(t *testing.T) {
+	t.Helper()
+
+	oldDir := state.GetStateDir()
+	state.SetStateDir(t.TempDir())
+	t.Cleanup(func() {
+		state.SetStateDir(oldDir)
+	})
+}
+
+func startTestServer(t *testing.T, handler ManualSyncHandler) context.CancelFunc {
+	t.Helper()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- Serve(ctx, handler)
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		if _, err := os.Stat(SocketPath()); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatal("daemon control socket was not created")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Errorf("Serve returned error: %v", err)
+			}
+		case <-time.After(time.Second):
+			t.Error("Serve did not stop")
+		}
+	})
+
+	return cancel
+}
+
+func TestRequestManualSync_OK(t *testing.T) {
+	withTempStateDir(t)
+
+	called := false
+	startTestServer(t, func(context.Context) Response {
+		called = true
+		return OK("accepted")
+	})
+
+	if err := RequestManualSync(context.Background()); err != nil {
+		t.Fatalf("RequestManualSync failed: %v", err)
+	}
+	if !called {
+		t.Fatal("Expected manual sync handler to be called")
+	}
+}
+
+func TestRequestManualSync_ErrorResponse(t *testing.T) {
+	withTempStateDir(t)
+
+	startTestServer(t, func(context.Context) Response {
+		return Error(CodeNoSDCardMounted, "no SD card mounted")
+	})
+
+	err := RequestManualSync(context.Background())
+	if err == nil {
+		t.Fatal("Expected error")
+	}
+
+	commandErr, ok := err.(*CommandError)
+	if !ok {
+		t.Fatalf("Expected CommandError, got %T", err)
+	}
+	if commandErr.Code != CodeNoSDCardMounted {
+		t.Fatalf("Expected code %q, got %q", CodeNoSDCardMounted, commandErr.Code)
+	}
+}
+
+func TestRequestManualSync_Unavailable(t *testing.T) {
+	withTempStateDir(t)
+
+	err := RequestManualSync(context.Background())
+	if err == nil {
+		t.Fatal("Expected error")
+	}
+
+	commandErr, ok := err.(*CommandError)
+	if !ok {
+		t.Fatalf("Expected CommandError, got %T", err)
+	}
+	if commandErr.Code != CodeUnavailable {
+		t.Fatalf("Expected code %q, got %q", CodeUnavailable, commandErr.Code)
+	}
+}
