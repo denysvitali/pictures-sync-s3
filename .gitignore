@@ -53,6 +53,7 @@ gokrazy/
 # Build artifacts
 dist/
 build/
+pkg/webui/dist/
 
 # Coverage reports
 coverage/
