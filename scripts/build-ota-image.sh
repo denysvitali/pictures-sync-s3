@@ -10,6 +10,21 @@ GOKRAZY_IMAGE_MODE="${GOKRAZY_IMAGE_MODE:-ota}"
 TARGET_STORAGE_BYTES="${TARGET_STORAGE_BYTES:-}"
 IMAGE_PATH="${IMAGE_DIR}/${IMAGE_NAME}"
 HOSTAPD_BINARY="${HOSTAPD_BINARY:-}"
+BUILD_DATE="${BUILD_DATE:-$(date -u '+%Y-%m-%dT%H:%M:%SZ')}"
+
+if [ -n "${VERSION:-}" ]; then
+  BUILD_VERSION="$VERSION"
+elif [ -n "${TAG_NAME:-}" ]; then
+  BUILD_VERSION="$TAG_NAME"
+elif [ "${GITHUB_REF:-}" = "refs/heads/master" ] && [ -n "${GITHUB_SHA:-}" ]; then
+  BUILD_VERSION="master-${GITHUB_SHA}"
+elif [[ "${GITHUB_REF:-}" == refs/tags/* ]] && [ -n "${GITHUB_REF_NAME:-}" ]; then
+  BUILD_VERSION="$GITHUB_REF_NAME"
+else
+  BUILD_VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo dev)"
+fi
+
+VERSION_LDFLAGS="-s -w -X github.com/denysvitali/pictures-sync-s3/pkg/version.Version=${BUILD_VERSION} -X github.com/denysvitali/pictures-sync-s3/pkg/version.BuildDate=${BUILD_DATE}"
 
 if [ -z "$HOSTAPD_BINARY" ]; then
   HOSTAPD_BINARY="$(command -v hostapd || true)"
@@ -63,17 +78,37 @@ cat > "$GOKRAZY_PARENT_DIR/$GOKRAZY_INSTANCE/config.json" <<EOF
     "github.com/denysvitali/pictures-sync-s3/cmd/provision-ap"
   ],
   "PackageConfig": {
+    "github.com/denysvitali/pictures-sync-s3/cmd/pictures-sync": {
+      "GoBuildFlags": [
+        "-trimpath",
+        "-ldflags=${VERSION_LDFLAGS}"
+      ]
+    },
+    "github.com/denysvitali/pictures-sync-s3/cmd/webui": {
+      "GoBuildFlags": [
+        "-trimpath",
+        "-ldflags=${VERSION_LDFLAGS}"
+      ],
+      "Environment": [
+        "PORT=8080"
+      ]
+    },
+    "github.com/denysvitali/pictures-sync-s3/cmd/wifi-init": {
+      "GoBuildFlags": [
+        "-trimpath",
+        "-ldflags=${VERSION_LDFLAGS}"
+      ]
+    },
     "github.com/gokrazy/breakglass": {
       "CommandLineFlags": [
         "-authorized_keys=/perm/breakglass/authorized_keys"
       ]
     },
-    "github.com/denysvitali/pictures-sync-s3/cmd/webui": {
-      "Environment": [
-        "PORT=8080"
-      ]
-    },
     "github.com/denysvitali/pictures-sync-s3/cmd/provision-ap": {
+      "GoBuildFlags": [
+        "-trimpath",
+        "-ldflags=${VERSION_LDFLAGS}"
+      ],
       "Environment": [
         "HOSTAPD_PATH=/usr/bin/hostapd"
       ],

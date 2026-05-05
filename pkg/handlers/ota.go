@@ -17,6 +17,8 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/version"
 )
 
+const goZeroPseudoVersion = "v0.0.0-00010101000000-000000000000"
+
 type otaReleaseCandidate struct {
 	TagName     string    `json:"tag_name"`
 	Name        string    `json:"name"`
@@ -187,7 +189,7 @@ func collectKnownVersions(otaManager *ota.Manager, currentVersion string) []stri
 		}
 
 		release := strings.TrimSpace(history[i].Release)
-		if release == "" {
+		if !isKnownInstalledVersion(release) {
 			continue
 		}
 		if _, exists := knownSet[release]; exists {
@@ -198,13 +200,18 @@ func collectKnownVersions(otaManager *ota.Manager, currentVersion string) []stri
 		knownSet[release] = struct{}{}
 	}
 
-	if strings.TrimSpace(currentVersion) != "" {
+	if isKnownInstalledVersion(currentVersion) {
 		if _, exists := knownSet[currentVersion]; !exists {
 			knownVersions = append(knownVersions, currentVersion)
 		}
 	}
 
 	return knownVersions
+}
+
+func isKnownInstalledVersion(value string) bool {
+	value = strings.TrimSpace(value)
+	return value != "" && value != "dev" && value != goZeroPseudoVersion
 }
 
 func collectInstallHistory(otaManager *ota.Manager) []otaInstallHistoryItem {
@@ -299,6 +306,9 @@ func parseRootPartition(rootValue string) int {
 
 	if strings.HasPrefix(rootValue, "PARTUUID=") {
 		partUUID := strings.TrimPrefix(rootValue, "PARTUUID=")
+		if part, ok := parsePARTNROFFPartition(partUUID); ok {
+			return part
+		}
 		lastDash := strings.LastIndex(partUUID, "-")
 		if lastDash >= 0 {
 			if part, err := strconv.Atoi(partUUID[lastDash+1:]); err == nil && part > 0 {
@@ -325,6 +335,27 @@ func parseRootPartition(rootValue string) int {
 	}
 
 	return 0
+}
+
+func parsePARTNROFFPartition(partUUID string) (int, bool) {
+	const marker = "/PARTNROFF="
+
+	partUUID = strings.TrimSpace(partUUID)
+	idx := strings.LastIndex(partUUID, marker)
+	if idx < 0 {
+		return 0, false
+	}
+
+	offsetValue := strings.TrimSpace(partUUID[idx+len(marker):])
+	if offsetValue == "" {
+		return 0, false
+	}
+	offset, err := strconv.Atoi(offsetValue)
+	if err != nil || offset < 0 {
+		return 0, false
+	}
+
+	return 1 + offset, true
 }
 
 func partitionMetadataFor(rootValue string, partition int) otaABPartitionMeta {
@@ -376,8 +407,15 @@ func resolveRootPartitionPath(rootValue string) string {
 
 	if strings.HasPrefix(rootValue, "PARTUUID=") {
 		partUUID := strings.TrimPrefix(rootValue, "PARTUUID=")
+		partnoffPartition, hasPartnoff := parsePARTNROFFPartition(partUUID)
+		if idx := strings.LastIndex(partUUID, "/PARTNROFF="); idx >= 0 {
+			partUUID = partUUID[:idx]
+		}
 		resolved, err := filepath.EvalSymlinks(filepath.Join("/dev/disk/by-partuuid", partUUID))
 		if err == nil {
+			if hasPartnoff {
+				return inferPartitionPath(resolved, strconv.Itoa(partnoffPartition))
+			}
 			return resolved
 		}
 	}

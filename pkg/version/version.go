@@ -2,6 +2,8 @@ package version
 
 import "runtime/debug"
 
+const zeroPseudoVersion = "v0.0.0-00010101000000-000000000000"
+
 var (
 	// Version and BuildDate are populated by release builds with -ldflags.
 	Version   = "dev"
@@ -28,7 +30,7 @@ func Get() Info {
 		info.Module = buildInfo.Main.Path
 
 		if info.Version == "" || info.Version == "dev" {
-			if buildInfo.Main.Version != "" && buildInfo.Main.Version != "(devel)" {
+			if isUsableBuildVersion(buildInfo.Main.Version) {
 				info.Version = buildInfo.Main.Version
 			}
 		}
@@ -55,4 +57,8 @@ func Get() Info {
 	}
 
 	return info
+}
+
+func isUsableBuildVersion(value string) bool {
+	return value != "" && value != "(devel)" && value != zeroPseudoVersion
 }
