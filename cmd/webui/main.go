@@ -233,6 +233,7 @@ func main() {
 	http.HandleFunc("/api/files/cards", ctx.HandleFileCards)
 	http.HandleFunc("/api/files", ctx.HandleFiles)
 	http.HandleFunc("/api/files/paginated", ctx.HandleFilesPaginated)
+	http.HandleFunc("/api/files/link", ctx.HandleFileLink)
 	http.HandleFunc("/api/files/view", ctx.HandleFileView)
 	http.HandleFunc("/api/thumbnail", ctx.HandleThumbnail)
 	http.HandleFunc("/api/sdcard/files", ctx.HandleSDCardFiles)

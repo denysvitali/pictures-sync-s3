@@ -16,7 +16,7 @@ function describeError(err) {
 }
 import { useDevice } from '../DeviceContext.jsx'
 import { useToast } from '../components/Toast.jsx'
-import { getFilesPaginated, getFileViewUrl, getThumbnailUrl, getSDCardFiles, getSDCardPreviewUrl } from '../api.js'
+import { getFilesPaginated, getFilePublicLink, getThumbnailUrl, getSDCardFiles, getSDCardPreviewUrl } from '../api.js'
 import { Card } from '../components/Card.jsx'
 import { Button } from '../components/Button.jsx'
 import { Icon } from '../components/Icons.jsx'
@@ -141,15 +141,60 @@ export default function GalleryPage() {
     [navigateTo]
   )
 
-  const handleImageClick = useCallback(
-    (file) => {
-      if (!deviceUrl) return
-      const url = source === 'sdcard'
-        ? getSDCardPreviewUrl(deviceUrl, file.path)
-        : getFileViewUrl(deviceUrl, file.path)
-      window.open(url, '_blank', 'noopener,noreferrer')
+  const getCloudFileUrl = useCallback(
+    async (file) => {
+      const data = await getFilePublicLink(deviceUrl, file.path)
+      if (!data?.url) {
+        throw new Error('Cloud did not return a file URL')
+      }
+      return data.url
     },
-    [deviceUrl, source]
+    [deviceUrl]
+  )
+
+  const handleImageClick = useCallback(
+    async (file) => {
+      if (!deviceUrl) return
+      try {
+        const url = source === 'sdcard'
+          ? getSDCardPreviewUrl(deviceUrl, file.path)
+          : await getCloudFileUrl(file)
+        window.open(url, '_blank', 'noopener,noreferrer')
+      } catch (err) {
+        toast.error(`Could not open file: ${describeError(err)}`)
+      }
+    },
+    [deviceUrl, getCloudFileUrl, source, toast]
+  )
+
+  const handleFilePreview = useCallback(
+    async (file) => {
+      if (!deviceUrl) return
+      try {
+        const url = source === 'sdcard'
+          ? getSDCardPreviewUrl(deviceUrl, file.path)
+          : await getCloudFileUrl(file)
+        setImagePreview(url)
+      } catch (err) {
+        toast.error(`Could not preview file: ${describeError(err)}`)
+      }
+    },
+    [deviceUrl, getCloudFileUrl, source, toast]
+  )
+
+  const handleFileDownload = useCallback(
+    async (file) => {
+      if (!deviceUrl) return
+      try {
+        const url = source === 'sdcard'
+          ? getSDCardPreviewUrl(deviceUrl, file.path)
+          : await getCloudFileUrl(file)
+        window.open(url, '_blank', 'noopener,noreferrer')
+      } catch (err) {
+        toast.error(`Could not download file: ${describeError(err)}`)
+      }
+    },
+    [deviceUrl, getCloudFileUrl, source, toast]
   )
 
   const handleBreadcrumbClick = useCallback(
@@ -304,7 +349,8 @@ export default function GalleryPage() {
                 source={source}
                 onFolderClick={handleFolderClick}
                 onImageClick={handleImageClick}
-                onImagePreview={setImagePreview}
+                onImagePreview={handleFilePreview}
+                onFileDownload={handleFileDownload}
                 showThumbnail={showThumbnails && source === 'sdcard'}
               />
             ))}
@@ -389,15 +435,12 @@ function PaginationButton({ page: pageNum, active = false, onClick }) {
   )
 }
 
-function FileCard({ file, deviceUrl, source, onFolderClick, onImageClick, onImagePreview, showThumbnail }) {
+function FileCard({ file, deviceUrl, source, onFolderClick, onImageClick, onImagePreview, onFileDownload, showThumbnail }) {
   const [thumbLoaded, setThumbLoaded] = useState(false)
   const [thumbError, setThumbError] = useState(false)
   const isImg = !file.is_dir && (source === 'sdcard' ? file.is_image : isImageFile(file.name))
 
   const thumbUrl = getThumbnailUrl(deviceUrl, file.path)
-  const previewUrl = source === 'sdcard'
-    ? getSDCardPreviewUrl(deviceUrl, file.path)
-    : getFileViewUrl(deviceUrl, file.path)
 
   const handleClick = () => {
     if (file.is_dir) {
@@ -471,7 +514,7 @@ function FileCard({ file, deviceUrl, source, onFolderClick, onImageClick, onImag
           className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/60 text-white/80 hover:text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-sm"
           onClick={(e) => {
             e.stopPropagation()
-            onImagePreview(previewUrl)
+            onImagePreview(file)
           }}
           aria-label={`Preview ${file.name}`}
         >
@@ -481,15 +524,17 @@ function FileCard({ file, deviceUrl, source, onFolderClick, onImageClick, onImag
 
       {/* Download button for files */}
       {!file.is_dir && (
-        <a
-          href={previewUrl}
-          download
-          onClick={(e) => e.stopPropagation()}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            onFileDownload(file)
+          }}
           className="absolute bottom-2 right-2 w-7 h-7 rounded-full bg-black/60 text-white/80 hover:text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-sm"
           aria-label={`Download ${file.name}`}
         >
           <Icon name="arrow-down-tray" className="w-3.5 h-3.5" />
-        </a>
+        </button>
       )}
     </Card>
   )

@@ -27,6 +27,7 @@ type mockSyncManager struct {
 	syncError    error
 	files        []syncmanager.FileInfo
 	cardIDs      []syncmanager.FileInfo
+	publicLink   string
 }
 
 func (m *mockSyncManager) IsRunning() bool                       { return m.isRunning }
@@ -41,6 +42,7 @@ func (m *mockSyncManager) ListFiles(path string) ([]syncmanager.FileInfo, error)
 }
 func (m *mockSyncManager) ListCardIDs() ([]syncmanager.FileInfo, error) { return m.cardIDs, nil }
 func (m *mockSyncManager) GetFile(path string, w io.Writer) error       { return nil }
+func (m *mockSyncManager) GetPublicLink(path string) (string, error)    { return m.publicLink, nil }
 func (m *mockSyncManager) ListFilesPaginated(path string, page, pageSize int) (*syncmanager.FileListResult, error) {
 	return &syncmanager.FileListResult{
 		Files:      m.files,
@@ -91,6 +93,7 @@ func setupTestContext(t *testing.T) (*Context, func()) {
 			{Name: "card-123", Path: "card-123", IsDir: true},
 			{Name: "card-456", Path: "card-456", IsDir: true},
 		},
+		publicLink: "https://storage.example.com/presigned/file1.jpg",
 	}
 
 	ctx := &Context{
@@ -480,6 +483,43 @@ func TestHandleFileView_UnsupportedType(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	ctx.HandleFileView(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected status 400, got %d", w.Code)
+	}
+}
+
+func TestHandleFileLink_GET(t *testing.T) {
+	ctx, cleanup := setupTestContext(t)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/files/link?path=/file1.jpg", nil)
+	w := httptest.NewRecorder()
+
+	ctx.HandleFileLink(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+
+	var response map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if response["url"] != "https://storage.example.com/presigned/file1.jpg" {
+		t.Errorf("Expected presigned URL response, got %q", response["url"])
+	}
+}
+
+func TestHandleFileLink_MissingPath(t *testing.T) {
+	ctx, cleanup := setupTestContext(t)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/files/link", nil)
+	w := httptest.NewRecorder()
+
+	ctx.HandleFileLink(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("Expected status 400, got %d", w.Code)

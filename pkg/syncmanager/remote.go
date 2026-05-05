@@ -16,6 +16,8 @@ import (
 	"github.com/rclone/rclone/fs/operations"
 )
 
+const publicLinkExpiry = 15 * time.Minute
+
 // FileInfo represents a file or directory on the remote
 type FileInfo struct {
 	Name    string    `json:"name"`
@@ -383,6 +385,56 @@ func (m *Manager) GetFile(path string, w io.Writer) error {
 		}
 		return nil
 	}
+}
+
+// GetPublicLink returns a temporary cloud-provider URL for a file on the remote.
+func (m *Manager) GetPublicLink(path string) (string, error) {
+	// Validate path to prevent directory traversal
+	if strings.Contains(path, "..") {
+		return "", fmt.Errorf("invalid path: contains directory traversal")
+	}
+
+	// Clean the path to remove any potential traversal attempts
+	path = filepath.Clean(path)
+
+	// Ensure path doesn't start with / or \ (should be relative)
+	path = strings.TrimPrefix(path, "/")
+	path = strings.TrimPrefix(path, "\\")
+	if path == "" || path == "." {
+		return "", fmt.Errorf("path must reference a file")
+	}
+
+	// Load rclone config from custom path
+	if err := m.loadRcloneConfig(); err != nil {
+		return "", err
+	}
+
+	// Create context with 25 second timeout (less than client's 30s timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+
+	m.mu.Lock()
+	remoteName := m.remoteName
+	remotePath := m.remotePath
+	m.mu.Unlock()
+
+	fsys, err := fs.NewFs(ctx, remoteName+":"+remotePath)
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("timeout accessing remote path (check network and remote configuration)")
+		}
+		return "", fmt.Errorf("failed to access remote path: %w", err)
+	}
+
+	link, err := operations.PublicLink(ctx, fsys, path, fs.Duration(publicLinkExpiry), false)
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("timeout creating public link (remote may be slow or unreachable)")
+		}
+		return "", fmt.Errorf("failed to create public link: %w", err)
+	}
+
+	return link, nil
 }
 
 // getConfigStorage loads and returns the configuration storage

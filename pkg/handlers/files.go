@@ -159,6 +159,32 @@ func (ctx *Context) HandleFileView(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// HandleFileLink returns a temporary cloud-provider URL for a remote file.
+func (ctx *Context) HandleFileLink(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	filePath := r.URL.Query().Get("path")
+	if filePath == "" {
+		http.Error(w, "path parameter required", http.StatusBadRequest)
+		return
+	}
+
+	link, err := ctx.SyncMgr.GetPublicLink(filePath)
+	if err != nil {
+		log.Printf("Failed to create public link for %s: %v", filePath, err)
+		http.Error(w, fmt.Sprintf("failed to create file link: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Cache-Control", "no-store")
+	JSONResponse(w, map[string]string{
+		"url": link,
+	})
+}
+
 // HandleThumbnail serves thumbnail images for files being synced
 func (ctx *Context) HandleThumbnail(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()

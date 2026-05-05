@@ -147,6 +147,8 @@ export const installOta = (d) =>
 export const getDevices = (d) => apiRequest('/api/devices', { deviceUrl: d })
 export const selectDevice = (d, deviceId) =>
   apiRequest('/api/devices/select', { deviceUrl: d, method: 'POST', body: { device_id: deviceId } })
+export const getFilePublicLink = (d, filePath) =>
+  apiRequest('/api/files/link', { deviceUrl: d, query: { path: filePath } })
 export const getFileViewUrl = (d, filePath) =>
   `${normalizeBaseUrl(d)}/api/files/view?path=${encodeURIComponent(filePath || '')}`
 export const getThumbnailUrl = (d, filePath) =>

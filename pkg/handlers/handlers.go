@@ -30,6 +30,7 @@ type SyncManager interface {
 	ListFiles(path string) ([]syncmanager.FileInfo, error)
 	ListFilesPaginated(path string, page, pageSize int) (*syncmanager.FileListResult, error)
 	GetFile(path string, w io.Writer) error
+	GetPublicLink(path string) (string, error)
 }
 
 // Context holds dependencies for all handlers
