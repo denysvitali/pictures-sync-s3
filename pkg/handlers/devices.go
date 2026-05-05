@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -105,50 +106,54 @@ func (ctx *Context) HandleSyncStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Printf("Manual sync requested for mounted SD card at: %s", currentState.SDCardPath)
+
+	if _, err := os.Stat(currentState.SDCardPath); err != nil {
+		http.Error(w, fmt.Sprintf("Mounted SD card path is not accessible: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Check for DCIM directory before claiming the sync has started.
+	dcimPath := filepath.Join(currentState.SDCardPath, "DCIM")
+	if !sdmonitor.HasDCIM(currentState.SDCardPath) {
+		log.Printf("Manual sync rejected: no DCIM directory found at %s", dcimPath)
+		http.Error(w, "No DCIM directory found on mounted SD card", http.StatusBadRequest)
+		return
+	}
+
+	// Count photos before returning success so the UI sees immediate setup failures.
+	totalFiles, totalBytes, err := sdmonitor.CountPhotos(currentState.SDCardPath)
+	if err != nil {
+		log.Printf("Manual sync rejected: error counting photos: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to count photos on mounted SD card: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if totalFiles == 0 {
+		log.Printf("Manual sync rejected: no photos found under %s", dcimPath)
+		http.Error(w, "No photos found on mounted SD card", http.StatusBadRequest)
+		return
+	}
+
+	// Get card ID before returning success so read-only or inaccessible cards are reported clearly.
+	cardID, _, err := sdmonitor.GetOrCreateCardID(currentState.SDCardPath, nil)
+	if err != nil {
+		log.Printf("Manual sync rejected: error getting card ID: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to get SD card ID: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Starting manual sync of %d files (%.2f MB) for card: %s",
+		totalFiles, float64(totalBytes)/(1024*1024), cardID)
+
+	if _, err := ctx.StateMgr.StartSync(cardID, int64(totalFiles), totalBytes); err != nil {
+		log.Printf("Manual sync rejected: error starting sync record: %v", err)
+		http.Error(w, fmt.Sprintf("Failed to start sync: %v", err), http.StatusConflict)
+		return
+	}
+
 	// Trigger sync in a goroutine to avoid blocking the HTTP response
 	go func() {
-		log.Printf("Manual sync triggered for mounted SD card at: %s", currentState.SDCardPath)
-
-		// Check for DCIM directory
-		dcimPath := filepath.Join(currentState.SDCardPath, "DCIM")
-		if !sdmonitor.HasDCIM(currentState.SDCardPath) {
-			log.Println("No DCIM directory found on SD card")
-			ctx.StateMgr.SetStatus(state.StatusError)
-			return
-		}
-
-		// Count photos
-		totalFiles, totalBytes, err := sdmonitor.CountPhotos(currentState.SDCardPath)
-		if err != nil {
-			log.Printf("Error counting photos: %v", err)
-			ctx.StateMgr.SetStatus(state.StatusError)
-			return
-		}
-
-		if totalFiles == 0 {
-			log.Println("No photos found on SD card")
-			ctx.StateMgr.SetStatus(state.StatusIdle)
-			return
-		}
-
-		// Get card ID
-		cardID, _, err := sdmonitor.GetOrCreateCardID(currentState.SDCardPath, nil)
-		if err != nil {
-			log.Printf("Error getting card ID: %v", err)
-			ctx.StateMgr.SetStatus(state.StatusError)
-			return
-		}
-
-		log.Printf("Starting manual sync of %d files (%.2f MB) for card: %s",
-			totalFiles, float64(totalBytes)/(1024*1024), cardID)
-
-		_, err = ctx.StateMgr.StartSync(cardID, int64(totalFiles), totalBytes)
-		if err != nil {
-			log.Printf("Error starting sync: %v", err)
-			ctx.StateMgr.SetStatus(state.StatusError)
-			return
-		}
-
 		// Perform sync
 		err = ctx.SyncMgr.Sync(dcimPath, cardID, totalFiles, totalBytes)
 

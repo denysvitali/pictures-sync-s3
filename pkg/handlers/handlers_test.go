@@ -25,18 +25,31 @@ type mockSyncManager struct {
 	isRunning    bool
 	cancelCalled bool
 	syncError    error
+	syncCalled   int
+	syncStarted  chan struct{}
+	syncBlock    chan struct{}
 	files        []syncmanager.FileInfo
 	cardIDs      []syncmanager.FileInfo
 	publicLink   string
 }
 
-func (m *mockSyncManager) IsRunning() bool                       { return m.isRunning }
-func (m *mockSyncManager) Cancel() error                         { m.cancelCalled = true; return nil }
-func (m *mockSyncManager) Sync(string, string, int, int64) error { return m.syncError }
-func (m *mockSyncManager) SetRemote(string, string)              {}
-func (m *mockSyncManager) SetGooglePhotos(bool, string)          {}
-func (m *mockSyncManager) ListRemotes() ([]string, error)        { return []string{"local"}, nil }
-func (m *mockSyncManager) TestConnection() error                 { return nil }
+func (m *mockSyncManager) IsRunning() bool { return m.isRunning }
+func (m *mockSyncManager) Cancel() error   { m.cancelCalled = true; return nil }
+func (m *mockSyncManager) Sync(string, string, int, int64) error {
+	m.syncCalled++
+	if m.syncStarted != nil {
+		close(m.syncStarted)
+		m.syncStarted = nil
+	}
+	if m.syncBlock != nil {
+		<-m.syncBlock
+	}
+	return m.syncError
+}
+func (m *mockSyncManager) SetRemote(string, string)       {}
+func (m *mockSyncManager) SetGooglePhotos(bool, string)   {}
+func (m *mockSyncManager) ListRemotes() ([]string, error) { return []string{"local"}, nil }
+func (m *mockSyncManager) TestConnection() error          { return nil }
 func (m *mockSyncManager) ListFiles(path string) ([]syncmanager.FileInfo, error) {
 	return m.files, nil
 }
@@ -327,6 +340,72 @@ func TestHandleSyncStart_AlreadyRunning(t *testing.T) {
 
 	if w.Code != http.StatusConflict {
 		t.Errorf("Expected status 409, got %d", w.Code)
+	}
+}
+
+func TestHandleSyncStart_NoDCIM(t *testing.T) {
+	ctx, cleanup := setupTestContext(t)
+	defer cleanup()
+
+	mountPath := t.TempDir()
+	if err := ctx.StateMgr.SetSDCard(true, mountPath); err != nil {
+		t.Fatalf("SetSDCard failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/sync/start", nil)
+	w := httptest.NewRecorder()
+
+	ctx.HandleSyncStart(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected status 400, got %d", w.Code)
+	}
+
+	mockSync := ctx.SyncMgr.(*mockSyncManager)
+	if mockSync.syncCalled != 0 {
+		t.Errorf("Expected sync not to start, got %d calls", mockSync.syncCalled)
+	}
+}
+
+func TestHandleSyncStart_SuccessStartsSyncRecordBeforeResponse(t *testing.T) {
+	ctx, cleanup := setupTestContext(t)
+	defer cleanup()
+
+	mountPath := t.TempDir()
+	dcimPath := filepath.Join(mountPath, "DCIM")
+	if err := os.Mkdir(dcimPath, 0755); err != nil {
+		t.Fatalf("Failed to create DCIM: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dcimPath, "photo.jpg"), []byte("jpg"), 0644); err != nil {
+		t.Fatalf("Failed to create photo: %v", err)
+	}
+	if err := ctx.StateMgr.SetSDCard(true, mountPath); err != nil {
+		t.Fatalf("SetSDCard failed: %v", err)
+	}
+
+	mockSync := ctx.SyncMgr.(*mockSyncManager)
+	mockSync.syncStarted = make(chan struct{})
+	mockSync.syncBlock = make(chan struct{})
+	defer close(mockSync.syncBlock)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/sync/start", nil)
+	w := httptest.NewRecorder()
+
+	ctx.HandleSyncStart(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	currentState := ctx.StateMgr.GetState()
+	if currentState.CurrentSync == nil {
+		t.Fatal("Expected sync record to exist before response returned")
+	}
+
+	select {
+	case <-mockSync.syncStarted:
+	case <-time.After(time.Second):
+		t.Fatal("Expected background sync to start")
 	}
 }
 
