@@ -1,21 +1,25 @@
 package sdmonitor
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"log"
-	"os/exec"
+	"math"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
+	"unsafe"
+
+	"github.com/diskfs/go-diskfs/backend"
+	"github.com/diskfs/go-diskfs/backend/file"
+	"github.com/diskfs/go-diskfs/filesystem/fat32"
+	"golang.org/x/sys/unix"
 )
 
 const formatTimeout = 2 * time.Minute
 
-var formatCommandContext = exec.CommandContext
 var validVolumeLabelPattern = regexp.MustCompile(`^[A-Za-z0-9 _-]{1,11}$`)
 
 // IsSupportedDevicePath returns true for partition paths the monitor is allowed to manage.
@@ -80,13 +84,8 @@ func (m *Monitor) FormatCurrentDevice(ctx context.Context, devicePath, label str
 	m.mountsCacheTime = time.Time{}
 	log.Printf("SD card partition %s will be ignored until removal after format attempt", devicePath)
 
-	args := buildFormatArgs(devicePath, label)
-	// #nosec G204 -- devicePath is restricted to monitored SD-card partition patterns.
-	cmd := formatCommandContext(formatCtx, "mkfs.vfat", args...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return formatCommandError(err, stderr.String())
+	if err := formatFAT32Device(formatCtx, devicePath, label); err != nil {
+		return err
 	}
 
 	log.Printf("Formatted SD card partition %s as FAT32", devicePath)
@@ -100,24 +99,71 @@ func (m *Monitor) ignoreDeviceUntilRemoval(devicePath string) {
 	m.ignoredDevice = devicePath
 }
 
-func buildFormatArgs(devicePath, label string) []string {
-	args := []string{"-F", "32"}
-	if label != "" {
-		args = append(args, "-n", label)
+func formatFAT32Device(ctx context.Context, devicePath, label string) (err error) {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("format SD card: %w", err)
 	}
-	args = append(args, devicePath)
-	return args
+
+	device, err := file.OpenFromPath(devicePath, false)
+	if err != nil {
+		return fmt.Errorf("format SD card: open device: %w", err)
+	}
+	defer func() {
+		if closeErr := device.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("format SD card: close device: %w", closeErr)
+		}
+	}()
+
+	size, err := storageSize(device)
+	if err != nil {
+		return fmt.Errorf("format SD card: determine device size: %w", err)
+	}
+
+	if _, err := fat32.Create(device, size, 0, int64(fat32.SectorSize512), label, false); err != nil {
+		return fmt.Errorf("format SD card as FAT32: %w", err)
+	}
+	if err := syncStorage(device); err != nil {
+		return fmt.Errorf("format SD card: sync device: %w", err)
+	}
+
+	return nil
 }
 
-func formatCommandError(err error, stderr string) error {
-	var execErr *exec.Error
-	if errors.As(err, &execErr) && errors.Is(execErr.Err, exec.ErrNotFound) {
-		return fmt.Errorf("format SD card: mkfs.vfat not found in PATH; include github.com/gokrazy/mkfs in the gokrazy image: %w", err)
+func storageSize(device backend.Storage) (int64, error) {
+	info, err := device.Stat()
+	if err != nil {
+		return 0, err
+	}
+	if info.Size() > 0 {
+		return info.Size(), nil
 	}
 
-	detail := strings.TrimSpace(stderr)
-	if detail != "" {
-		return fmt.Errorf("format SD card: %w: %s", err, detail)
+	osFile, err := device.Sys()
+	if err != nil {
+		return 0, err
 	}
-	return fmt.Errorf("format SD card: %w", err)
+
+	var size uint64
+	// #nosec G103 -- BLKGETSIZE64 requires passing a pointer for the kernel to fill.
+	if _, _, errno := unix.Syscall(
+		unix.SYS_IOCTL,
+		osFile.Fd(),
+		uintptr(unix.BLKGETSIZE64),
+		uintptr(unsafe.Pointer(&size)),
+	); errno != 0 {
+		return 0, errno
+	}
+	if size > uint64(math.MaxInt64) {
+		return 0, errors.New("device size exceeds supported range")
+	}
+
+	return int64(size), nil
+}
+
+func syncStorage(device backend.Storage) error {
+	osFile, err := device.Sys()
+	if err != nil {
+		return err
+	}
+	return osFile.Sync()
 }

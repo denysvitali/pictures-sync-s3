@@ -143,7 +143,6 @@ Supporting packages:
      },
      "Packages": [
        "github.com/gokrazy/fbstatus",
-       "github.com/gokrazy/mkfs",
        "github.com/gokrazy/wifi",
        "github.com/gokrazy/serial-busybox",
        "github.com/gokrazy/breakglass",

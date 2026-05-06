@@ -3,10 +3,11 @@ package sdmonitor
 import (
 	"context"
 	"errors"
-	"os/exec"
-	"reflect"
-	"strings"
+	"os"
 	"testing"
+
+	"github.com/diskfs/go-diskfs"
+	"github.com/diskfs/go-diskfs/filesystem"
 )
 
 func TestIsSupportedDevicePath(t *testing.T) {
@@ -73,26 +74,6 @@ func TestValidateVolumeLabel(t *testing.T) {
 	}
 }
 
-func TestFormatCurrentDeviceOmitsLabelByDefault(t *testing.T) {
-	args := buildFormatArgs("/dev/sda1", "")
-	if containsArg(args, "-n") {
-		t.Fatalf("Expected no label args, got %v", args)
-	}
-	want := []string{"-F", "32", "/dev/sda1"}
-	if !reflect.DeepEqual(args, want) {
-		t.Fatalf("Expected args %v, got %v", want, args)
-	}
-}
-
-func TestFormatCurrentDeviceIncludesProvidedLabel(t *testing.T) {
-	args := buildFormatArgs("/dev/sda1", "CAMERA_1")
-
-	want := []string{"-F", "32", "-n", "CAMERA_1", "/dev/sda1"}
-	if !reflect.DeepEqual(args, want) {
-		t.Fatalf("Expected args %v, got %v", want, args)
-	}
-}
-
 func TestFormatCurrentDeviceIgnoresDeviceUntilRemovalAfterAttempt(t *testing.T) {
 	monitor := NewMonitor(t.TempDir())
 	monitor.lastDevice = "/dev/sda1"
@@ -107,24 +88,59 @@ func TestFormatCurrentDeviceIgnoresDeviceUntilRemovalAfterAttempt(t *testing.T) 
 	}
 }
 
-func TestFormatCommandErrorExplainsMissingFormatter(t *testing.T) {
-	err := formatCommandError(&exec.Error{Name: "mkfs.vfat", Err: exec.ErrNotFound}, "")
-	if err == nil {
-		t.Fatal("Expected error")
+func TestFormatFAT32DeviceCreatesFilesystem(t *testing.T) {
+	imagePath := createFormatTestImage(t, 64*1024*1024)
+
+	if err := formatFAT32Device(context.Background(), imagePath, "CAMERA_1"); err != nil {
+		t.Fatalf("formatFAT32Device() error = %v", err)
 	}
-	if !strings.Contains(err.Error(), "include github.com/gokrazy/mkfs") {
-		t.Fatalf("Error %q does not explain missing gokrazy formatter package", err)
+
+	disk, err := diskfs.Open(imagePath, diskfs.WithOpenMode(diskfs.ReadOnly), diskfs.WithSectorSize(diskfs.SectorSize512))
+	if err != nil {
+		t.Fatalf("Open formatted image: %v", err)
 	}
-	if !errors.Is(err, exec.ErrNotFound) {
-		t.Fatalf("Error does not wrap exec.ErrNotFound: %v", err)
+	defer disk.Backend.Close()
+
+	fs, err := disk.GetFilesystem(0)
+	if err != nil {
+		t.Fatalf("GetFilesystem() error = %v", err)
+	}
+	if fs.Type() != filesystem.TypeFat32 {
+		t.Fatalf("filesystem type = %v, want %v", fs.Type(), filesystem.TypeFat32)
+	}
+	if fs.Label() != "CAMERA_1" {
+		t.Fatalf("filesystem label = %q, want CAMERA_1", fs.Label())
 	}
 }
 
-func containsArg(args []string, want string) bool {
-	for _, arg := range args {
-		if arg == want {
-			return true
-		}
+func TestFormatFAT32DeviceHonorsCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := formatFAT32Device(ctx, "/dev/sda1", "")
+	if err == nil {
+		t.Fatal("Expected error")
 	}
-	return false
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Error does not wrap context.Canceled: %v", err)
+	}
+}
+
+func createFormatTestImage(t *testing.T, size int64) string {
+	t.Helper()
+
+	imagePath := t.TempDir() + "/sdcard.img"
+	f, err := os.Create(imagePath)
+	if err != nil {
+		t.Fatalf("Create test image: %v", err)
+	}
+	if err := f.Truncate(size); err != nil {
+		_ = f.Close()
+		t.Fatalf("Truncate test image: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("Close test image: %v", err)
+	}
+
+	return imagePath
 }

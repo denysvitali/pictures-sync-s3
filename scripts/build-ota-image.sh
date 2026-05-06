@@ -75,7 +75,6 @@ EOF
 fi
 
 gok -i "$GOKRAZY_INSTANCE" add github.com/gokrazy/fbstatus
-gok -i "$GOKRAZY_INSTANCE" add github.com/gokrazy/mkfs
 gok -i "$GOKRAZY_INSTANCE" add github.com/gokrazy/wifi
 gok -i "$GOKRAZY_INSTANCE" add github.com/gokrazy/serial-busybox
 gok -i "$GOKRAZY_INSTANCE" add github.com/gokrazy/breakglass
@@ -98,7 +97,6 @@ cat > "$INSTANCE_DIR/config.json" <<EOF
   },
   "Packages": [
     "github.com/gokrazy/fbstatus",
-    "github.com/gokrazy/mkfs",
     "github.com/gokrazy/wifi",
     "github.com/gokrazy/serial-busybox",
     "github.com/gokrazy/breakglass",

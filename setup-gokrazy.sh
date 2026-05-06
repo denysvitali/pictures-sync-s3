@@ -89,7 +89,6 @@ echo ""
 # Add public packages only (private packages will be added via config.json)
 echo "Adding public packages..."
 gok -i "$INSTANCE_NAME" add github.com/gokrazy/fbstatus
-gok -i "$INSTANCE_NAME" add github.com/gokrazy/mkfs
 gok -i "$INSTANCE_NAME" add github.com/gokrazy/wifi
 gok -i "$INSTANCE_NAME" add github.com/gokrazy/serial-busybox
 gok -i "$INSTANCE_NAME" add github.com/gokrazy/breakglass
@@ -117,7 +116,6 @@ cat > "$CONFIG_FILE" <<EOF
   },
   "Packages": [
     "github.com/gokrazy/fbstatus",
-    "github.com/gokrazy/mkfs",
     "github.com/gokrazy/wifi",
     "github.com/gokrazy/serial-busybox",
     "github.com/gokrazy/breakglass",

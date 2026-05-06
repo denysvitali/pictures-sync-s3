@@ -1,6 +1,7 @@
 package sdmonitor
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"os"
@@ -695,15 +696,18 @@ func createTestFATImage(t *testing.T, path string, size int64) {
 	if err != nil {
 		t.Fatalf("Cannot create image file: %v", err)
 	}
-	defer f.Close()
 
 	if err := f.Truncate(size); err != nil {
+		_ = f.Close()
 		t.Fatalf("Cannot truncate image: %v", err)
 	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("Cannot close image: %v", err)
+	}
 
-	// Note: Would need mkfs.vfat to create actual FAT filesystem
-	// For now, just create empty file
-	t.Log("Created test image (not formatted, needs mkfs.vfat)")
+	if err := formatFAT32Device(context.Background(), path, "TEST"); err != nil {
+		t.Fatalf("Cannot format test image: %v", err)
+	}
 }
 
 // createCorruptedFATImage creates a corrupted filesystem image
