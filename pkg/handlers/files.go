@@ -13,9 +13,13 @@ import (
 	"time"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/daemoncontrol"
+	"github.com/denysvitali/pictures-sync-s3/pkg/sdcardbrowser"
+	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 	exif "github.com/dsoprea/go-exif/v3"
 	exifcommon "github.com/dsoprea/go-exif/v3/common"
 )
+
+var sdCardMountPath = state.MountDir
 
 // HandleFileCards returns list of card IDs
 func (ctx *Context) HandleFileCards(w http.ResponseWriter, r *http.Request) {
@@ -407,6 +411,53 @@ func (ctx *Context) HandleSDCardPreview(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Cache-Control", "public, max-age=3600")
 	if _, err := w.Write(preview.Data); err != nil {
 		log.Printf("[Gallery] sdcard preview write failed path=%q error=%v", requestedPath, err)
+	}
+}
+
+// HandleSDCardFile streams any regular file from the SD card.
+func (ctx *Context) HandleSDCardFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	requestedPath := r.URL.Query().Get("path")
+	if requestedPath == "" {
+		http.Error(w, "path parameter required", http.StatusBadRequest)
+		return
+	}
+
+	file, info, contentType, err := sdcardbrowser.OpenFile(sdCardMountPath, requestedPath)
+	if err != nil {
+		http.Error(w, err.Error(), sdcardFileHTTPStatus(err))
+		return
+	}
+	defer file.Close()
+
+	disposition := "inline"
+	if r.URL.Query().Get("download") == "1" {
+		disposition = "attachment"
+	}
+
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`%s; filename=%q`, disposition, filepath.Base(requestedPath)))
+	w.Header().Set("Cache-Control", "no-store")
+	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
+}
+
+func sdcardFileHTTPStatus(err error) int {
+	message := err.Error()
+	switch {
+	case strings.Contains(message, "path parameter required"):
+		return http.StatusBadRequest
+	case strings.Contains(message, "access denied"):
+		return http.StatusForbidden
+	case strings.Contains(message, "path is a directory"):
+		return http.StatusBadRequest
+	case os.IsNotExist(err):
+		return http.StatusNotFound
+	default:
+		return http.StatusInternalServerError
 	}
 }
 

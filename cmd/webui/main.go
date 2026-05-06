@@ -266,6 +266,7 @@ func main() {
 	http.HandleFunc("/api/thumbnail", ctx.HandleThumbnail)
 	http.HandleFunc("/api/sdcard/files", ctx.HandleSDCardFiles)
 	http.HandleFunc("/api/sdcard/preview", ctx.HandleSDCardPreview)
+	http.HandleFunc("/api/sdcard/file", ctx.HandleSDCardFile)
 	http.HandleFunc("/api/network/dns", ctx.HandleNetworkDNS)
 	http.HandleFunc("/api/network/interfaces", ctx.HandleNetworkInterfaces)
 	http.HandleFunc("/api/network/dns-lookup", ctx.HandleDNSLookup)

@@ -114,6 +114,8 @@ export const getSDCardFiles = (d, path = 'DCIM') =>
   apiRequest('/api/sdcard/files', { deviceUrl: d, query: { path } })
 export const getSDCardPreviewUrl = (d, filePath) =>
   `${normalizeBaseUrl(d)}/api/sdcard/preview?path=${encodeURIComponent(filePath || '')}`
+export const getSDCardFileUrl = (d, filePath, { download = false } = {}) =>
+  `${normalizeBaseUrl(d)}/api/sdcard/file?path=${encodeURIComponent(filePath || '')}${download ? '&download=1' : ''}`
 export const getConfig = (d) => apiRequest('/api/config', { deviceUrl: d })
 export const saveConfig = (d, configText) =>
   apiRequest('/api/config', {

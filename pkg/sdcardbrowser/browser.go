@@ -3,6 +3,7 @@ package sdcardbrowser
 import (
 	"bytes"
 	"fmt"
+	"mime"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +20,8 @@ type FileInfo struct {
 	ModTime time.Time              `json:"mod_time"`
 	IsDir   bool                   `json:"is_dir"`
 	IsImage bool                   `json:"is_image"`
+	IsVideo bool                   `json:"is_video"`
+	IsRAW   bool                   `json:"is_raw"`
 	EXIF    map[string]interface{} `json:"exif,omitempty"`
 }
 
@@ -66,7 +69,10 @@ func ListFiles(mountPath, requestedPath string) (*FileList, error) {
 		}
 
 		if !entry.IsDir() {
-			fileInfo.IsImage = isImageExt(filepath.Ext(entry.Name()))
+			ext := filepath.Ext(entry.Name())
+			fileInfo.IsImage = isImageExt(ext)
+			fileInfo.IsVideo = isVideoExt(ext)
+			fileInfo.IsRAW = isRAWExt(ext)
 		}
 
 		files = append(files, fileInfo)
@@ -86,7 +92,7 @@ func ReadPreview(mountPath, requestedPath string) (*Preview, error) {
 		return nil, err
 	}
 
-	contentType := contentTypeForExt(filepath.Ext(cleanFullPath))
+	contentType := imageContentTypeForExt(filepath.Ext(cleanFullPath))
 	if contentType == "" {
 		return nil, fmt.Errorf("unsupported file type")
 	}
@@ -131,6 +137,36 @@ func ReadThumbnail(mountPath, requestedPath string) (*Preview, error) {
 	return &Preview{ContentType: "image/jpeg", Data: buf.Bytes()}, nil
 }
 
+// OpenFile opens any regular file under the SD card mount path for streaming.
+func OpenFile(mountPath, requestedPath string) (*os.File, os.FileInfo, string, error) {
+	if requestedPath == "" {
+		return nil, nil, "", fmt.Errorf("path parameter required")
+	}
+
+	cleanFullPath, err := resolvePath(mountPath, requestedPath)
+	if err != nil {
+		return nil, nil, "", err
+	}
+
+	// #nosec G304 -- path is resolved and constrained to the SD card mount path above.
+	file, err := os.Open(cleanFullPath)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("failed to open file: %w", err)
+	}
+
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, nil, "", fmt.Errorf("failed to stat file: %w", err)
+	}
+	if info.IsDir() {
+		_ = file.Close()
+		return nil, nil, "", fmt.Errorf("path is a directory")
+	}
+
+	return file, info, contentTypeForExt(filepath.Ext(cleanFullPath)), nil
+}
+
 func resolvePath(mountPath, requestedPath string) (string, error) {
 	if filepath.IsAbs(requestedPath) || strings.Contains(requestedPath, "..") {
 		return "", fmt.Errorf("access denied")
@@ -152,10 +188,28 @@ func resolvePath(mountPath, requestedPath string) (string, error) {
 }
 
 func isImageExt(ext string) bool {
-	return contentTypeForExt(ext) != ""
+	return imageContentTypeForExt(ext) != ""
 }
 
-func contentTypeForExt(ext string) string {
+func isVideoExt(ext string) bool {
+	switch strings.ToLower(ext) {
+	case ".mp4", ".m4v", ".mov", ".avi", ".mkv", ".mts", ".m2ts", ".3gp", ".webm":
+		return true
+	default:
+		return false
+	}
+}
+
+func isRAWExt(ext string) bool {
+	switch strings.ToLower(ext) {
+	case ".raw", ".cr2", ".cr3", ".nef", ".nrw", ".arw", ".dng", ".rw2", ".orf", ".raf", ".pef", ".srw":
+		return true
+	default:
+		return false
+	}
+}
+
+func imageContentTypeForExt(ext string) string {
 	switch strings.ToLower(ext) {
 	case ".jpg", ".jpeg":
 		return "image/jpeg"
@@ -167,5 +221,35 @@ func contentTypeForExt(ext string) string {
 		return "image/webp"
 	default:
 		return ""
+	}
+}
+
+func contentTypeForExt(ext string) string {
+	if contentType := imageContentTypeForExt(ext); contentType != "" {
+		return contentType
+	}
+
+	switch strings.ToLower(ext) {
+	case ".mp4", ".m4v":
+		return "video/mp4"
+	case ".mov":
+		return "video/quicktime"
+	case ".avi":
+		return "video/x-msvideo"
+	case ".mkv":
+		return "video/x-matroska"
+	case ".mts", ".m2ts":
+		return "video/mp2t"
+	case ".3gp":
+		return "video/3gpp"
+	case ".webm":
+		return "video/webm"
+	case ".raw", ".cr2", ".cr3", ".nef", ".nrw", ".arw", ".dng", ".rw2", ".orf", ".raf", ".pef", ".srw":
+		return "application/octet-stream"
+	default:
+		if contentType := mime.TypeByExtension(ext); contentType != "" {
+			return contentType
+		}
+		return "application/octet-stream"
 	}
 }

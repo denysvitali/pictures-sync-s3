@@ -16,7 +16,7 @@ function describeError(err) {
 }
 import { useDevice } from '../DeviceContext.jsx'
 import { useToast } from '../components/Toast.jsx'
-import { getFilesPaginated, getFilePublicLink, getThumbnailUrl, getSDCardFiles, getSDCardPreviewUrl, getStatus } from '../api.js'
+import { getFilesPaginated, getFilePublicLink, getThumbnailUrl, getSDCardFiles, getSDCardPreviewUrl, getSDCardFileUrl, getStatus } from '../api.js'
 import { Card } from '../components/Card.jsx'
 import { Button } from '../components/Button.jsx'
 import { Icon } from '../components/Icons.jsx'
@@ -24,10 +24,16 @@ import { LoadingSpinner } from '../components/LoadingSpinner.jsx'
 
 const PAGE_SIZE = 40
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'tif', 'heic', 'heif', 'avif'])
+const VIDEO_EXTENSIONS = new Set(['mp4', 'm4v', 'mov', 'avi', 'mkv', 'mts', 'm2ts', '3gp', 'webm'])
 
 function isImageFile(name) {
   const ext = name.split('.').pop()?.toLowerCase() || ''
   return IMAGE_EXTENSIONS.has(ext)
+}
+
+function isVideoFile(name) {
+  const ext = name.split('.').pop()?.toLowerCase() || ''
+  return VIDEO_EXTENSIONS.has(ext)
 }
 
 function formatFileSize(bytes) {
@@ -73,6 +79,7 @@ export default function GalleryPage() {
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [imagePreview, setImagePreview] = useState(null)
+  const [videoPreview, setVideoPreview] = useState(null)
   const [showThumbnails, setShowThumbnails] = useState(false)
   const [deviceStatus, setDeviceStatus] = useState(null)
 
@@ -214,7 +221,7 @@ export default function GalleryPage() {
       if (!deviceUrl) return
       try {
         const url = source === 'sdcard'
-          ? getSDCardPreviewUrl(deviceUrl, file.path)
+          ? getSDCardFileUrl(deviceUrl, file.path, { download: true })
           : await getCloudFileUrl(file)
         window.open(url, '_blank', 'noopener,noreferrer')
       } catch (err) {
@@ -222,6 +229,17 @@ export default function GalleryPage() {
       }
     },
     [deviceUrl, getCloudFileUrl, source, toast]
+  )
+
+  const handleVideoPlay = useCallback(
+    (file) => {
+      if (!deviceUrl || source !== 'sdcard') return
+      setVideoPreview({
+        name: file.name,
+        url: getSDCardFileUrl(deviceUrl, file.path),
+      })
+    },
+    [deviceUrl, source]
   )
 
   const handleBreadcrumbClick = useCallback(
@@ -328,6 +346,28 @@ export default function GalleryPage() {
         </div>
       )}
 
+      {/* Video preview overlay */}
+      {videoPreview && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4"
+          onClick={() => setVideoPreview(null)}
+        >
+          <button
+            className="absolute top-4 right-4 text-white/80 hover:text-white transition-colors"
+            onClick={() => setVideoPreview(null)}
+          >
+            <Icon name="x" className="w-8 h-8" />
+          </button>
+          <video
+            src={videoPreview.url}
+            controls
+            autoPlay
+            className="max-h-[90vh] max-w-[95vw] bg-black rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
+
       {/* Breadcrumb navigation */}
       <nav className="mb-6" aria-label="Breadcrumb">
         <div className="flex items-center gap-1 flex-wrap px-1">
@@ -383,6 +423,7 @@ export default function GalleryPage() {
                 onImageClick={handleImageClick}
                 onImagePreview={handleFilePreview}
                 onFileDownload={handleFileDownload}
+                onVideoPlay={handleVideoPlay}
                 showThumbnail={thumbnailsAllowed}
               />
             ))}
@@ -467,18 +508,23 @@ function PaginationButton({ page: pageNum, active = false, onClick }) {
   )
 }
 
-function FileCard({ file, deviceUrl, source, onFolderClick, onImageClick, onImagePreview, onFileDownload, showThumbnail }) {
+function FileCard({ file, deviceUrl, source, onFolderClick, onImageClick, onImagePreview, onFileDownload, onVideoPlay, showThumbnail }) {
   const [thumbLoaded, setThumbLoaded] = useState(false)
   const [thumbError, setThumbError] = useState(false)
   const isImg = !file.is_dir && (source === 'sdcard' ? file.is_image : isImageFile(file.name))
+  const isVideo = !file.is_dir && source === 'sdcard' && (file.is_video || isVideoFile(file.name))
 
   const thumbUrl = getThumbnailUrl(deviceUrl, file.path)
 
   const handleClick = () => {
     if (file.is_dir) {
       onFolderClick(file.path)
+    } else if (isVideo) {
+      onVideoPlay(file)
     } else if (isImg) {
       onImageClick(file)
+    } else {
+      onFileDownload(file)
     }
   }
 
@@ -515,6 +561,10 @@ function FileCard({ file, deviceUrl, source, onFolderClick, onImageClick, onImag
             <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-surface-800 border border-surface-600 flex items-center justify-center">
               <Icon name="chevron-right" className="w-3 h-3 text-surface-400" />
             </div>
+          </div>
+        ) : isVideo ? (
+          <div className="w-12 h-12 rounded-full bg-surface-800 border border-surface-700 flex items-center justify-center">
+            <Icon name="play" className="w-6 h-6 text-brand-400 ml-0.5" />
           </div>
         ) : (
           <Icon name="image" className="w-10 h-10 sm:w-12 sm:h-12 text-surface-600" />
@@ -554,6 +604,20 @@ function FileCard({ file, deviceUrl, source, onFolderClick, onImageClick, onImag
         </button>
       )}
 
+      {/* Video play button overlay */}
+      {isVideo && (
+        <button
+          className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/60 text-white/80 hover:text-white flex items-center justify-center opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity backdrop-blur-sm"
+          onClick={(e) => {
+            e.stopPropagation()
+            onVideoPlay(file)
+          }}
+          aria-label={`Play ${file.name}`}
+        >
+          <Icon name="play" className="w-3.5 h-3.5 ml-0.5" />
+        </button>
+      )}
+
       {/* Download button for files */}
       {!file.is_dir && (
         <button
@@ -562,7 +626,7 @@ function FileCard({ file, deviceUrl, source, onFolderClick, onImageClick, onImag
             e.stopPropagation()
             onFileDownload(file)
           }}
-          className="absolute bottom-2 right-2 w-7 h-7 rounded-full bg-black/60 text-white/80 hover:text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-sm"
+          className="absolute bottom-2 right-2 w-7 h-7 rounded-full bg-black/60 text-white/80 hover:text-white flex items-center justify-center opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity backdrop-blur-sm"
           aria-label={`Download ${file.name}`}
         >
           <Icon name="arrow-down-tray" className="w-3.5 h-3.5" />
