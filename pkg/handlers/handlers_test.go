@@ -744,8 +744,8 @@ func TestHandleThumbnail_PathTraversal(t *testing.T) {
 
 			ctx.HandleThumbnail(w, req)
 
-			if w.Code != http.StatusForbidden && w.Code != http.StatusInternalServerError {
-				t.Errorf("Expected status 403 or 500, got %d for path %s", w.Code, tc.path)
+			if w.Code != http.StatusBadRequest && w.Code != http.StatusForbidden {
+				t.Errorf("Expected status 400 or 403, got %d for path %s", w.Code, tc.path)
 			}
 		})
 	}

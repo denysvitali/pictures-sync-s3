@@ -17,6 +17,13 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 )
 
+func skipRcloneNetworkTest(t *testing.T) {
+	t.Helper()
+	if os.Getenv("RUN_RCLONE_NETWORK_TESTS") == "" {
+		t.Skip("skipping rclone network integration test; set RUN_RCLONE_NETWORK_TESTS=1 to run")
+	}
+}
+
 // Network Resilience Tests for Sync Manager
 // Tests various network failure scenarios and recovery mechanisms
 
@@ -83,6 +90,7 @@ import (
 
 // TestNetworkDropMidSync simulates network dropping during active sync
 func TestNetworkDropMidSync(t *testing.T) {
+	skipRcloneNetworkTest(t)
 	// BUG: Network drops mid-sync cause complete failure with no retry
 	tmpDir, err := os.MkdirTemp("", "network-test-*")
 	if err != nil {
@@ -173,6 +181,7 @@ acl = private
 
 // TestDNSResolutionFailure tests behavior when DNS cannot resolve remote endpoint
 func TestDNSResolutionFailure(t *testing.T) {
+	skipRcloneNetworkTest(t)
 	tmpDir, err := os.MkdirTemp("", "network-test-*")
 	if err != nil {
 		t.Fatal(err)
@@ -241,6 +250,7 @@ acl = private
 
 // TestIntermittentPacketLoss simulates unreliable network with packet loss
 func TestIntermittentPacketLoss(t *testing.T) {
+	skipRcloneNetworkTest(t)
 	// BUG: Packet loss causes retransmission delays but no application-level retry
 	tmpDir, err := os.MkdirTemp("", "network-test-*")
 	if err != nil {
@@ -301,6 +311,7 @@ endpoint = %s
 
 // TestTCPConnectionTimeout tests handling of TCP connection timeouts
 func TestTCPConnectionTimeout(t *testing.T) {
+	skipRcloneNetworkTest(t)
 	tmpDir, err := os.MkdirTemp("", "network-test-*")
 	if err != nil {
 		t.Fatal(err)
@@ -378,6 +389,7 @@ endpoint = http://%s
 
 // TestSSLCertificateErrors tests handling of TLS certificate validation failures
 func TestSSLCertificateErrors(t *testing.T) {
+	skipRcloneNetworkTest(t)
 	tmpDir, err := os.MkdirTemp("", "network-test-*")
 	if err != nil {
 		t.Fatal(err)
@@ -420,8 +432,8 @@ endpoint = %s
 
 		// Check if error message is helpful
 		if !strings.Contains(err.Error(), "certificate") &&
-		   !strings.Contains(err.Error(), "TLS") &&
-		   !strings.Contains(err.Error(), "x509") {
+			!strings.Contains(err.Error(), "TLS") &&
+			!strings.Contains(err.Error(), "x509") {
 			t.Log("BUG: Error message doesn't clearly indicate certificate issue")
 			t.Log("RECOMMENDATION: Provide clear error messages for cert errors")
 		}
@@ -430,6 +442,7 @@ endpoint = %s
 
 // TestPartialHTTPResponse tests handling of incomplete HTTP responses
 func TestPartialHTTPResponse(t *testing.T) {
+	skipRcloneNetworkTest(t)
 	tmpDir, err := os.MkdirTemp("", "network-test-*")
 	if err != nil {
 		t.Fatal(err)
@@ -541,6 +554,7 @@ endpoint = https://network-error.invalid
 
 // TestConnectionPoolExhaustion tests for connection/file descriptor leaks
 func TestConnectionPoolExhaustion(t *testing.T) {
+	skipRcloneNetworkTest(t)
 	tmpDir, err := os.MkdirTemp("", "network-test-*")
 	if err != nil {
 		t.Fatal(err)
@@ -598,6 +612,7 @@ endpoint = %s
 
 // TestNetworkRecoveryMidSync tests behavior when network recovers during sync
 func TestNetworkRecoveryMidSync(t *testing.T) {
+	skipRcloneNetworkTest(t)
 	tmpDir, err := os.MkdirTemp("", "network-test-*")
 	if err != nil {
 		t.Fatal(err)
@@ -680,6 +695,7 @@ func TestIPv4IPv6Fallback(t *testing.T) {
 
 // TestCancelDuringNetworkOperation tests cancel safety during network ops
 func TestCancelDuringNetworkOperation(t *testing.T) {
+	skipRcloneNetworkTest(t)
 	tmpDir, err := os.MkdirTemp("", "network-test-*")
 	if err != nil {
 		t.Fatal(err)
@@ -763,20 +779,13 @@ endpoint = %s
 
 // TestProgressChannelLeakOnNetworkDisconnect tests memory leak scenario
 func TestProgressChannelLeakOnNetworkDisconnect(t *testing.T) {
-	// BUG: No UnsubscribeProgress() method
-	// Simulates WebSocket client disconnecting during network issues
-
 	syncMgr, _, cleanup := setupTestSyncManager(t)
 	defer cleanup()
 
-	// Simulate multiple clients subscribing (e.g., web UI reloads)
 	var channels []chan Progress
 	for i := 0; i < 50; i++ {
 		ch := syncMgr.SubscribeProgress()
 		channels = append(channels, ch)
-
-		// Simulate client disconnect - channel is abandoned but not removed
-		// In real scenario: WebSocket disconnects, goroutine exits, but channel remains
 	}
 
 	syncMgr.mu.Lock()
@@ -787,15 +796,17 @@ func TestProgressChannelLeakOnNetworkDisconnect(t *testing.T) {
 		t.Errorf("Expected 50 channels, got %d", channelCount)
 	}
 
-	// BUG: No way to clean up these channels
-	t.Error("BUG CONFIRMED: No UnsubscribeProgress() method")
-	t.Log("SCENARIO: User opens web UI, network drops, reconnects multiple times")
-	t.Log("RESULT: Each connection leaves orphaned channel in memory")
-	t.Log("MEMORY LEAK: 50 channels * 10 cap * ~8 bytes = ~4KB per disconnect cycle")
-	t.Log("After 1000 disconnect/reconnect cycles: ~4MB leaked")
-	t.Log("LOCATION: syncmanager.go:332-339")
-	t.Log("RECOMMENDATION: Add UnsubscribeProgress(chan Progress) method")
-	t.Log("RECOMMENDATION: Use sync.Map or cleanup goroutine to detect closed channels")
+	for _, ch := range channels {
+		syncMgr.UnsubscribeProgress(ch)
+	}
+
+	syncMgr.mu.Lock()
+	channelCount = len(syncMgr.progressChans)
+	syncMgr.mu.Unlock()
+
+	if channelCount != 0 {
+		t.Errorf("Expected all progress channels to be unsubscribed, got %d", channelCount)
+	}
 }
 
 // TestSyncRetryWithExponentialBackoff tests what SHOULD exist but doesn't
@@ -1009,6 +1020,7 @@ func TestRcloneConfigurationOptions(t *testing.T) {
 
 // TestNetworkErrorReadWrite tests read/write scenarios with network issues
 func TestNetworkErrorDuringGetFile(t *testing.T) {
+	skipRcloneNetworkTest(t)
 	tmpDir, err := os.MkdirTemp("", "network-test-*")
 	if err != nil {
 		t.Fatal(err)
@@ -1117,8 +1129,8 @@ func TestSummary(t *testing.T) {
 
 // Mock slow reader for testing timeout scenarios
 type slowReader struct {
-	data []byte
-	pos  int
+	data  []byte
+	pos   int
 	delay time.Duration
 }
 

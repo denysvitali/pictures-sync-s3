@@ -71,7 +71,7 @@ func TestUpdateSyncProgress(t *testing.T) {
 	bytesSynced := int64(1024 * 1024 * 12) // 12MB
 	currentFile := "IMG_001.jpg"
 	currentFileSize := int64(1024 * 1024 * 2) // 2MB
-	speed := float64(1024 * 1024) // 1MB/s
+	speed := float64(1024 * 1024)             // 1MB/s
 	eta := "45s"
 
 	err = mgr.UpdateSyncProgress(filesSynced, bytesSynced, currentFile, currentFileSize, speed, eta)
@@ -184,6 +184,7 @@ func TestStateReloadPreservesCurrentSync(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSync failed: %v", err)
 	}
+	mgr1.progressSaveDelay = 0
 	mgr1.UpdateSyncProgress(25, 1024*1024*12, "IMG_025.jpg", 1024*1024, 500000, "2m")
 
 	// For this test, we'll skip file verification since we're using mock managers

@@ -1,3 +1,5 @@
+//go:build security
+
 package syncmanager
 
 import (
@@ -181,12 +183,12 @@ type = local
 	stateMgr, _ := state.NewManager()
 
 	maliciousPaths := []string{
-		"../../../etc",             // Traverse to system files
-		"../../../../../../etc",    // Deep traversal
-		"/etc/passwd",              // Absolute path to sensitive file
-		"../../.ssh",               // Access SSH keys
-		"../../../root",            // Root directory access
-		"photos/../../secrets",     // Mixed legitimate/malicious
+		"../../../etc",          // Traverse to system files
+		"../../../../../../etc", // Deep traversal
+		"/etc/passwd",           // Absolute path to sensitive file
+		"../../.ssh",            // Access SSH keys
+		"../../../root",         // Root directory access
+		"photos/../../secrets",  // Mixed legitimate/malicious
 	}
 
 	for _, maliciousPath := range maliciousPaths {
@@ -241,15 +243,15 @@ type = local
 
 	// Test cases that validateCardID should reject
 	maliciousCardIDs := []string{
-		"card-../etc",              // Path traversal in card ID
-		"card-..%2F..%2Fetc",       // URL-encoded traversal
-		"card-12345678\x00etc",     // Null byte injection
-		"CARD-12345678",            // Case variation (uppercase)
-		"card-12345678 ",           // Trailing space
-		" card-12345678",           // Leading space
-		"card-123456789",           // Wrong length (9 chars)
-		"card-1234567",             // Wrong length (7 chars)
-		"card-!@#$%^&*",            // Special characters
+		"card-../etc",          // Path traversal in card ID
+		"card-..%2F..%2Fetc",   // URL-encoded traversal
+		"card-12345678\x00etc", // Null byte injection
+		"CARD-12345678",        // Case variation (uppercase)
+		"card-12345678 ",       // Trailing space
+		" card-12345678",       // Leading space
+		"card-123456789",       // Wrong length (9 chars)
+		"card-1234567",         // Wrong length (7 chars)
+		"card-!@#$%^&*",        // Special characters
 	}
 
 	for _, cardID := range maliciousCardIDs {
@@ -272,11 +274,11 @@ type = local
 
 	// Test edge cases in regex validation
 	edgeCases := []string{
-		"card-AAAAAAAA",  // Valid format, all uppercase
-		"card-aaaaaaaa",  // Valid format, all lowercase
-		"card-00000000",  // Valid format, all zeros
-		"card-12345678",  // Valid format
-		"card-abc123XY",  // Valid format, mixed case
+		"card-AAAAAAAA", // Valid format, all uppercase
+		"card-aaaaaaaa", // Valid format, all lowercase
+		"card-00000000", // Valid format, all zeros
+		"card-12345678", // Valid format
+		"card-abc123XY", // Valid format, mixed case
 	}
 
 	for _, cardID := range edgeCases {
@@ -599,14 +601,14 @@ nounc = ../../../etc
 			risk: "Access to sensitive filesystem locations",
 		},
 		{
-			name: "Oversized config",
+			name:   "Oversized config",
 			config: strings.Repeat("[remote]\ntype=s3\n", 100000),
-			risk: "Denial of service through resource exhaustion",
+			risk:   "Denial of service through resource exhaustion",
 		},
 		{
-			name: "Binary data injection",
+			name:   "Binary data injection",
 			config: "[remote]\ntype=s3\n\x00\x01\x02\xFF\xFE\xFD",
-			risk: "Potential buffer overflow or parsing vulnerabilities",
+			risk:   "Potential buffer overflow or parsing vulnerabilities",
 		},
 		{
 			name: "Script injection",

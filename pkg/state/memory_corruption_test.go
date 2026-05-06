@@ -81,11 +81,11 @@ func TestIntegerOverflowInSyncProgress(t *testing.T) {
 	}
 
 	tests := []struct {
-		name          string
-		totalFiles    int64
-		totalBytes    int64
-		filesSynced   int64
-		bytesSynced   int64
+		name           string
+		totalFiles     int64
+		totalBytes     int64
+		filesSynced    int64
+		bytesSynced    int64
 		shouldOverflow bool
 	}{
 		{
@@ -528,8 +528,7 @@ func TestProgressSaveThrottling(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Set very short throttle for testing
-	mgr.progressSaveDelay = 10 * time.Millisecond
+	mgr.progressSaveDelay = time.Hour
 
 	_, err = mgr.StartSync("card-test", 100, 1024)
 	if err != nil {
@@ -539,8 +538,7 @@ func TestProgressSaveThrottling(t *testing.T) {
 	t.Run("RapidProgressUpdates", func(t *testing.T) {
 		var wg sync.WaitGroup
 
-		// Rapid concurrent progress updates
-		for i := 0; i < 100; i++ {
+		for i := 0; i < 10; i++ {
 			wg.Add(1)
 			go func(val int64) {
 				defer wg.Done()

@@ -21,7 +21,7 @@ func TestCardIDPathTraversal(t *testing.T) {
 	}{
 		{
 			name:        "ValidCardID",
-			cardID:      "card-12345678",
+			cardID:      "card-0123456789abcdef",
 			shouldError: false,
 		},
 		{
@@ -87,10 +87,10 @@ func TestCardIDPathTraversal(t *testing.T) {
 // TestIntegerOverflowInProgress tests integer overflow in progress calculations
 func TestIntegerOverflowInProgress(t *testing.T) {
 	tests := []struct {
-		name           string
-		bytes          int64
-		percentage     int
-		expectedPanic  bool
+		name          string
+		bytes         int64
+		percentage    int
+		expectedPanic bool
 	}{
 		{
 			name:       "MaxInt64",
@@ -189,10 +189,6 @@ func TestProgressChannelMemoryLeak(t *testing.T) {
 	os.MkdirAll(stateDir, 0755)
 
 	// Note: Cannot modify state constants
-	
-	
-	
-	
 
 	stateMgr, _ := state.NewManager()
 	mgr := NewManager(configPath, "test", "/test", stateMgr, 4, 8)
@@ -225,10 +221,6 @@ func TestConcurrentCancelOperation(t *testing.T) {
 	os.MkdirAll(stateDir, 0755)
 
 	// Note: Cannot modify state constants
-	
-	
-	
-	
 
 	stateMgr, _ := state.NewManager()
 	mgr := NewManager(configPath, "test", "/test", stateMgr, 4, 8)
@@ -279,10 +271,6 @@ func TestMonitorProgressRaceCondition(t *testing.T) {
 	os.MkdirAll(stateDir, 0755)
 
 	// Note: Cannot modify state constants
-	
-	
-	
-	
 
 	stateMgr, _ := state.NewManager()
 	mgr := NewManager(configPath, "test", "/test", stateMgr, 4, 8)
@@ -326,9 +314,9 @@ func TestMonitorProgressRaceCondition(t *testing.T) {
 // TestRetryableErrorDetection tests isRetryableError for edge cases
 func TestRetryableErrorDetection(t *testing.T) {
 	tests := []struct {
-		name          string
-		err           error
-		shouldRetry   bool
+		name        string
+		err         error
+		shouldRetry bool
 	}{
 		{
 			name:        "NilError",
@@ -475,10 +463,6 @@ func TestSliceAppendRaceInProgressChans(t *testing.T) {
 	os.MkdirAll(stateDir, 0755)
 
 	// Note: Cannot modify state constants
-	
-	
-	
-	
 
 	stateMgr, _ := state.NewManager()
 	mgr := NewManager(configPath, "test", "/test", stateMgr, 4, 8)
@@ -517,10 +501,6 @@ func TestNilCancelFuncDereference(t *testing.T) {
 	os.MkdirAll(stateDir, 0755)
 
 	// Note: Cannot modify state constants
-	
-	
-	
-	
 
 	stateMgr, _ := state.NewManager()
 	mgr := NewManager(configPath, "test", "/test", stateMgr, 4, 8)
@@ -588,24 +568,24 @@ func TestSpeedCalculationDivisionByZero(t *testing.T) {
 // TestETACalculationNegativeRemaining tests ETA with negative remaining bytes
 func TestETACalculationNegativeRemaining(t *testing.T) {
 	tests := []struct {
-		name          string
-		totalBytes    int64
-		transferred   int64
-		speed         float64
+		name           string
+		totalBytes     int64
+		transferred    int64
+		speed          float64
 		expectNegative bool
 	}{
 		{
-			name:        "TransferredExceedsTotal",
-			totalBytes:  1000,
-			transferred: 2000,
-			speed:       100.0,
+			name:           "TransferredExceedsTotal",
+			totalBytes:     1000,
+			transferred:    2000,
+			speed:          100.0,
 			expectNegative: true,
 		},
 		{
-			name:        "NegativeTotal",
-			totalBytes:  -1000,
-			transferred: 500,
-			speed:       100.0,
+			name:           "NegativeTotal",
+			totalBytes:     -1000,
+			transferred:    500,
+			speed:          100.0,
 			expectNegative: true,
 		},
 		{

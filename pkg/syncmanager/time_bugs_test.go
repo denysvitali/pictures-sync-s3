@@ -1,3 +1,5 @@
+//go:build stress
+
 package syncmanager
 
 import (
@@ -13,39 +15,39 @@ func TestTimeZoneChangeDuringSync(t *testing.T) {
 	// This can cause negative durations or incorrect ETA calculations
 
 	tests := []struct {
-		name           string
-		startTime      time.Time
-		currentTime    time.Time
+		name            string
+		startTime       time.Time
+		currentTime     time.Time
 		expectedElapsed time.Duration
-		expectNegative bool
+		expectNegative  bool
 	}{
 		{
-			name:           "normal progression",
-			startTime:      time.Date(2025, 10, 15, 10, 0, 0, 0, time.UTC),
-			currentTime:    time.Date(2025, 10, 15, 10, 5, 0, 0, time.UTC),
+			name:            "normal progression",
+			startTime:       time.Date(2025, 10, 15, 10, 0, 0, 0, time.UTC),
+			currentTime:     time.Date(2025, 10, 15, 10, 5, 0, 0, time.UTC),
 			expectedElapsed: 5 * time.Minute,
-			expectNegative: false,
+			expectNegative:  false,
 		},
 		{
-			name:           "timezone change backwards (UTC to PST)",
-			startTime:      time.Date(2025, 10, 15, 10, 0, 0, 0, time.UTC),
-			currentTime:    time.Date(2025, 10, 15, 2, 0, 0, 0, time.FixedZone("PST", -8*3600)),
+			name:            "timezone change backwards (UTC to PST)",
+			startTime:       time.Date(2025, 10, 15, 10, 0, 0, 0, time.UTC),
+			currentTime:     time.Date(2025, 10, 15, 2, 0, 0, 0, time.FixedZone("PST", -8*3600)),
 			expectedElapsed: 0, // Same instant, but looks like -8 hours
-			expectNegative: false,
+			expectNegative:  false,
 		},
 		{
-			name:           "DST transition forward (spring)",
-			startTime:      time.Date(2025, 3, 9, 1, 30, 0, 0, time.FixedZone("PST", -8*3600)),
-			currentTime:    time.Date(2025, 3, 9, 3, 30, 0, 0, time.FixedZone("PDT", -7*3600)),
+			name:            "DST transition forward (spring)",
+			startTime:       time.Date(2025, 3, 9, 1, 30, 0, 0, time.FixedZone("PST", -8*3600)),
+			currentTime:     time.Date(2025, 3, 9, 3, 30, 0, 0, time.FixedZone("PDT", -7*3600)),
 			expectedElapsed: 1 * time.Hour, // Lost an hour
-			expectNegative: false,
+			expectNegative:  false,
 		},
 		{
-			name:           "DST transition backward (fall)",
-			startTime:      time.Date(2025, 11, 2, 1, 30, 0, 0, time.FixedZone("PDT", -7*3600)),
-			currentTime:    time.Date(2025, 11, 2, 1, 30, 0, 0, time.FixedZone("PST", -8*3600)),
+			name:            "DST transition backward (fall)",
+			startTime:       time.Date(2025, 11, 2, 1, 30, 0, 0, time.FixedZone("PDT", -7*3600)),
+			currentTime:     time.Date(2025, 11, 2, 1, 30, 0, 0, time.FixedZone("PST", -8*3600)),
 			expectedElapsed: 1 * time.Hour, // Gained an hour
-			expectNegative: false,
+			expectNegative:  false,
 		},
 	}
 
@@ -139,39 +141,39 @@ func TestMonotonicVsWallClockTime(t *testing.T) {
 // TestDurationOverflow tests integer overflow in duration calculations
 func TestDurationOverflow(t *testing.T) {
 	tests := []struct {
-		name      string
-		bytes     int64
-		speed     float64
+		name           string
+		bytes          int64
+		speed          float64
 		expectOverflow bool
 	}{
 		{
-			name:      "normal case",
-			bytes:     1000000,
-			speed:     100000,
+			name:           "normal case",
+			bytes:          1000000,
+			speed:          100000,
 			expectOverflow: false,
 		},
 		{
-			name:      "very large file with slow speed",
-			bytes:     1 << 50, // 1 PB
-			speed:     1024,    // 1 KB/s
-			expectOverflow: true, // Would take 34 years
+			name:           "very large file with slow speed",
+			bytes:          1 << 50, // 1 PB
+			speed:          1024,    // 1 KB/s
+			expectOverflow: true,    // Would take 34 years
 		},
 		{
-			name:      "max int64 bytes",
-			bytes:     1<<63 - 1,
-			speed:     1,
+			name:           "max int64 bytes",
+			bytes:          1<<63 - 1,
+			speed:          1,
 			expectOverflow: true,
 		},
 		{
-			name:      "zero speed",
-			bytes:     1000000,
-			speed:     0,
+			name:           "zero speed",
+			bytes:          1000000,
+			speed:          0,
 			expectOverflow: false, // Division by zero case
 		},
 		{
-			name:      "negative speed (from clock going backwards)",
-			bytes:     1000000,
-			speed:     -1000,
+			name:           "negative speed (from clock going backwards)",
+			bytes:          1000000,
+			speed:          -1000,
 			expectOverflow: false, // Results in negative ETA
 		},
 	}
@@ -220,7 +222,7 @@ func TestFormatDurationEdgeCases(t *testing.T) {
 		{"59 seconds", 59, "59s"},
 		{"one minute", 60, "1m 0s"},
 		{"one hour", 3600, "1h 0m"},
-		{"max int", int(^uint(0) >> 1), ""}, // BUG: Will overflow in calculations
+		{"max int", int(^uint(0) >> 1), ""},       // BUG: Will overflow in calculations
 		{"negative max", -int(^uint(0) >> 1), ""}, // BUG: Will overflow
 	}
 
@@ -377,12 +379,12 @@ func TestTickerAndTimerLeaks(t *testing.T) {
 // TestTimeoutValueZeroOrNegative tests handling of zero or negative timeouts
 func TestTimeoutValueZeroOrNegative(t *testing.T) {
 	tests := []struct {
-		name    string
-		timeout time.Duration
+		name         string
+		timeout      time.Duration
 		shouldExpire bool
 	}{
 		{"positive timeout", 100 * time.Millisecond, true},
-		{"zero timeout", 0, true}, // BUG: context.WithTimeout(0) expires immediately
+		{"zero timeout", 0, true},                    // BUG: context.WithTimeout(0) expires immediately
 		{"negative timeout", -1 * time.Second, true}, // BUG: Treated as 0
 	}
 

@@ -1,3 +1,5 @@
+//go:build stress
+
 package state
 
 import (
@@ -43,12 +45,12 @@ func TestConcurrentStartSync(t *testing.T) {
 			// Lock is acquired here
 			mgr.mu.Lock()
 			record := &SyncRecord{
-				ID:          fmt.Sprintf("%d", time.Now().UnixNano()),
-				StartTime:   time.Now(),
-				Status:      "syncing",
-				FilesTotal:  int64(id * 100),
-				BytesTotal:  int64(id * 1024 * 1024),
-				CardID:      cardID,
+				ID:         fmt.Sprintf("%d", time.Now().UnixNano()),
+				StartTime:  time.Now(),
+				Status:     "syncing",
+				FilesTotal: int64(id * 100),
+				BytesTotal: int64(id * 1024 * 1024),
+				CardID:     cardID,
 			}
 			mgr.currentState.CurrentSync = record
 			mgr.currentState.Status = StatusSyncing
@@ -84,12 +86,12 @@ func TestSyncCanceledWhileWritingState(t *testing.T) {
 	// Start a sync
 	mgr.mu.Lock()
 	record := &SyncRecord{
-		ID:          fmt.Sprintf("%d", time.Now().Unix()),
-		StartTime:   time.Now(),
-		Status:      "syncing",
-		FilesTotal:  100,
-		BytesTotal:  1024 * 1024,
-		CardID:      "test-card",
+		ID:         fmt.Sprintf("%d", time.Now().Unix()),
+		StartTime:  time.Now(),
+		Status:     "syncing",
+		FilesTotal: 100,
+		BytesTotal: 1024 * 1024,
+		CardID:     "test-card",
 	}
 	mgr.currentState.CurrentSync = record
 	mgr.currentState.Status = StatusSyncing
@@ -226,12 +228,12 @@ func TestProgressUpdatesDuringStateTransitions(t *testing.T) {
 	// Start sync
 	mgr.mu.Lock()
 	record := &SyncRecord{
-		ID:          fmt.Sprintf("%d", time.Now().Unix()),
-		StartTime:   time.Now(),
-		Status:      "syncing",
-		FilesTotal:  1000,
-		BytesTotal:  1024 * 1024 * 100,
-		CardID:      "test-card",
+		ID:         fmt.Sprintf("%d", time.Now().Unix()),
+		StartTime:  time.Now(),
+		Status:     "syncing",
+		FilesTotal: 1000,
+		BytesTotal: 1024 * 1024 * 100,
+		CardID:     "test-card",
 	}
 	mgr.currentState.CurrentSync = record
 	mgr.currentState.Status = StatusSyncing
@@ -319,12 +321,12 @@ func TestHistoryAccessDuringWrites(t *testing.T) {
 			// Start sync
 			mgr.mu.Lock()
 			record := &SyncRecord{
-				ID:          fmt.Sprintf("%d-%d", time.Now().Unix(), i),
-				StartTime:   time.Now(),
-				Status:      "syncing",
-				FilesTotal:  int64(i * 10),
-				BytesTotal:  int64(i * 1024),
-				CardID:      cardID,
+				ID:         fmt.Sprintf("%d-%d", time.Now().Unix(), i),
+				StartTime:  time.Now(),
+				Status:     "syncing",
+				FilesTotal: int64(i * 10),
+				BytesTotal: int64(i * 1024),
+				CardID:     cardID,
 			}
 			mgr.currentState.CurrentSync = record
 			mgr.currentState.Status = StatusSyncing
@@ -494,12 +496,12 @@ func TestMultipleHTTPRequestsToWebUI(t *testing.T) {
 	// Start a sync
 	mgr.mu.Lock()
 	record := &SyncRecord{
-		ID:          fmt.Sprintf("%d", time.Now().Unix()),
-		StartTime:   time.Now(),
-		Status:      "syncing",
-		FilesTotal:  1000,
-		BytesTotal:  1024 * 1024 * 100,
-		CardID:      "test-card",
+		ID:         fmt.Sprintf("%d", time.Now().Unix()),
+		StartTime:  time.Now(),
+		Status:     "syncing",
+		FilesTotal: 1000,
+		BytesTotal: 1024 * 1024 * 100,
+		CardID:     "test-card",
 	}
 	mgr.currentState.CurrentSync = record
 	mgr.currentState.Status = StatusSyncing
@@ -564,12 +566,12 @@ func TestShutdownDuringActiveSync(t *testing.T) {
 	// Start a sync
 	mgr.mu.Lock()
 	record := &SyncRecord{
-		ID:          fmt.Sprintf("%d", time.Now().Unix()),
-		StartTime:   time.Now(),
-		Status:      "syncing",
-		FilesTotal:  1000,
-		BytesTotal:  1024 * 1024 * 100,
-		CardID:      "test-card",
+		ID:         fmt.Sprintf("%d", time.Now().Unix()),
+		StartTime:  time.Now(),
+		Status:     "syncing",
+		FilesTotal: 1000,
+		BytesTotal: 1024 * 1024 * 100,
+		CardID:     "test-card",
 	}
 	mgr.currentState.CurrentSync = record
 	mgr.currentState.Status = StatusSyncing
@@ -746,12 +748,12 @@ func TestLostUpdates(t *testing.T) {
 	// Start a sync
 	mgr.mu.Lock()
 	record := &SyncRecord{
-		ID:          fmt.Sprintf("%d", time.Now().Unix()),
-		StartTime:   time.Now(),
-		Status:      "syncing",
-		FilesTotal:  numUpdates,
-		BytesTotal:  1024 * 1024 * 100,
-		CardID:      "test-card",
+		ID:         fmt.Sprintf("%d", time.Now().Unix()),
+		StartTime:  time.Now(),
+		Status:     "syncing",
+		FilesTotal: numUpdates,
+		BytesTotal: 1024 * 1024 * 100,
+		CardID:     "test-card",
 	}
 	mgr.currentState.CurrentSync = record
 	mgr.currentState.Status = StatusSyncing

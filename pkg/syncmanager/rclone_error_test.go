@@ -24,7 +24,7 @@ func TestRcloneConcurrentSyncPrevention(t *testing.T) {
 	syncMgr.mu.Unlock()
 
 	// Try to start another sync
-	err := syncMgr.Sync("/tmp/test", "card-123", 10, 1024)
+	err := syncMgr.Sync("/tmp/test", "card-0123456789abcdef", 10, 1024)
 	if err == nil {
 		t.Error("Expected error when starting sync while another is running")
 	}
@@ -94,7 +94,7 @@ func TestCancelWithoutSync(t *testing.T) {
 
 	// Test various operations with invalid config
 	t.Run("GetRemoteSize", func(t *testing.T) {
-		_, err := syncMgr.GetRemoteSize("card-123")
+		_, err := syncMgr.GetRemoteSize("card-0123456789abcdef")
 		if err == nil {
 			t.Log("GetRemoteSize succeeded unexpectedly - config might have been created")
 		} else {
@@ -207,7 +207,7 @@ type = local
 
 	// Try to sync from nonexistent path
 	nonexistentPath := filepath.Join(tmpDir, "this-does-not-exist")
-	err = syncMgr.Sync(nonexistentPath, "card-123", 10, 1024)
+	err = syncMgr.Sync(nonexistentPath, "card-0123456789abcdef", 10, 1024)
 
 	if err == nil {
 		t.Error("Sync should fail with nonexistent source path")
@@ -217,8 +217,8 @@ type = local
 	// Then fails later during sync with "directory not found"
 	// The error message is different than expected
 	if !strings.Contains(err.Error(), "failed to create source filesystem") &&
-	   !strings.Contains(err.Error(), "directory not found") &&
-	   !strings.Contains(err.Error(), "sync failed") {
+		!strings.Contains(err.Error(), "directory not found") &&
+		!strings.Contains(err.Error(), "sync failed") {
 		t.Errorf("Expected filesystem or sync error, got: %v", err)
 	} else {
 		t.Logf("Sync properly failed with: %v", err)
@@ -268,10 +268,10 @@ endpoint = https://invalid.example.com
 	}
 
 	stateMgr, _ := state.NewManager()
-	syncMgr := NewManager(configPath, "broken-remote", "/test", stateMgr, 4, 8)
+	syncMgr := NewManager(configPath, "missing-remote", "/test", stateMgr, 4, 8)
 
 	// Try to sync - destination creation should fail
-	err = syncMgr.Sync(srcDir, "card-123", 1, 4)
+	err = syncMgr.Sync(srcDir, "card-0123456789abcdef", 1, 4)
 
 	if err == nil {
 		t.Error("Sync should fail with invalid destination remote")
@@ -630,7 +630,7 @@ type = local
 
 	// Test uploadToGooglePhotos directly
 	ctx := context.Background()
-	err = syncMgr.uploadToGooglePhotos(ctx, srcDir, "card-123")
+	err = syncMgr.uploadToGooglePhotos(ctx, srcDir, "card-0123456789abcdef")
 
 	if err == nil {
 		t.Error("uploadToGooglePhotos should fail with nonexistent remote")
@@ -677,7 +677,7 @@ type = local
 
 		go func() {
 			defer wg.Done()
-			syncMgr.GetRemoteSize("card-123")
+			syncMgr.GetRemoteSize("card-0123456789abcdef")
 		}()
 	}
 
@@ -711,7 +711,7 @@ type = local
 	syncMgr := NewManager(configPath, "local-test", tmpDir, stateMgr, 4, 8)
 
 	// Start a sync in background
-	go syncMgr.Sync(srcDir, "card-123", 0, 0)
+	go syncMgr.Sync(srcDir, "card-0123456789abcdef", 0, 0)
 
 	// Wait for sync to actually start
 	time.Sleep(100 * time.Millisecond)
@@ -750,7 +750,7 @@ func TestStateSyncAfterError(t *testing.T) {
 	syncMgr := NewManager(configPath, "nonexistent-remote", "/test", stateMgr, 4, 8)
 
 	// Start a sync that will fail
-	err = syncMgr.Sync("/nonexistent/path", "card-123", 10, 1024)
+	err = syncMgr.Sync("/nonexistent/path", "card-0123456789abcdef", 10, 1024)
 
 	if err == nil {
 		t.Fatal("Expected sync to fail")
@@ -891,7 +891,7 @@ region = us-east-1
 
 	// GetRemoteSize should return 0 for non-existent destination (per line 92-93)
 	// But what if there's a network error or auth failure?
-	size, err := syncMgr.GetRemoteSize("card-123")
+	size, err := syncMgr.GetRemoteSize("card-0123456789abcdef")
 
 	// BUG: Current implementation returns 0 with nil error even on failure
 	// This could hide real errors like network issues or auth failures
@@ -932,7 +932,7 @@ type = local
 	// Start sync in background
 	errChan := make(chan error, 1)
 	go func() {
-		errChan <- syncMgr.Sync(srcDir, "card-123", 0, 0)
+		errChan <- syncMgr.Sync(srcDir, "card-0123456789abcdef", 0, 0)
 	}()
 
 	// Wait for sync to start

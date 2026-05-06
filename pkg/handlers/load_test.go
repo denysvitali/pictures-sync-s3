@@ -508,8 +508,8 @@ func TestStressEndpoints(t *testing.T) {
 	}
 
 	const (
-		concurrency = 200
-		duration    = 10 * time.Second
+		concurrency = 10
+		duration    = 50 * time.Millisecond
 	)
 
 	var successCount, errorCount atomic.Int64

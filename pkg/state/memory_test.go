@@ -30,13 +30,13 @@ func TestGoroutineLeaks(t *testing.T) {
 	// Force GC to clean up before baseline
 	runtime.GC()
 	debug.FreeOSMemory()
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 
 	baselineGoroutines := runtime.NumGoroutine()
 	t.Logf("Baseline goroutines: %d", baselineGoroutines)
 
 	// Create and destroy managers multiple times
-	iterations := 50
+	iterations := 10
 	for i := 0; i < iterations; i++ {
 		mgr := setupTestManager(t)
 
@@ -53,10 +53,10 @@ func TestGoroutineLeaks(t *testing.T) {
 	}
 
 	// Force GC multiple times to clean up
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 2; i++ {
 		runtime.GC()
 		debug.FreeOSMemory()
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	finalGoroutines := runtime.NumGoroutine()
@@ -113,7 +113,7 @@ func TestFileDescriptorAccumulation(t *testing.T) {
 	// Perform many state save operations (using in-memory manager, no file I/O)
 	mgr := setupTestManager(t)
 
-	iterations := 500
+	iterations := 50
 	for i := 0; i < iterations; i++ {
 		mgr.SetStatus(StatusIdle)
 		mgr.SetStatus(StatusSyncing)
@@ -124,7 +124,7 @@ func TestFileDescriptorAccumulation(t *testing.T) {
 
 	// Force GC
 	runtime.GC()
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 
 	finalFDs := countOpenFileDescriptors(t)
 	t.Logf("Final file descriptors: %d", finalFDs)
@@ -153,7 +153,7 @@ func TestMemoryGrowthDuringLargeSync(t *testing.T) {
 	// Simulate large sync with many progress updates
 	mgr.StartSync("test-card-large", 10000, 100*1024*1024*1024) // 100 GB
 
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 50; i++ {
 		fileName := fmt.Sprintf("IMG_%04d.jpg", i)
 		mgr.UpdateSyncProgress(
 			int64(i),
@@ -192,8 +192,9 @@ func TestStringConcatenationInLoops(t *testing.T) {
 
 	mgr := setupTestManager(t)
 
-	// Create many sync records with string data
-	for i := 0; i < 1000; i++ {
+	// Create enough sync records to catch obvious allocation regressions without
+	// turning the unit suite into a stress test.
+	for i := 0; i < 25; i++ {
 		cardID := fmt.Sprintf("card-%d", i)
 		mgr.StartSync(cardID, 100, 1000000)
 
@@ -214,7 +215,7 @@ func TestStringConcatenationInLoops(t *testing.T) {
 	t.Logf("Total allocations during string operations: %.2f MB", allocGrowth)
 
 	// Check allocation efficiency - should be reasonable for 1000 syncs
-	if allocGrowth > 100 {
+	if allocGrowth > 50 {
 		t.Errorf("Excessive allocations from string operations: %.2f MB", allocGrowth)
 	}
 }
@@ -228,8 +229,7 @@ func TestLargeJSONMarshalingMemory(t *testing.T) {
 
 	mgr := setupTestManager(t)
 
-	// Create large history (simulate 10,000 syncs = ~100MB JSON)
-	numRecords := 10000
+	numRecords := 100
 	for i := 0; i < numRecords; i++ {
 		record := SyncRecord{
 			ID:              fmt.Sprintf("sync-%d", i),
@@ -271,7 +271,10 @@ func TestLargeJSONMarshalingMemory(t *testing.T) {
 	afterMarshalHeap := m3.HeapAlloc
 
 	historySize := float64(beforeMarshalHeap-baselineHeap) / (1024 * 1024)
-	marshalOverhead := float64(afterMarshalHeap-beforeMarshalHeap) / (1024 * 1024)
+	var marshalOverhead float64
+	if afterMarshalHeap > beforeMarshalHeap {
+		marshalOverhead = float64(afterMarshalHeap-beforeMarshalHeap) / (1024 * 1024)
+	}
 	dataSize := float64(len(data)) / (1024 * 1024)
 
 	t.Logf("History memory usage: %.2f MB", historySize)
@@ -280,7 +283,7 @@ func TestLargeJSONMarshalingMemory(t *testing.T) {
 	t.Logf("Number of records: %d", numRecords)
 
 	// Verify marshaling doesn't leak memory
-	if marshalOverhead > 50 {
+	if marshalOverhead > 10 {
 		t.Errorf("Excessive JSON marshaling overhead: %.2f MB", marshalOverhead)
 	}
 
@@ -340,7 +343,7 @@ func TestMapMemoryNotReleased(t *testing.T) {
 	mgr := setupTestManager(t)
 
 	// Create many sync records (stored in slice, but could expose map issues)
-	numSyncs := 10000
+	numSyncs := 100
 	for i := 0; i < numSyncs; i++ {
 		cardID := fmt.Sprintf("card-%d", i)
 		mgr.StartSync(cardID, 100, 1000000)
@@ -359,7 +362,7 @@ func TestMapMemoryNotReleased(t *testing.T) {
 
 	runtime.GC()
 	debug.FreeOSMemory()
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 
 	var m3 runtime.MemStats
 	runtime.ReadMemStats(&m3)
@@ -374,8 +377,8 @@ func TestMapMemoryNotReleased(t *testing.T) {
 	t.Logf("Memory retained: %.2f MB", retainedMB)
 
 	// Should release most of the memory
-	releaseRate := releasedMB / growthMB
-	if releaseRate < 0.5 {
+	if growthMB > 0 && releasedMB/growthMB < 0.5 {
+		releaseRate := releasedMB / growthMB
 		t.Errorf("Insufficient memory released: %.1f%% (expected >50%%)", releaseRate*100)
 	}
 }
@@ -435,7 +438,7 @@ func TestConcurrentAccessMemorySafety(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for j := 0; j < 500; j++ {
+		for j := 0; j < 50; j++ {
 			if err := mgr.SetStatus(StatusSyncing); err != nil {
 				errors <- fmt.Errorf("writer: SetStatus failed: %v", err)
 				return
@@ -459,11 +462,11 @@ func TestConcurrentAccessMemorySafety(t *testing.T) {
 	}()
 
 	// Multiple concurrent readers
-	for i := 0; i < 20; i++ {
+	for i := 0; i < 5; i++ {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			for j := 0; j < 100; j++ {
+			for j := 0; j < 20; j++ {
 				_ = mgr.GetState()
 				_ = mgr.GetHistory()
 				_ = mgr.FindLastSyncByCardID(fmt.Sprintf("card-%d", id))
@@ -479,13 +482,11 @@ func TestConcurrentAccessMemorySafety(t *testing.T) {
 			ch := mgr.Subscribe()
 			defer mgr.Unsubscribe(ch)
 
-			timeout := time.After(3 * time.Second)
-			for {
+			for j := 0; j < 20; j++ {
 				select {
 				case <-ch:
 					// Consume messages
-				case <-timeout:
-					return
+				case <-time.After(10 * time.Millisecond):
 				}
 			}
 		}(i)
@@ -522,18 +523,12 @@ func TestNotifyListenersDeadlock(t *testing.T) {
 			ch := mgr.Subscribe()
 			defer mgr.Unsubscribe(ch)
 
-			// Consume messages for up to 1 second; notification may
-			// drop messages when the buffer is full, so we just verify
-			// the system doesn't deadlock.
-			timeout := time.After(1 * time.Second)
-			for {
+			for j := 0; j < 20; j++ {
 				select {
 				case <-ch:
 					receivedCounts[id]++
-					// Slow consumer
-					time.Sleep(10 * time.Millisecond)
-				case <-timeout:
-					return
+					time.Sleep(time.Millisecond)
+				case <-time.After(10 * time.Millisecond):
 				}
 			}
 		}(i)

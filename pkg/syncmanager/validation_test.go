@@ -12,12 +12,12 @@ func TestValidateCardID(t *testing.T) {
 	}{
 		{
 			name:    "Valid card ID",
-			cardID:  "card-12345678",
+			cardID:  "card-0123456789abcdef",
 			wantErr: false,
 		},
 		{
 			name:    "Valid card ID with letters",
-			cardID:  "card-abcd1234",
+			cardID:  "card-abcd1234abcd1234",
 			wantErr: false,
 		},
 		{
@@ -47,7 +47,7 @@ func TestValidateCardID(t *testing.T) {
 		},
 		{
 			name:    "Invalid format - too long",
-			cardID:  "card-123456789",
+			cardID:  "card-123456789abcdef01",
 			wantErr: true,
 		},
 		{
@@ -79,14 +79,14 @@ func TestValidateCardID(t *testing.T) {
 
 func TestIsRetryableError(t *testing.T) {
 	tests := []struct {
-		name  string
-		err   error
-		want  bool
+		name string
+		err  error
+		want bool
 	}{
 		{
-			name:  "Nil error",
-			err:   nil,
-			want:  false,
+			name: "Nil error",
+			err:  nil,
+			want: false,
 		},
 		// Add more test cases as needed
 	}

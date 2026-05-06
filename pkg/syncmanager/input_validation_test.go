@@ -16,7 +16,7 @@ func TestInputValidation_CardIDValidation(t *testing.T) {
 	}{
 		{
 			name:        "ValidCardID",
-			cardID:      "card-12345678",
+			cardID:      "card-0123456789abcdef",
 			shouldPass:  true,
 			description: "Valid card ID should pass",
 			severity:    "N/A",
@@ -160,81 +160,81 @@ func TestInputValidation_CardIDValidation(t *testing.T) {
 // TestInputValidation_RetryableErrors tests error classification
 func TestInputValidation_RetryableErrors(t *testing.T) {
 	tests := []struct {
-		name         string
-		errorStr     string
-		shouldRetry  bool
-		description  string
-		severity     string
+		name        string
+		errorStr    string
+		shouldRetry bool
+		description string
+		severity    string
 	}{
 		{
-			name:         "ConnectionRefused",
-			errorStr:     "connection refused",
-			shouldRetry:  true,
-			description:  "Connection refused errors should be retryable",
-			severity:     "N/A",
+			name:        "ConnectionRefused",
+			errorStr:    "connection refused",
+			shouldRetry: true,
+			description: "Connection refused errors should be retryable",
+			severity:    "N/A",
 		},
 		{
-			name:         "Timeout",
-			errorStr:     "timeout exceeded",
-			shouldRetry:  true,
-			description:  "Timeout errors should be retryable",
-			severity:     "N/A",
+			name:        "Timeout",
+			errorStr:    "timeout exceeded",
+			shouldRetry: true,
+			description: "Timeout errors should be retryable",
+			severity:    "N/A",
 		},
 		{
-			name:         "RateLimited",
-			errorStr:     "rate limit exceeded",
-			shouldRetry:  true,
-			description:  "Rate limit errors should be retryable",
-			severity:     "N/A",
+			name:        "RateLimited",
+			errorStr:    "rate limit exceeded",
+			shouldRetry: true,
+			description: "Rate limit errors should be retryable",
+			severity:    "N/A",
 		},
 		{
-			name:         "ServerError500",
-			errorStr:     "500 internal server error",
-			shouldRetry:  true,
-			description:  "500 errors should be retryable",
-			severity:     "N/A",
+			name:        "ServerError500",
+			errorStr:    "500 internal server error",
+			shouldRetry: true,
+			description: "500 errors should be retryable",
+			severity:    "N/A",
 		},
 		{
-			name:         "NotFound404",
-			errorStr:     "404 not found",
-			shouldRetry:  false,
-			description:  "404 errors should not be retryable",
-			severity:     "N/A",
+			name:        "NotFound404",
+			errorStr:    "404 not found",
+			shouldRetry: false,
+			description: "404 errors should not be retryable",
+			severity:    "N/A",
 		},
 		{
-			name:         "Unauthorized401",
-			errorStr:     "401 unauthorized",
-			shouldRetry:  false,
-			description:  "401 errors should not be retryable",
-			severity:     "N/A",
+			name:        "Unauthorized401",
+			errorStr:    "401 unauthorized",
+			shouldRetry: false,
+			description: "401 errors should not be retryable",
+			severity:    "N/A",
 		},
 		{
-			name:         "PermissionDenied",
-			errorStr:     "permission denied",
-			shouldRetry:  false,
-			description:  "Permission errors should not be retryable",
-			severity:     "N/A",
+			name:        "PermissionDenied",
+			errorStr:    "permission denied",
+			shouldRetry: false,
+			description: "Permission errors should not be retryable",
+			severity:    "N/A",
 		},
 		{
-			name:         "VeryLongErrorMessage",
-			errorStr:     "error: " + strings.Repeat("x", 1000000),
-			shouldRetry:  false,
-			description:  "Very long error messages could cause memory issues",
-			severity:     "MEDIUM",
+			name:        "VeryLongErrorMessage",
+			errorStr:    "error: " + strings.Repeat("x", 1000000),
+			shouldRetry: false,
+			description: "Very long error messages could cause memory issues",
+			severity:    "MEDIUM",
 		},
 		{
-			name:         "ErrorWithFormatStrings",
-			errorStr:     "error: %s%s%s%s%s%n%n",
-			shouldRetry:  false,
-			description:  "Format strings in errors should be safe",
-			severity:     "LOW",
+			name:        "ErrorWithFormatStrings",
+			errorStr:    "error: %s%s%s%s%s%n%n",
+			shouldRetry: false,
+			description: "Format strings in errors should be safe",
+			severity:    "LOW",
 		},
 		{
-			name:         "ErrorWithNullByte",
-			errorStr:     "error: something\x00hidden",
-			shouldRetry:  false,
-			description:  "Null bytes in errors should be handled",
-			severity:     "LOW",
+			name:        "ErrorWithNullByte",
+			errorStr:    "error: something\x00hidden",
+			shouldRetry: false,
+			description: "Null bytes in errors should be handled",
+			severity:    "LOW",
 		},
 	}
 
@@ -274,7 +274,7 @@ func TestInputValidation_PathConstruction(t *testing.T) {
 	}{
 		{
 			name:        "ValidCardID",
-			cardID:      "card-12345678",
+			cardID:      "card-0123456789abcdef",
 			description: "Normal card ID should construct safe path",
 			severity:    "N/A",
 		},
@@ -472,8 +472,8 @@ func TestInputValidation_MemoryExhaustion(t *testing.T) {
 			name: "LargeCardIDList",
 			setup: func() error {
 				// Simulate processing many card IDs
-				for i := 0; i < 100000; i++ {
-					cardID := "card-12345678"
+				for i := 0; i < 1000; i++ {
+					cardID := "card-0123456789abcdef"
 					if err := validateCardID(cardID); err != nil {
 						return err
 					}
@@ -487,7 +487,7 @@ func TestInputValidation_MemoryExhaustion(t *testing.T) {
 			name: "RepeatedErrorChecking",
 			setup: func() error {
 				// Simulate many error checks with large messages
-				for i := 0; i < 10000; i++ {
+				for i := 0; i < 1000; i++ {
 					err := &mockError{msg: strings.Repeat("error", 100)}
 					_ = isRetryableError(err)
 				}
