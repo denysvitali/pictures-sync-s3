@@ -455,7 +455,9 @@ func TestSubscribeUnsubscribe(t *testing.T) {
 	ch3 := mgr.Subscribe()
 
 	// Trigger a state change
-	mgr.SetStatus(StatusDetected)
+	if err := mgr.SetStatus(StatusDetected); err != nil {
+		t.Fatalf("SetStatus failed: %v", err)
+	}
 
 	// All channels should receive the update
 	timeout := time.After(1 * time.Second)
@@ -474,7 +476,9 @@ func TestSubscribeUnsubscribe(t *testing.T) {
 	mgr.Unsubscribe(ch2)
 
 	// Trigger another change
-	mgr.SetStatus(StatusSyncing)
+	if err := mgr.SetStatus(StatusSyncing); err != nil {
+		t.Fatalf("SetStatus failed: %v", err)
+	}
 
 	// Only ch1 and ch3 should receive update
 	for i, ch := range []chan CurrentState{ch1, ch3} {

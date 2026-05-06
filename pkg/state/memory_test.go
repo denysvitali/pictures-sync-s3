@@ -15,6 +15,12 @@ import (
 
 // setupTestManager creates a test manager (shared with state_test.go)
 func setupTestManager(t testing.TB) *Manager {
+	t.Helper()
+
+	if err := ensureDirectories(); err != nil {
+		t.Fatalf("failed to create state test directories: %v", err)
+	}
+
 	mgr := &Manager{
 		currentState:      CurrentState{Status: StatusIdle},
 		notifier:          newNotifier(),
