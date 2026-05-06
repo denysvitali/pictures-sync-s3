@@ -512,7 +512,31 @@ func configureUpdateHTTPClient(client *http.Client, rawURL string, insecureSkipV
 	tlsConfig.InsecureSkipVerify = true
 	transport.TLSClientConfig = tlsConfig
 	cloned.Transport = transport
+	configureLoopbackRedirectAuth(&cloned, rawURL)
 	return &cloned
+}
+
+func configureLoopbackRedirectAuth(client *http.Client, rawURL string) {
+	baseURL, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || baseURL.User == nil || !isLoopbackHost(baseURL.Hostname()) {
+		return
+	}
+
+	username := baseURL.User.Username()
+	password, _ := baseURL.User.Password()
+	checkRedirect := client.CheckRedirect
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) > 0 && isLoopbackHost(req.URL.Hostname()) && req.Header.Get("Authorization") == "" {
+			req.SetBasicAuth(username, password)
+		}
+		if checkRedirect != nil {
+			return checkRedirect(req, via)
+		}
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		return nil
+	}
 }
 
 func shouldSkipUpdateTLSVerify(rawURL string) bool {

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -169,6 +170,15 @@ func TestGokrazyUpdaterTargetSkipsTLSVerifyAfterLoopbackHTTPRedirect(t *testing.
 			http.NotFound(w, r)
 			return
 		}
+		user, password, ok := r.BasicAuth()
+		if !ok {
+			http.Error(w, "no Basic Authorization header set", http.StatusUnauthorized)
+			return
+		}
+		if user != "gokrazy" || password != "photo-backup" {
+			http.Error(w, "invalid credentials", http.StatusForbidden)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"features":"streaming"}`))
 	}))
@@ -179,12 +189,18 @@ func TestGokrazyUpdaterTargetSkipsTLSVerifyAfterLoopbackHTTPRedirect(t *testing.
 	}))
 	defer redirectServer.Close()
 
-	client := NewUpdateHTTPClient(redirectServer.URL+"/", time.Minute, false)
+	baseURL, err := url.Parse(redirectServer.URL + "/")
+	if err != nil {
+		t.Fatalf("parse redirect server URL: %v", err)
+	}
+	baseURL.User = url.UserPassword("gokrazy", "photo-backup")
+
+	client := NewUpdateHTTPClient(baseURL.String(), time.Minute, false)
 	if !transportSkipsTLSVerify(client.Transport) {
 		t.Fatal("loopback HTTP client should allow a self-signed HTTPS updater redirect")
 	}
 
-	if _, err := updater.NewTarget(context.Background(), redirectServer.URL+"/", client); err != nil {
+	if _, err := updater.NewTarget(context.Background(), baseURL.String(), client); err != nil {
 		t.Fatalf("updater.NewTarget should accept loopback HTTP to self-signed HTTPS redirect: %v", err)
 	}
 }
