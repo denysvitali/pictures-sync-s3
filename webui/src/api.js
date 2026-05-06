@@ -144,6 +144,11 @@ export const saveB2Config = (d, payload) =>
 export const getOtaStatus = (d) => apiRequest('/api/ota/status', { deviceUrl: d })
 export const installOta = (d, releaseTag = null) =>
   apiRequest('/api/ota/install', { deviceUrl: d, method: 'POST', body: releaseTag ? { release_tag: releaseTag } : undefined })
+export const getSystemTime = (d) => apiRequest('/api/system/time', { deviceUrl: d })
+export const syncSystemTime = (d, clientTime) =>
+  apiRequest('/api/system/time', { deviceUrl: d, method: 'POST', body: { client_time: clientTime } })
+export const generateTLSCertificate = (d, hosts = []) =>
+  apiRequest('/api/system/tls-certificate', { deviceUrl: d, method: 'POST', body: { hosts } })
 export const getDevices = (d) => apiRequest('/api/devices', { deviceUrl: d })
 export const selectDevice = (d, devicePath) =>
   apiRequest('/api/devices/select', { deviceUrl: d, method: 'POST', body: { device_path: devicePath } })

@@ -214,6 +214,67 @@ func TestCertificatesExist(t *testing.T) {
 	}
 }
 
+func TestGeneratePersistentSelfSignedCertificate(t *testing.T) {
+	tmpDir := t.TempDir()
+	rootDir := filepath.Join(tmpDir, "root")
+	permDir := filepath.Join(tmpDir, "perm")
+	setTestTLSPaths(t, rootDir, permDir)
+
+	now := time.Date(2026, time.May, 6, 8, 0, 0, 0, time.UTC)
+	info, err := generateSelfSignedCertificate(PersistentConfig(), []string{"photo-backup.local", "192.168.1.10"}, now)
+	if err != nil {
+		t.Fatalf("generate certificate: %v", err)
+	}
+
+	if info.CertFile != permCertFile {
+		t.Fatalf("expected cert file %q, got %q", permCertFile, info.CertFile)
+	}
+	if !info.Exists || !info.ValidNow || info.NeedsRegeneration {
+		t.Fatalf("expected usable generated certificate, got %+v", info)
+	}
+	if info.NotAfter.Before(now.Add(9 * 365 * 24 * time.Hour)) {
+		t.Fatalf("certificate expiry is too soon: %s", info.NotAfter)
+	}
+	if !containsString(info.DNSNames, "photo-backup.local") {
+		t.Fatalf("expected DNS SAN photo-backup.local, got %v", info.DNSNames)
+	}
+	if !containsString(info.IPAddresses, "192.168.1.10") {
+		t.Fatalf("expected IP SAN 192.168.1.10, got %v", info.IPAddresses)
+	}
+
+	keyInfo, err := os.Stat(permKeyFile)
+	if err != nil {
+		t.Fatalf("stat generated key: %v", err)
+	}
+	if keyInfo.Mode().Perm() != 0600 {
+		t.Fatalf("expected key mode 0600, got %v", keyInfo.Mode().Perm())
+	}
+}
+
+func TestGeneratePersistentSelfSignedCertificateRejectsInvalidClock(t *testing.T) {
+	tmpDir := t.TempDir()
+	rootDir := filepath.Join(tmpDir, "root")
+	permDir := filepath.Join(tmpDir, "perm")
+	setTestTLSPaths(t, rootDir, permDir)
+
+	_, err := generateSelfSignedCertificate(PersistentConfig(), nil, time.Date(1980, time.January, 1, 0, 0, 3, 0, time.UTC))
+	if err == nil {
+		t.Fatal("expected invalid clock error")
+	}
+	if fileExists(permCertFile) || fileExists(permKeyFile) {
+		t.Fatal("certificate files should not be written when clock is invalid")
+	}
+}
+
+func containsString(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
+}
+
 func setTestTLSPaths(t *testing.T, rootDir, permDir string) {
 	t.Helper()
 

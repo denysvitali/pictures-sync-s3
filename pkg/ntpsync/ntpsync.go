@@ -9,41 +9,94 @@ import (
 	"time"
 
 	"github.com/beevik/ntp"
+	"golang.org/x/sys/unix"
 )
 
-// SyncTime synchronizes system time with NTP servers
-// Returns error if sync fails after all retries
-func SyncTime() error {
-	servers := []string{
+const (
+	defaultNTPTimeout       = 2 * time.Second
+	systemClockSetThreshold = time.Second
+)
+
+var (
+	servers = []string{
 		"0.pool.ntp.org",
 		"1.pool.ntp.org",
 		"2.pool.ntp.org",
 		"time.google.com",
 	}
+	now            = time.Now
+	setSystemClock = setSystemClockLinux
+)
 
+// SyncResult describes a successful NTP synchronization attempt.
+type SyncResult struct {
+	Server        string
+	SyncedTime    time.Time
+	Offset        time.Duration
+	SystemTimeSet bool
+}
+
+// SyncTime synchronizes system time with NTP servers.
+// Returns error if sync fails after all configured servers.
+func SyncTime() error {
+	_, err := SyncTimeWithTimeout(defaultNTPTimeout)
+	return err
+}
+
+// SyncTimeWithTimeout synchronizes system time using a bounded NTP query timeout.
+func SyncTimeWithTimeout(timeout time.Duration) (*SyncResult, error) {
 	var lastErr error
 	for _, server := range servers {
 		log.Printf("Attempting NTP sync with %s...", server)
 
-		ntpTime, err := ntp.Time(server)
+		response, err := ntp.QueryWithOptions(server, ntp.QueryOptions{Timeout: timeout})
 		if err != nil {
 			log.Printf("Failed to sync with %s: %v", server, err)
 			lastErr = err
 			continue
 		}
-
-		offset := time.Since(ntpTime)
-		log.Printf("NTP sync successful with %s. Time offset: %v", server, offset)
-
-		// If offset is more than 1 second, log a warning
-		if offset.Abs() > time.Second {
-			log.Printf("Warning: System time differs from NTP by %v", offset)
+		if err := response.Validate(); err != nil {
+			log.Printf("Invalid NTP response from %s: %v", server, err)
+			lastErr = err
+			continue
 		}
 
-		return nil
+		offset := response.ClockOffset
+		ntpTime := now().Add(offset)
+		log.Printf("NTP sync successful with %s. Time offset: %v", server, offset)
+
+		result := &SyncResult{
+			Server:     server,
+			SyncedTime: ntpTime,
+			Offset:     offset,
+		}
+
+		if offset.Abs() > systemClockSetThreshold {
+			log.Printf("Warning: System time differs from NTP by %v", offset)
+			if err := SetSystemTime(ntpTime); err != nil {
+				return nil, fmt.Errorf("set system time from NTP server %s: %w", server, err)
+			}
+			result.SystemTimeSet = true
+			result.SyncedTime = now()
+		}
+
+		return result, nil
 	}
 
-	return fmt.Errorf("failed to sync with any NTP server: %w", lastErr)
+	return nil, fmt.Errorf("failed to sync with any NTP server: %w", lastErr)
+}
+
+// SetSystemTime sets the system realtime clock to the supplied timestamp.
+func SetSystemTime(t time.Time) error {
+	if t.IsZero() {
+		return fmt.Errorf("time must not be zero")
+	}
+	return setSystemClock(t)
+}
+
+func setSystemClockLinux(t time.Time) error {
+	ts := unix.NsecToTimespec(t.UnixNano())
+	return unix.ClockSettime(unix.CLOCK_REALTIME, &ts)
 }
 
 // EnsureTimeSync ensures time is synchronized before proceeding
@@ -52,7 +105,7 @@ func EnsureTimeSync(maxAttempts int) error {
 	backoff := time.Second
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		err := SyncTime()
+		_, err := SyncTimeWithTimeout(defaultNTPTimeout)
 		if err == nil {
 			return nil
 		}

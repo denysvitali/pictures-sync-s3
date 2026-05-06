@@ -19,6 +19,9 @@ import {
   saveBreakglassAuthorizedKeys,
   getOtaStatus,
   installOta,
+  getSystemTime,
+  syncSystemTime,
+  generateTLSCertificate,
 } from '../api.js'
 
 function describeError(err) {
@@ -67,6 +70,14 @@ function formatDate(value) {
 function formatPartition(partition) {
   if (!partition) return '--'
   return `root${partition}`
+}
+
+function getDeviceHost(deviceUrl) {
+  try {
+    return new URL(deviceUrl).hostname
+  } catch {
+    return ''
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -871,7 +882,152 @@ function OtaSection() {
 }
 
 // ---------------------------------------------------------------------------
-// Section 5 - Danger Zone (Password + Breakglass)
+// Section 5 - System Clock + TLS
+// ---------------------------------------------------------------------------
+
+function SystemMaintenanceSection() {
+  const { deviceUrl } = useDevice()
+  const toast = useToast()
+
+  const [status, setStatus] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [syncingTime, setSyncingTime] = useState(false)
+  const [generatingCert, setGeneratingCert] = useState(false)
+
+  const cert = status?.tls_certificate || {}
+  const certReady = !!cert.exists && !!cert.valid_now && !cert.needs_regeneration
+  const timeReady = !!status?.time_reasonable
+
+  const fetchStatus = useCallback(async () => {
+    setLoading(true)
+    try {
+      const data = await getSystemTime(deviceUrl)
+      setStatus(data)
+    } catch (err) {
+      toast.error(describeError(err) || 'Failed to load system time')
+    } finally {
+      setLoading(false)
+    }
+  }, [deviceUrl, toast])
+
+  useEffect(() => {
+    fetchStatus()
+  }, [fetchStatus])
+
+  const handleSyncTime = useCallback(async () => {
+    setSyncingTime(true)
+    try {
+      const data = await syncSystemTime(deviceUrl, new Date().toISOString())
+      setStatus(data)
+      toast.success('Device time synced')
+    } catch (err) {
+      toast.error(describeError(err) || 'Failed to sync device time')
+    } finally {
+      setSyncingTime(false)
+    }
+  }, [deviceUrl, toast])
+
+  const handleGenerateCert = useCallback(async () => {
+    setGeneratingCert(true)
+    try {
+      const host = getDeviceHost(deviceUrl)
+      const data = await generateTLSCertificate(deviceUrl, host ? [host] : [])
+      setStatus(data)
+      toast.success('TLS certificate generated')
+    } catch (err) {
+      toast.error(describeError(err) || 'Failed to generate TLS certificate')
+    } finally {
+      setGeneratingCert(false)
+    }
+  }, [deviceUrl, toast])
+
+  return (
+    <AccordionSection title="System Clock & TLS" icon="clock" badge={
+      loading ? null : (
+        <StatusBadge variant={timeReady && certReady ? 'success' : 'warning'}>
+          {timeReady && certReady ? 'Ready' : 'Needs attention'}
+        </StatusBadge>
+      )
+    }>
+      {loading ? (
+        <div className="flex items-center justify-center py-6">
+          <LoadingSpinner size="sm" />
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="bg-surface-900 rounded-lg p-3">
+              <p className="text-xs text-surface-400 mb-1">Device Time</p>
+              <p className="text-sm font-medium text-surface-100">
+                {formatDate(status?.current_time)}
+              </p>
+              <div className="mt-2">
+                <StatusBadge variant={timeReady ? 'success' : 'warning'}>
+                  {timeReady ? 'Valid' : 'Invalid'}
+                </StatusBadge>
+              </div>
+            </div>
+            <div className="bg-surface-900 rounded-lg p-3">
+              <p className="text-xs text-surface-400 mb-1">Persistent TLS</p>
+              <p className="text-sm font-medium text-surface-100">
+                {cert.exists ? (cert.valid_now ? 'Certificate valid' : 'Certificate invalid') : 'No certificate'}
+              </p>
+              <p className="text-xs text-surface-500 mt-1 break-all">
+                {cert.cert_file || '/perm/ssl/gokrazy-web.pem'}
+              </p>
+              {cert.not_after ? (
+                <p className="text-xs text-surface-500 mt-1">
+                  Expires {formatDate(cert.not_after)}
+                </p>
+              ) : null}
+            </div>
+          </div>
+          {cert.error ? (
+            <p className="text-xs text-danger bg-danger/10 border border-danger/20 rounded-lg p-2">
+              {cert.error}
+            </p>
+          ) : null}
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 pt-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={fetchStatus}
+              disabled={syncingTime || generatingCert}
+            >
+              <Icon name="arrow-path" className="w-4 h-4" />
+              Refresh
+            </Button>
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={syncingTime}
+                disabled={generatingCert}
+                onClick={handleSyncTime}
+              >
+                <Icon name="clock" className="w-4 h-4" />
+                Sync Time
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                loading={generatingCert}
+                disabled={syncingTime || !timeReady}
+                onClick={handleGenerateCert}
+              >
+                <Icon name="lock" className="w-4 h-4" />
+                Generate Cert
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </AccordionSection>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Section 6 - Danger Zone (Password + Breakglass)
 // ---------------------------------------------------------------------------
 
 function DangerZonePassword() {
@@ -1049,6 +1205,7 @@ export default function ConfigPage() {
       <B2SetupSection />
       <SyncSettingsSection />
       <OtaSection />
+      <SystemMaintenanceSection />
       <DangerZoneSection />
     </div>
   )

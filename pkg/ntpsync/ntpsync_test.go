@@ -130,6 +130,47 @@ func TestEnsureTimeSyncNegativeAttempts(t *testing.T) {
 	}
 }
 
+func TestSetSystemTime(t *testing.T) {
+	originalSetSystemClock := setSystemClock
+	defer func() {
+		setSystemClock = originalSetSystemClock
+	}()
+
+	want := time.Date(2026, time.May, 6, 8, 0, 0, 0, time.UTC)
+	var got time.Time
+	setSystemClock = func(t time.Time) error {
+		got = t
+		return nil
+	}
+
+	if err := SetSystemTime(want); err != nil {
+		t.Fatalf("SetSystemTime returned error: %v", err)
+	}
+	if !got.Equal(want) {
+		t.Fatalf("expected %s, got %s", want, got)
+	}
+}
+
+func TestSetSystemTimeRejectsZero(t *testing.T) {
+	originalSetSystemClock := setSystemClock
+	defer func() {
+		setSystemClock = originalSetSystemClock
+	}()
+
+	called := false
+	setSystemClock = func(t time.Time) error {
+		called = true
+		return nil
+	}
+
+	if err := SetSystemTime(time.Time{}); err == nil {
+		t.Fatal("expected zero time error")
+	}
+	if called {
+		t.Fatal("system clock setter should not be called for zero time")
+	}
+}
+
 func TestBackoffCapping(t *testing.T) {
 	// Test that backoff is capped at 64 seconds
 	// This is a unit test of the backoff logic without actually running it

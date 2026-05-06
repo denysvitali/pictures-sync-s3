@@ -16,6 +16,7 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/auth"
 	"github.com/denysvitali/pictures-sync-s3/pkg/events"
 	"github.com/denysvitali/pictures-sync-s3/pkg/handlers"
+	"github.com/denysvitali/pictures-sync-s3/pkg/ntpsync"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ota"
 	"github.com/denysvitali/pictures-sync-s3/pkg/settings"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ssrf"
@@ -105,6 +106,32 @@ func logAllowedOrigins(origins []string) {
 
 func configuredAllowedOrigins() []string {
 	return parseAllowedOrigins(defaultAllowedOrigins + "," + os.Getenv("WEBUI_ALLOWED_ORIGINS"))
+}
+
+func repairClockAndPersistentCertificateBeforeTLS() {
+	if err := ntpsync.EnsureTimeSync(1); err != nil {
+		log.Printf("Warning: NTP time sync before TLS setup failed: %v", err)
+	} else {
+		log.Println("System time synchronized before TLS setup")
+	}
+
+	if !tlsconfig.CurrentTimeCanIssueCertificate(time.Now()) {
+		log.Println("Skipping persistent TLS certificate repair until system time is valid")
+		return
+	}
+	if _, err := os.Stat("/perm"); err != nil {
+		log.Printf("Skipping persistent TLS certificate repair because /perm is not available: %v", err)
+		return
+	}
+
+	info, regenerated, err := tlsconfig.EnsurePersistentSelfSignedCertificate(nil)
+	if err != nil {
+		log.Printf("Warning: Failed to repair persistent TLS certificate: %v", err)
+		return
+	}
+	if regenerated {
+		log.Printf("Persistent TLS certificate generated at %s", info.CertFile)
+	}
 }
 
 func main() {
@@ -246,6 +273,8 @@ func main() {
 	http.HandleFunc("/api/network/diagnostics", ctx.HandleNetworkDiagnostics)
 	http.HandleFunc("/api/ota/status", ctx.HandleOTAStatus)
 	http.HandleFunc("/api/ota/install", ctx.HandleOTAInstall)
+	http.HandleFunc("/api/system/time", ctx.HandleSystemTime)
+	http.HandleFunc("/api/system/tls-certificate", ctx.HandleSystemTLSCertificate)
 	http.HandleFunc("/ws", websocket.HandleWebSocket(stateMgr, eventMgr))
 
 	// SPA route and static assets for React frontend
@@ -269,6 +298,8 @@ func main() {
 
 	// Start server (HTTPS if certificates are available, HTTP for development)
 	addr := ":" + port
+
+	repairClockAndPersistentCertificateBeforeTLS()
 
 	// Try to load TLS configuration
 	tlsConfig, useTLS, err := tlsconfig.LoadOrDefault()
