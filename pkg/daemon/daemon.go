@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/captiveportal"
@@ -384,7 +385,7 @@ func (s *Service) handleDevicesCommand(ctx context.Context) daemoncontrol.Respon
 	return daemoncontrol.OKData("devices", devices)
 }
 
-func (s *Service) handleFormatSDCardCommand(ctx context.Context, devicePath string) daemoncontrol.Response {
+func (s *Service) handleFormatSDCardCommand(ctx context.Context, devicePath, label string) daemoncontrol.Response {
 	if ctx.Err() != nil {
 		return daemoncontrol.Error(daemoncontrol.CodeUnavailable, "pictures-sync daemon is shutting down")
 	}
@@ -397,9 +398,12 @@ func (s *Service) handleFormatSDCardCommand(ctx context.Context, devicePath stri
 	if !sdmonitor.IsSupportedDevicePath(devicePath) {
 		return daemoncontrol.Error(daemoncontrol.CodeInvalidDevice, "unsupported SD card device path")
 	}
+	if err := sdmonitor.ValidateVolumeLabel(strings.TrimSpace(label)); err != nil {
+		return daemoncontrol.Error(daemoncontrol.CodeInvalidDevice, err.Error())
+	}
 
 	log.Printf("Manual SD card format requested for %s", devicePath)
-	if err := s.monitor.FormatCurrentDevice(ctx, devicePath); err != nil {
+	if err := s.monitor.FormatCurrentDevice(ctx, devicePath, label); err != nil {
 		log.Printf("SD card format failed: %v", err)
 		if !s.monitor.IsCardMounted() {
 			if stateErr := s.stateMgr.SetSDCard(false, ""); stateErr != nil {

@@ -111,6 +111,7 @@ func (ctx *Context) HandleDeviceFormat(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		DevicePath   string `json:"device_path"`
 		Confirmation string `json:"confirmation"`
+		Label        string `json:"label"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -131,7 +132,7 @@ func (ctx *Context) HandleDeviceFormat(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	log.Printf("SD card format requested via WebUI for device: %s", req.DevicePath)
-	if err := requester.RequestFormatSDCard(requestCtx, req.DevicePath); err != nil {
+	if err := requester.RequestFormatSDCard(requestCtx, req.DevicePath, req.Label); err != nil {
 		statusCode := http.StatusServiceUnavailable
 		var commandErr *daemoncontrol.CommandError
 		if errors.As(err, &commandErr) {

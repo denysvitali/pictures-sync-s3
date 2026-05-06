@@ -40,7 +40,7 @@ type SyncManager interface {
 type ManualSyncRequester interface {
 	RequestManualSync(context.Context, string) error
 	RequestCancelSync(context.Context) error
-	RequestFormatSDCard(context.Context, string) error
+	RequestFormatSDCard(context.Context, string, string) error
 }
 
 type DaemonClient interface {
@@ -56,7 +56,7 @@ type DaemonClient interface {
 type DaemonControlFunc struct {
 	ManualSync   func(context.Context, string) error
 	CancelSync   func(context.Context) error
-	FormatSDCard func(context.Context, string) error
+	FormatSDCard func(context.Context, string, string) error
 }
 
 func (f DaemonControlFunc) RequestManualSync(ctx context.Context, devicePath string) error {
@@ -67,9 +67,9 @@ func (f DaemonControlFunc) RequestCancelSync(ctx context.Context) error {
 	return f.CancelSync(ctx)
 }
 
-func (f DaemonControlFunc) RequestFormatSDCard(ctx context.Context, devicePath string) error {
+func (f DaemonControlFunc) RequestFormatSDCard(ctx context.Context, devicePath, label string) error {
 	if f.FormatSDCard != nil {
-		return f.FormatSDCard(ctx, devicePath)
+		return f.FormatSDCard(ctx, devicePath, label)
 	}
 	return &daemoncontrol.CommandError{
 		Code:    daemoncontrol.CodeUnavailable,
@@ -90,8 +90,8 @@ func (DaemonControlClient) RequestCancelSync(ctx context.Context) error {
 	return daemoncontrol.RequestCancelSync(ctx)
 }
 
-func (DaemonControlClient) RequestFormatSDCard(ctx context.Context, devicePath string) error {
-	return daemoncontrol.RequestFormatSDCard(ctx, devicePath)
+func (DaemonControlClient) RequestFormatSDCard(ctx context.Context, devicePath, label string) error {
+	return daemoncontrol.RequestFormatSDCard(ctx, devicePath, label)
 }
 
 func (DaemonControlClient) RequestStatus(ctx context.Context) (state.CurrentState, error) {

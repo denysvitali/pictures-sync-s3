@@ -7,6 +7,7 @@ import (
 	"log"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -14,6 +15,7 @@ import (
 const formatTimeout = 2 * time.Minute
 
 var formatCommandContext = exec.CommandContext
+var validVolumeLabelPattern = regexp.MustCompile(`^[A-Za-z0-9 _-]{1,11}$`)
 
 // IsSupportedDevicePath returns true for partition paths the monitor is allowed to manage.
 func IsSupportedDevicePath(devicePath string) bool {
@@ -32,10 +34,25 @@ func IsSupportedDevicePath(devicePath string) bool {
 	return false
 }
 
+// ValidateVolumeLabel validates an optional FAT volume label.
+func ValidateVolumeLabel(label string) error {
+	if label == "" {
+		return nil
+	}
+	if !validVolumeLabelPattern.MatchString(label) {
+		return fmt.Errorf("label must be 1-11 characters and contain only letters, numbers, spaces, underscores, or hyphens")
+	}
+	return nil
+}
+
 // FormatCurrentDevice unmounts and formats the currently mounted SD-card partition as FAT32.
-func (m *Monitor) FormatCurrentDevice(ctx context.Context, devicePath string) error {
+func (m *Monitor) FormatCurrentDevice(ctx context.Context, devicePath, label string) error {
 	if !IsSupportedDevicePath(devicePath) {
 		return fmt.Errorf("unsupported SD card device path: %s", devicePath)
+	}
+	label = strings.TrimSpace(label)
+	if err := ValidateVolumeLabel(label); err != nil {
+		return err
 	}
 
 	m.mu.RLock()
@@ -63,7 +80,7 @@ func (m *Monitor) FormatCurrentDevice(ctx context.Context, devicePath string) er
 	m.mu.Unlock()
 	m.mountsCacheTime = time.Time{}
 
-	args := []string{"-F", "32", "-n", "PICTURES", devicePath}
+	args := buildFormatArgs(devicePath, label)
 	// #nosec G204 -- devicePath is restricted to monitored SD-card partition patterns.
 	cmd := formatCommandContext(formatCtx, "mkfs.vfat", args...)
 	var stderr bytes.Buffer
@@ -78,4 +95,13 @@ func (m *Monitor) FormatCurrentDevice(ctx context.Context, devicePath string) er
 
 	log.Printf("Formatted SD card partition %s as FAT32", devicePath)
 	return nil
+}
+
+func buildFormatArgs(devicePath, label string) []string {
+	args := []string{"-F", "32"}
+	if label != "" {
+		args = append(args, "-n", label)
+	}
+	args = append(args, devicePath)
+	return args
 }

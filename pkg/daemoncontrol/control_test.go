@@ -179,8 +179,10 @@ func TestRequestFormatSDCard_WithDevicePath(t *testing.T) {
 	withTempSocket(t)
 
 	const wantedDevicePath = "/dev/sda1"
+	const wantedLabel = "CAMERA_1"
 	called := false
 	var requestedPath string
+	var requestedLabel string
 
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
@@ -188,9 +190,10 @@ func TestRequestFormatSDCard_WithDevicePath(t *testing.T) {
 		errCh <- ServeWithHandlers(ctx, Handlers{
 			ManualSync: func(context.Context, string) Response { return OK("accepted") },
 			CancelSync: func(context.Context) Response { return OK("cancelled") },
-			FormatSDCard: func(_ context.Context, devicePath string) Response {
+			FormatSDCard: func(_ context.Context, devicePath, label string) Response {
 				called = true
 				requestedPath = devicePath
+				requestedLabel = label
 				return OK("formatted")
 			},
 		})
@@ -208,7 +211,7 @@ func TestRequestFormatSDCard_WithDevicePath(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	if err := RequestFormatSDCard(context.Background(), wantedDevicePath); err != nil {
+	if err := RequestFormatSDCard(context.Background(), wantedDevicePath, wantedLabel); err != nil {
 		t.Fatalf("RequestFormatSDCard failed: %v", err)
 	}
 	if !called {
@@ -216,6 +219,9 @@ func TestRequestFormatSDCard_WithDevicePath(t *testing.T) {
 	}
 	if requestedPath != wantedDevicePath {
 		t.Fatalf("Expected device path %q, got %q", wantedDevicePath, requestedPath)
+	}
+	if requestedLabel != wantedLabel {
+		t.Fatalf("Expected label %q, got %q", wantedLabel, requestedLabel)
 	}
 
 	cancel()

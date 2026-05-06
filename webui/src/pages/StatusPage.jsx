@@ -517,10 +517,16 @@ export default function StatusPage() {
       toast.info('Format cancelled')
       return
     }
+    const rawLabel = window.prompt('Optional volume label (leave blank for no label):', '')
+    if (rawLabel === null) {
+      toast.info('Format cancelled')
+      return
+    }
+    const label = rawLabel.trim()
 
     setFormatLoading(true)
     try {
-      await formatSDCard(deviceUrl, devicePath, confirmation)
+      await formatSDCard(deviceUrl, devicePath, confirmation, label)
       toast.success('SD card formatted')
       await fetchData()
     } catch (err) {

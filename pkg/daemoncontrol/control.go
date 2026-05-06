@@ -40,6 +40,7 @@ const (
 type Request struct {
 	Command    string `json:"command"`
 	DevicePath string `json:"device_path,omitempty"`
+	Label      string `json:"label,omitempty"`
 	Path       string `json:"path,omitempty"`
 }
 
@@ -67,7 +68,7 @@ type CancelSyncHandler func(context.Context) Response
 type StatusHandler func(context.Context) Response
 type HistoryHandler func(context.Context) Response
 type DevicesHandler func(context.Context) Response
-type FormatSDCardHandler func(context.Context, string) Response
+type FormatSDCardHandler func(context.Context, string, string) Response
 type SDCardFilesHandler func(context.Context, string) Response
 type SDCardPreviewHandler func(context.Context, string) Response
 type SDCardThumbnailHandler func(context.Context, string) Response
@@ -186,7 +187,7 @@ func handleConn(ctx context.Context, conn net.Conn, handlers Handlers) {
 	case CommandDevices:
 		_ = json.NewEncoder(conn).Encode(call0(ctx, handlers.Devices))
 	case CommandFormatSDCard:
-		_ = json.NewEncoder(conn).Encode(callPath(ctx, handlers.FormatSDCard, req.DevicePath))
+		_ = json.NewEncoder(conn).Encode(callFormatSDCard(ctx, handlers.FormatSDCard, req.DevicePath, req.Label))
 	case CommandSDCardFiles:
 		_ = json.NewEncoder(conn).Encode(callPath(ctx, handlers.SDCardFiles, req.Path))
 	case CommandSDCardPreview:
@@ -210,6 +211,13 @@ func callPath(ctx context.Context, handler func(context.Context, string) Respons
 		return Error(CodeUnavailable, "daemon command is not available")
 	}
 	return handler(ctx, path)
+}
+
+func callFormatSDCard(ctx context.Context, handler FormatSDCardHandler, devicePath, label string) Response {
+	if handler == nil {
+		return Error(CodeUnavailable, "daemon command is not available")
+	}
+	return handler(ctx, devicePath, label)
 }
 
 func RequestManualSync(ctx context.Context) error {
@@ -242,8 +250,12 @@ func RequestDevices(ctx context.Context) ([]sdmonitor.DeviceInfo, error) {
 	return devices, err
 }
 
-func RequestFormatSDCard(ctx context.Context, devicePath string) error {
-	_, err := sendRequestWithTimeout(ctx, Request{Command: CommandFormatSDCard, DevicePath: devicePath}, formatRequestTimeout)
+func RequestFormatSDCard(ctx context.Context, devicePath, label string) error {
+	_, err := sendRequestWithTimeout(ctx, Request{
+		Command:    CommandFormatSDCard,
+		DevicePath: devicePath,
+		Label:      label,
+	}, formatRequestTimeout)
 	return err
 }
 

@@ -154,11 +154,11 @@ export const generateTLSCertificate = (d, hosts = []) =>
 export const getDevices = (d) => apiRequest('/api/devices', { deviceUrl: d })
 export const selectDevice = (d, devicePath) =>
   apiRequest('/api/devices/select', { deviceUrl: d, method: 'POST', body: { device_path: devicePath } })
-export const formatSDCard = (d, devicePath, confirmation) =>
+export const formatSDCard = (d, devicePath, confirmation, label = '') =>
   apiRequest('/api/devices/format', {
     deviceUrl: d,
     method: 'POST',
-    body: { device_path: devicePath, confirmation }
+    body: { device_path: devicePath, confirmation, label }
   })
 export const getFilePublicLink = (d, filePath) =>
   apiRequest('/api/files/link', { deviceUrl: d, query: { path: filePath } })

@@ -87,7 +87,7 @@ func (m *mockDaemonClient) RequestCancelSync(context.Context) error {
 	return m.cancelSyncErr
 }
 
-func (m *mockDaemonClient) RequestFormatSDCard(context.Context, string) error {
+func (m *mockDaemonClient) RequestFormatSDCard(context.Context, string, string) error {
 	return m.formatErr
 }
 
@@ -148,16 +148,18 @@ func TestHandleDeviceFormat_POST(t *testing.T) {
 	defer cleanup()
 
 	var requestedPath string
+	var requestedLabel string
 	ctx.ManualSync = DaemonControlFunc{
 		ManualSync: func(context.Context, string) error { return nil },
 		CancelSync: func(context.Context) error { return nil },
-		FormatSDCard: func(_ context.Context, devicePath string) error {
+		FormatSDCard: func(_ context.Context, devicePath, label string) error {
 			requestedPath = devicePath
+			requestedLabel = label
 			return nil
 		},
 	}
 
-	body := bytes.NewBufferString(`{"device_path":"/dev/sda1","confirmation":"FORMAT"}`)
+	body := bytes.NewBufferString(`{"device_path":"/dev/sda1","confirmation":"FORMAT","label":"CAMERA_1"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/devices/format", body)
 	w := httptest.NewRecorder()
 
@@ -169,6 +171,9 @@ func TestHandleDeviceFormat_POST(t *testing.T) {
 	if requestedPath != "/dev/sda1" {
 		t.Fatalf("Expected device path %q, got %q", "/dev/sda1", requestedPath)
 	}
+	if requestedLabel != "CAMERA_1" {
+		t.Fatalf("Expected label %q, got %q", "CAMERA_1", requestedLabel)
+	}
 }
 
 func TestHandleDeviceFormat_RequiresConfirmation(t *testing.T) {
@@ -179,7 +184,7 @@ func TestHandleDeviceFormat_RequiresConfirmation(t *testing.T) {
 	ctx.ManualSync = DaemonControlFunc{
 		ManualSync: func(context.Context, string) error { return nil },
 		CancelSync: func(context.Context) error { return nil },
-		FormatSDCard: func(context.Context, string) error {
+		FormatSDCard: func(context.Context, string, string) error {
 			called = true
 			return nil
 		},
