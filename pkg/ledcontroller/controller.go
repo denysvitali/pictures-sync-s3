@@ -21,10 +21,10 @@ const (
 
 // LED represents a single LED device
 type LED struct {
-	name         string
+	name           string
 	brightnessPath string
-	available    bool
-	mu           sync.Mutex // Protects LED operations
+	available      bool
+	mu             sync.Mutex // Protects LED operations
 }
 
 // LEDInterface allows for dependency injection and testing
@@ -35,19 +35,19 @@ type LEDInterface interface {
 
 // Controller manages LED indicators and responds to system state changes
 type Controller struct {
-	actLED    *LED
-	pwrLED    *LED
-	stateMgr  *state.Manager
+	actLED   *LED
+	pwrLED   *LED
+	stateMgr *state.Manager
 
 	// Goroutine management
-	stopChan       chan struct{}
-	patternStopMu  sync.Mutex
-	patternStop    chan struct{}
-	stateUpdates   chan state.CurrentState
-	wg             sync.WaitGroup
+	stopChan      chan struct{}
+	patternStopMu sync.Mutex
+	patternStop   chan struct{}
+	stateUpdates  chan state.CurrentState
+	wg            sync.WaitGroup
 
 	// State tracking
-	currentPattern LEDPattern
+	currentPattern   LEDPattern
 	currentPatternMu sync.RWMutex
 }
 
@@ -78,9 +78,9 @@ func discoverLED(name string, paths []string) *LED {
 	for _, path := range paths {
 		if _, err := os.Stat(path); err == nil {
 			return &LED{
-				name:         name,
+				name:           name,
 				brightnessPath: path,
-				available:    true,
+				available:      true,
 			}
 		}
 	}
@@ -207,7 +207,11 @@ func (c *Controller) runPattern(led *LED, pattern LEDPattern, stopChan chan stru
 	// Handle steady-on pattern (no blinking)
 	if pattern.OnDuration == 0 && pattern.OffDuration == 0 {
 		c.setLEDState(led, true)
-		<-stopChan // Wait for stop signal
+		select {
+		case <-stopChan:
+		case <-c.stopChan:
+		}
+		c.setLEDState(led, false)
 		return
 	}
 

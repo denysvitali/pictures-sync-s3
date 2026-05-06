@@ -410,6 +410,9 @@ func (s *Service) handleFormatSDCardCommand(ctx context.Context, devicePath, lab
 				log.Printf("Warning: Failed to clear SD card state after format failure: %v", stateErr)
 			}
 		}
+		if stateErr := s.stateMgr.SetError(err.Error()); stateErr != nil {
+			log.Printf("Warning: Failed to record SD card format error in state: %v", stateErr)
+		}
 		switch err.Error() {
 		case "no SD card mounted":
 			return daemoncontrol.Error(daemoncontrol.CodeNoSDCardMounted, err.Error())

@@ -23,77 +23,77 @@ func TestInvalidRemotePaths(t *testing.T) {
 			name:        "null bytes in remote name",
 			remoteName:  "remote\x00malicious",
 			remotePath:  "/photos",
-			expectError: false, // BUG: No validation!
+			expectError: true,
 			description: "Null bytes can cause string termination issues",
 		},
 		{
 			name:        "null bytes in remote path",
 			remoteName:  "remote",
 			remotePath:  "/photos\x00/../../../etc/passwd",
-			expectError: false, // BUG: No validation!
+			expectError: true,
 			description: "Path traversal with null bytes",
 		},
 		{
 			name:        "extremely long remote name",
 			remoteName:  strings.Repeat("a", 10000),
 			remotePath:  "/photos",
-			expectError: false, // BUG: No length validation!
+			expectError: true,
 			description: "Can cause memory issues or DOS",
 		},
 		{
 			name:        "extremely long remote path",
 			remoteName:  "remote",
 			remotePath:  "/" + strings.Repeat("a", 100000),
-			expectError: false, // BUG: No length validation!
+			expectError: true,
 			description: "Can cause filesystem issues",
 		},
 		{
 			name:        "path traversal in remote path",
 			remoteName:  "remote",
 			remotePath:  "/../../../etc/passwd",
-			expectError: false, // BUG: No path validation!
+			expectError: true,
 			description: "Could access unintended files",
 		},
 		{
 			name:        "special characters in remote name",
 			remoteName:  "remote; rm -rf /",
 			remotePath:  "/photos",
-			expectError: false, // BUG: No sanitization!
+			expectError: true,
 			description: "Command injection potential if used in shell",
 		},
 		{
 			name:        "newline injection in remote name",
 			remoteName:  "remote\n--delete-excluded",
 			remotePath:  "/photos",
-			expectError: false, // BUG: Could inject rclone flags!
+			expectError: true,
 			description: "Could inject malicious rclone flags",
 		},
 		{
 			name:        "unicode normalization issues",
 			remoteName:  "remote\u202E", // Right-to-left override
 			remotePath:  "/photos",
-			expectError: false, // BUG: No unicode validation!
+			expectError: true,
 			description: "Could cause display spoofing",
 		},
 		{
 			name:        "empty remote name allowed",
 			remoteName:  "",
 			remotePath:  "/photos",
-			expectError: false, // BUG: Empty strings accepted!
+			expectError: true,
 			description: "Empty remote name should be invalid",
 		},
 		{
 			name:        "whitespace only remote name",
 			remoteName:  "   \t\n",
 			remotePath:  "/photos",
-			expectError: false, // BUG: Whitespace accepted!
+			expectError: true,
 			description: "Whitespace-only strings should be invalid",
 		},
 		{
 			name:        "control characters in path",
 			remoteName:  "remote",
 			remotePath:  "/photos\r\n\t\x07",
-			expectError: false, // BUG: Control chars not validated!
+			expectError: true,
 			description: "Control characters can cause issues",
 		},
 	}
@@ -105,8 +105,10 @@ func TestInvalidRemotePaths(t *testing.T) {
 
 			if tt.expectError && err == nil {
 				t.Errorf("Expected error for %s, got nil", tt.description)
-			} else if !tt.expectError && err != nil {
-				t.Logf("BUG FOUND: %s - No validation, but should have error", tt.description)
+			} else if tt.expectError && err != nil {
+				return
+			} else if err != nil {
+				t.Errorf("Unexpected error for %s: %v", tt.description, err)
 			}
 
 			// Verify the values were actually set (demonstrating lack of validation)
@@ -131,37 +133,37 @@ func TestInvalidReformatThresholdValues(t *testing.T) {
 		{
 			name:        "negative threshold",
 			threshold:   -0.5,
-			expectError: false, // BUG: No validation!
+			expectError: true,
 			description: "Negative values should be rejected",
 		},
 		{
 			name:        "threshold greater than 100",
 			threshold:   150.0,
-			expectError: false, // BUG: No validation!
+			expectError: true,
 			description: "Values > 100 make no sense for percentage",
 		},
 		{
 			name:        "threshold greater than 1 but less than 100",
 			threshold:   50.0,
-			expectError: false, // Ambiguous: is this 50% or 5000%?
+			expectError: true,
 			description: "Ambiguous whether this is 0-1 or 0-100 scale",
 		},
 		{
 			name:        "NaN threshold",
 			threshold:   math.NaN(),
-			expectError: false, // BUG: No NaN check!
+			expectError: true,
 			description: "NaN values should be rejected",
 		},
 		{
 			name:        "positive infinity",
 			threshold:   math.Inf(1),
-			expectError: false, // BUG: No infinity check!
+			expectError: true,
 			description: "Infinity should be rejected",
 		},
 		{
 			name:        "negative infinity",
 			threshold:   math.Inf(-1),
-			expectError: false, // BUG: No infinity check!
+			expectError: true,
 			description: "Negative infinity should be rejected",
 		},
 		{
@@ -179,7 +181,7 @@ func TestInvalidReformatThresholdValues(t *testing.T) {
 		{
 			name:        "extremely large value",
 			threshold:   1e100,
-			expectError: false, // BUG: No upper bound!
+			expectError: true,
 			description: "Extremely large values should be rejected",
 		},
 	}
@@ -191,8 +193,10 @@ func TestInvalidReformatThresholdValues(t *testing.T) {
 
 			if tt.expectError && err == nil {
 				t.Errorf("Expected error for %s, got nil", tt.description)
-			} else if !tt.expectError && err != nil {
-				t.Logf("BUG FOUND: %s - No validation, but should have error", tt.description)
+			} else if tt.expectError && err != nil {
+				return
+			} else if err != nil {
+				t.Errorf("Unexpected error for %s: %v", tt.description, err)
 			}
 
 			// Check if the value was actually set
@@ -222,42 +226,42 @@ func TestInvalidTransfersAndCheckers(t *testing.T) {
 			name:        "negative transfers",
 			transfers:   -1,
 			checkers:    8,
-			expectError: false, // BUG: No validation!
+			expectError: true,
 			description: "Negative transfers should be rejected",
 		},
 		{
 			name:        "negative checkers",
 			transfers:   4,
 			checkers:    -10,
-			expectError: false, // BUG: No validation!
+			expectError: true,
 			description: "Negative checkers should be rejected",
 		},
 		{
 			name:        "zero transfers",
 			transfers:   0,
 			checkers:    8,
-			expectError: false,
+			expectError: true,
 			description: "Zero transfers might cause rclone issues",
 		},
 		{
 			name:        "zero checkers",
 			transfers:   4,
 			checkers:    0,
-			expectError: false,
+			expectError: true,
 			description: "Zero checkers might cause rclone issues",
 		},
 		{
 			name:        "extremely large transfers",
 			transfers:   1000000,
 			checkers:    8,
-			expectError: false, // BUG: Could exhaust resources!
+			expectError: true,
 			description: "Extremely large values could cause resource exhaustion",
 		},
 		{
 			name:        "extremely large checkers",
 			transfers:   4,
 			checkers:    1000000,
-			expectError: false, // BUG: Could exhaust resources!
+			expectError: true,
 			description: "Extremely large values could cause resource exhaustion",
 		},
 	}
@@ -266,19 +270,18 @@ func TestInvalidTransfersAndCheckers(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s := DefaultSettings()
 
-			var err error
-			if tt.transfers != 0 {
-				err = s.SetTransfers(tt.transfers)
-				if tt.expectError && err == nil {
-					t.Errorf("Expected error for transfers %s, got nil", tt.description)
-				}
+			transferShouldError := tt.transfers < MinTransfers || tt.transfers > MaxTransfers
+			if err := s.SetTransfers(tt.transfers); transferShouldError && err == nil {
+				t.Errorf("Expected error for transfers %s, got nil", tt.description)
+			} else if !transferShouldError && err != nil {
+				t.Errorf("Unexpected error for transfers %s: %v", tt.description, err)
 			}
 
-			if tt.checkers != 0 {
-				err = s.SetCheckers(tt.checkers)
-				if tt.expectError && err == nil {
-					t.Errorf("Expected error for checkers %s, got nil", tt.description)
-				}
+			checkerShouldError := tt.checkers < MinCheckers || tt.checkers > MaxCheckers
+			if err := s.SetCheckers(tt.checkers); checkerShouldError && err == nil {
+				t.Errorf("Expected error for checkers %s, got nil", tt.description)
+			} else if !checkerShouldError && err != nil {
+				t.Errorf("Unexpected error for checkers %s: %v", tt.description, err)
 			}
 		})
 	}

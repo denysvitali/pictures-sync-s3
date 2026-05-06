@@ -36,6 +36,9 @@ func SetStateDir(dir string) {
 // getPermDir returns the appropriate permanent directory path
 // Uses /perm for production (Gokrazy), falls back to /tmp for development
 func getPermDir() string {
+	if baseDir := os.Getenv("PERM_DIR"); baseDir != "" {
+		return filepath.Join(baseDir, "pictures-sync")
+	}
 	if _, err := os.Stat("/perm"); os.IsNotExist(err) {
 		return "/tmp/pictures-sync"
 	}

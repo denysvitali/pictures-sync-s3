@@ -38,7 +38,7 @@ func (m *MockStateManager) SetStatus(status state.SyncStatus) error {
 
 	// Notify listeners
 	for _, ch := range listeners {
-		select{
+		select {
 		case ch <- currentState:
 		default:
 			// Skip if channel is full
@@ -103,14 +103,14 @@ func (c *Controller) StartMocked(m *MockStateManager) error {
 
 // TestLED implements the LED interface for testing
 type TestLED struct {
-	mu              sync.RWMutex
-	brightness      int
-	writeCount      int
-	lastWrite       time.Time
-	writeDurations  []time.Duration
-	failNextWrite   bool
-	writeError      error
-	writeHistory    []int // Track all brightness values written
+	mu             sync.RWMutex
+	brightness     int
+	writeCount     int
+	lastWrite      time.Time
+	writeDurations []time.Duration
+	failNextWrite  bool
+	writeError     error
+	writeHistory   []int // Track all brightness values written
 }
 
 func (t *TestLED) SetBrightness(value int) error {
@@ -161,7 +161,6 @@ func (t *TestLED) Reset() {
 	t.writeHistory = []int{}
 }
 
-
 // createTestController creates a controller with test LEDs
 func createTestController() (*Controller, *TestLED) {
 	testLED := &TestLED{
@@ -170,9 +169,9 @@ func createTestController() (*Controller, *TestLED) {
 
 	c := &Controller{
 		actLED: &LED{
-			name:         "TEST",
+			name:           "TEST",
 			brightnessPath: "/dev/null",
-			available:    true,
+			available:      true,
 		},
 		stopChan: make(chan struct{}),
 		wg:       sync.WaitGroup{},
@@ -284,9 +283,9 @@ func TestPatternNotStopping(t *testing.T) {
 
 	c := &Controller{
 		actLED: &LED{
-			name:         "TEST",
+			name:           "TEST",
 			brightnessPath: brightnessFile,
-			available:    true,
+			available:      true,
 		},
 		stopChan: make(chan struct{}),
 		wg:       sync.WaitGroup{},
@@ -403,9 +402,9 @@ func TestInvalidLEDPaths(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			led := &LED{
-				name:         "TEST",
+				name:           "TEST",
 				brightnessPath: tt.path,
-				available:    tt.available,
+				available:      tt.available,
 			}
 
 			err := led.SetBrightness(255)
@@ -430,9 +429,9 @@ func TestStateChangeDuringBlink(t *testing.T) {
 
 	c := &Controller{
 		actLED: &LED{
-			name:         "TEST",
+			name:           "TEST",
 			brightnessPath: brightnessFile,
-			available:    true,
+			available:      true,
 		},
 		stopChan: make(chan struct{}),
 		wg:       sync.WaitGroup{},
@@ -487,9 +486,9 @@ func TestRaceConditionsInGoroutineManagement(t *testing.T) {
 
 	// Override LED to track writes
 	c.actLED = &LED{
-		name:         "TEST",
+		name:           "TEST",
 		brightnessPath: "/dev/null",
-		available:    true,
+		available:      true,
 	}
 
 	err := c.StartMocked(mock)
@@ -598,9 +597,9 @@ func TestLEDStateAfterErrors(t *testing.T) {
 
 	c := &Controller{
 		actLED: &LED{
-			name:         "TEST",
+			name:           "TEST",
 			brightnessPath: brightnessFile,
-			available:    true,
+			available:      true,
 		},
 		stopChan: make(chan struct{}),
 		wg:       sync.WaitGroup{},
@@ -642,9 +641,9 @@ func TestCleanupOnShutdown(t *testing.T) {
 
 	c := &Controller{
 		actLED: &LED{
-			name:         "TEST",
+			name:           "TEST",
 			brightnessPath: brightnessFile,
-			available:    true,
+			available:      true,
 		},
 		stopChan: make(chan struct{}),
 		wg:       sync.WaitGroup{},
@@ -753,7 +752,6 @@ func TestStateManagerSubscriptionHandling(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	c.Stop()
-	wg.Wait()
 
 	// BUG: Blocked subscriptions might cause state manager to hang
 	// or leak goroutines when notifying listeners
@@ -762,6 +760,17 @@ func TestStateManagerSubscriptionHandling(t *testing.T) {
 	mock.Unsubscribe(sub1)
 	mock.Unsubscribe(sub2)
 	mock.Unsubscribe(sub3)
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Subscription consumers did not exit after unsubscribe")
+	}
 
 	t.Log("Subscription handling test completed")
 }
@@ -819,9 +828,9 @@ func TestRunPatternRepeatEdgeCases(t *testing.T) {
 	defer cleanup()
 
 	led := &LED{
-		name:         "TEST",
+		name:           "TEST",
 		brightnessPath: brightnessFile,
-		available:    true,
+		available:      true,
 	}
 
 	tests := []struct {
@@ -922,9 +931,9 @@ func TestStopChanCloseVsSend(t *testing.T) {
 	defer cleanup()
 
 	led := &LED{
-		name:         "TEST",
+		name:           "TEST",
 		brightnessPath: brightnessFile,
-		available:    true,
+		available:      true,
 	}
 
 	// BUG ANALYSIS: Stop() closes stopChan, but updatePattern tries to SEND

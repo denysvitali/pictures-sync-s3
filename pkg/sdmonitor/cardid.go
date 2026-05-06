@@ -4,16 +4,25 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
 const (
 	// CardIDFile is the name of the file storing the card's unique ID
-	CardIDFile = ".pictures-sync-id"
+	CardIDFile         = ".pictures-sync-id"
+	maxCardIDFileBytes = 1024
+)
+
+var (
+	validCardIDPattern = regexp.MustCompile(`^card-[A-Za-z0-9_-]{1,128}$`)
+	cardIDPathLocks    sync.Map
 )
 
 // GetOrCreateCardID reads or creates a unique ID for the SD card
@@ -22,17 +31,16 @@ const (
 // NOTE: This function assumes the filesystem is already mounted read-write
 func GetOrCreateCardID(mountPath string, monitor *Monitor) (string, bool, error) {
 	idPath := filepath.Join(mountPath, CardIDFile)
+	unlock := lockCardIDPath(idPath)
+	defer unlock()
 
 	log.Printf("CardID: Attempting to read or create card ID at %s", idPath)
 
-	// Try to read existing ID
-	// #nosec G304 -- idPath is constructed from mount path + well-known CardIDFile constant
-	if data, err := os.ReadFile(idPath); err == nil {
-		cardID := strings.TrimSpace(string(data))
-		if cardID != "" {
+	if cardID, ok, err := readExistingCardID(idPath); err == nil {
+		if ok {
 			log.Printf("CardID: Found existing card ID: %s", cardID)
 			// Remount read-only now that we've read the ID
-			if monitor != nil {
+			if monitor != nil && !monitor.devMode {
 				// Note: RemountReadOnly does not need mountMu because it's a different syscall
 				// that doesn't conflict with mount/unmount operations
 				if err := monitor.RemountReadOnly(); err != nil {
@@ -45,7 +53,7 @@ func GetOrCreateCardID(mountPath string, monitor *Monitor) (string, bool, error)
 		}
 		log.Printf("CardID: Card ID file exists but is empty, generating new ID")
 	} else {
-		log.Printf("CardID: No existing card ID file found (%v), generating new ID", err)
+		log.Printf("CardID: No usable existing card ID found (%v), generating new ID", err)
 	}
 
 	// Generate new ID
@@ -53,16 +61,14 @@ func GetOrCreateCardID(mountPath string, monitor *Monitor) (string, bool, error)
 	log.Printf("CardID: Generated new card ID: %s", newID)
 
 	// Write to card (filesystem should be read-write at this point)
-	// #nosec G306 -- Card ID on SD card must be readable by other processes
-	if err := os.WriteFile(idPath, []byte(newID+"\n"), 0644); err != nil {
+	if err := writeCardID(idPath, newID); err != nil {
 		log.Printf("CardID ERROR: Could not write card ID to %s: %v", idPath, err)
-		// This means the card will get a different ID next time
-		return newID, true, fmt.Errorf("failed to write card ID: %w", err)
+		return "", false, fmt.Errorf("failed to write card ID: %w", err)
 	}
 	log.Printf("CardID: Successfully wrote card ID to %s", idPath)
 
 	// Remount read-only now that we've written the ID
-	if monitor != nil {
+	if monitor != nil && !monitor.devMode {
 		if err := monitor.RemountReadOnly(); err != nil {
 			log.Printf("CardID ERROR: Failed to remount read-only after writing card ID: %v", err)
 			// This is critical - SD card remains read-write and could be corrupted
@@ -74,26 +80,99 @@ func GetOrCreateCardID(mountPath string, monitor *Monitor) (string, bool, error)
 	return newID, true, nil
 }
 
+func readExistingCardID(idPath string) (string, bool, error) {
+	info, err := os.Lstat(idPath)
+	if err != nil {
+		return "", false, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", false, fmt.Errorf("card ID file is a symlink")
+	}
+
+	// #nosec G304 -- idPath is constructed from mount path + well-known CardIDFile constant
+	file, err := os.Open(idPath)
+	if err != nil {
+		return "", false, err
+	}
+	defer file.Close()
+
+	buf := make([]byte, maxCardIDFileBytes+1)
+	n, err := file.Read(buf)
+	if err != nil && err != io.EOF {
+		return "", false, err
+	}
+	if n > maxCardIDFileBytes {
+		return "", false, fmt.Errorf("card ID file is too large")
+	}
+
+	firstLine := strings.TrimSpace(strings.SplitN(string(buf[:n]), "\n", 2)[0])
+	if firstLine == "" {
+		return "", false, nil
+	}
+	if !validCardIDPattern.MatchString(firstLine) {
+		return "", false, fmt.Errorf("card ID is invalid")
+	}
+	return firstLine, true, nil
+}
+
+func writeCardID(idPath, cardID string) error {
+	if info, err := os.Lstat(idPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("card ID file is a symlink")
+	} else if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+
+	dir := filepath.Dir(idPath)
+	tmp, err := os.CreateTemp(dir, CardIDFile+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+
+	if _, err := tmp.WriteString(cardID + "\n"); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(0644); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+
+	return os.Rename(tmpPath, idPath)
+}
+
+func lockCardIDPath(idPath string) func() {
+	lock, _ := cardIDPathLocks.LoadOrStore(filepath.Clean(idPath), &sync.Mutex{})
+	mu := lock.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
+
 // CreateNewCardID forces creation of a new card ID (for reformatted cards)
 // The monitor parameter is optional - if provided, it will remount read-only after writing
 // NOTE: This function assumes the filesystem is already mounted read-write
 func CreateNewCardID(mountPath string, monitor *Monitor) (string, error) {
 	newID := generateCardID()
 	idPath := filepath.Join(mountPath, CardIDFile)
+	unlock := lockCardIDPath(idPath)
+	defer unlock()
 
 	log.Printf("CardID: Creating new card ID: %s", newID)
 
 	// Write to card (filesystem should be read-write at this point)
-	// #nosec G306 -- Card ID on SD card must be readable by other processes
-	if err := os.WriteFile(idPath, []byte(newID+"\n"), 0644); err != nil {
+	if err := writeCardID(idPath, newID); err != nil {
 		log.Printf("CardID ERROR: Could not write card ID to %s: %v", idPath, err)
 		// This is a critical error - return it instead of ignoring
-		return newID, fmt.Errorf("failed to write new card ID: %w", err)
+		return "", fmt.Errorf("failed to write new card ID: %w", err)
 	}
 	log.Printf("CardID: Successfully wrote new card ID to %s", idPath)
 
 	// Remount read-only now that we've written the ID
-	if monitor != nil {
+	if monitor != nil && !monitor.devMode {
 		if err := monitor.RemountReadOnly(); err != nil {
 			log.Printf("CardID ERROR: Failed to remount read-only after creating new card ID: %v", err)
 			// This is critical - SD card remains read-write and could be corrupted

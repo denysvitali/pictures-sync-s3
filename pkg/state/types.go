@@ -46,11 +46,12 @@ type DeviceInfo struct {
 
 // CurrentState represents the current system state
 type CurrentState struct {
-	Status            SyncStatus    `json:"status"`
-	CurrentSync       *SyncRecord   `json:"current_sync,omitempty"`
-	LastSync          *SyncRecord   `json:"last_sync,omitempty"`
-	SDCardMounted     bool          `json:"sdcard_mounted"`
-	SDCardPath        string        `json:"sdcard_path,omitempty"`
-	AvailableDevices  []DeviceInfo  `json:"available_devices,omitempty"`
-	NeedsDeviceSelect bool          `json:"needs_device_select"`
+	Status            SyncStatus   `json:"status"`
+	Error             string       `json:"error,omitempty"`
+	CurrentSync       *SyncRecord  `json:"current_sync,omitempty"`
+	LastSync          *SyncRecord  `json:"last_sync,omitempty"`
+	SDCardMounted     bool         `json:"sdcard_mounted"`
+	SDCardPath        string       `json:"sdcard_path,omitempty"`
+	AvailableDevices  []DeviceInfo `json:"available_devices,omitempty"`
+	NeedsDeviceSelect bool         `json:"needs_device_select"`
 }

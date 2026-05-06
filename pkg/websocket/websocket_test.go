@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -341,6 +342,7 @@ func TestWebSocketStateUpdates(t *testing.T) {
 
 // TestWebSocketEventDelivery tests event delivery to WebSocket clients
 func TestWebSocketEventDelivery(t *testing.T) {
+	resetWebSocketTestState(t)
 	stateMgr, err := state.NewManager()
 	if err != nil {
 		t.Fatalf("Failed to create state manager: %v", err)
@@ -446,6 +448,7 @@ func TestWebSocketRateLimiting(t *testing.T) {
 
 // TestWebSocketOriginValidation tests origin header validation
 func TestWebSocketOriginValidation(t *testing.T) {
+	resetWebSocketTestState(t)
 	stateMgr, err := state.NewManager()
 	if err != nil {
 		t.Fatalf("Failed to create state manager: %v", err)
@@ -456,6 +459,10 @@ func TestWebSocketOriginValidation(t *testing.T) {
 	defer server.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	_, serverPort, err := net.SplitHostPort(strings.TrimPrefix(server.URL, "http://"))
+	if err != nil {
+		t.Fatalf("Failed to parse test server port: %v", err)
+	}
 
 	t.Run("reject invalid origin", func(t *testing.T) {
 		dialer := websocket.DefaultDialer
@@ -490,7 +497,7 @@ func TestWebSocketOriginValidation(t *testing.T) {
 		dialer := websocket.DefaultDialer
 		headers := http.Header{}
 		// Test Tailscale CGNAT IP range (100.64.0.0/10)
-		headers.Add("Origin", "https://100.106.81.42:8080")
+		headers.Add("Origin", "https://100.106.81.42:"+serverPort)
 
 		conn, _, err := dialer.Dial(wsURL, headers)
 		if err != nil {
@@ -506,11 +513,11 @@ func TestWebSocketOriginValidation(t *testing.T) {
 			name   string
 			origin string
 		}{
-			{"10.x network", "http://10.0.0.1:8080"},
-			{"172.16.x network", "http://172.16.0.1:8080"},
-			{"192.168.x network", "http://192.168.1.1:8080"},
-			{"Tailscale lower range", "http://100.64.0.1:8080"},
-			{"Tailscale upper range", "http://100.127.255.254:8080"},
+			{"10.x network", "http://10.0.0.1:" + serverPort},
+			{"172.16.x network", "http://172.16.0.1:" + serverPort},
+			{"192.168.x network", "http://192.168.1.1:" + serverPort},
+			{"Tailscale lower range", "http://100.64.0.1:" + serverPort},
+			{"Tailscale upper range", "http://100.127.255.254:" + serverPort},
 		}
 
 		for _, tc := range testCases {

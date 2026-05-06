@@ -9,13 +9,15 @@ import (
 
 // ValidatePath checks if a path is safe (no directory traversal, no absolute paths).
 func ValidatePath(path string) error {
+	normalized := strings.ReplaceAll(path, "\\", "/")
+
 	// Check for directory traversal
-	if strings.Contains(path, "..") {
+	if strings.Contains(normalized, "..") {
 		return fmt.Errorf("path contains directory traversal: %s", path)
 	}
 
 	// Check for absolute paths (should be relative)
-	if strings.HasPrefix(path, "/") || strings.HasPrefix(path, "\\") {
+	if strings.HasPrefix(normalized, "/") || regexp.MustCompile(`^[A-Za-z]:/`).MatchString(normalized) {
 		return fmt.Errorf("path must be relative, not absolute: %s", path)
 	}
 
@@ -24,6 +26,8 @@ func ValidatePath(path string) error {
 
 // SanitizePath cleans a path to remove traversal attempts and makes it relative.
 func SanitizePath(path string) string {
+	path = strings.ReplaceAll(path, "\\", "/")
+
 	// Clean the path to remove any traversal attempts
 	path = filepath.Clean(path)
 

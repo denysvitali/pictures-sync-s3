@@ -273,9 +273,9 @@ func TestHandleRemoved_BasicFlow(t *testing.T) {
 		t.Error("SD card should not be mounted after removal")
 	}
 
-	state := stateMgr.GetState()
-	if state.Status != state.StatusIdle {
-		t.Errorf("Expected idle status, got %s", state.Status)
+	currentState := stateMgr.GetState()
+	if currentState.Status != state.StatusIdle {
+		t.Errorf("Expected idle status, got %s", currentState.Status)
 	}
 }
 
@@ -305,9 +305,9 @@ func TestHandleRemoved_DuringSync(t *testing.T) {
 	}
 
 	// Verify state is idle
-	state = stateMgr.GetState()
-	if state.Status != state.StatusIdle {
-		t.Errorf("Expected idle status after removal, got %s", state.Status)
+	currentState := stateMgr.GetState()
+	if currentState.Status != state.StatusIdle {
+		t.Errorf("Expected idle status after removal, got %s", currentState.Status)
 	}
 }
 
@@ -337,16 +337,16 @@ func TestReformatDetection(t *testing.T) {
 	}
 
 	// Record a successful sync with 100 files
-	syncID, _ := stateMgr.StartSync("card-test-123", 100, 1024*1024)
+	syncRecord, _ := stateMgr.StartSync("card-test-123", 100, 1024*1024)
 	stateMgr.FinishSync(true, nil)
 
 	// Verify sync was recorded
-	history := stateMgr.GetSyncHistory()
+	history := stateMgr.GetHistory()
 	if len(history) == 0 {
 		t.Fatal("Expected sync history to be recorded")
 	}
-	if history[0].ID != syncID {
-		t.Errorf("Expected sync ID %s, got %s", syncID, history[0].ID)
+	if history[0].ID != syncRecord.ID {
+		t.Errorf("Expected sync ID %s, got %s", syncRecord.ID, history[0].ID)
 	}
 
 	// Now simulate card being reformatted - delete most photos

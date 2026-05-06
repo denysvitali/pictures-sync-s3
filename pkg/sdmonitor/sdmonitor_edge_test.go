@@ -222,12 +222,12 @@ func TestPermissionIssues(t *testing.T) {
 			t.Error("Should return error when cannot write ID file")
 		}
 
-		if !isNew {
-			t.Error("Should indicate new card even if write fails")
+		if isNew {
+			t.Error("Should not indicate a new card when the ID was not persisted")
 		}
 
-		if cardID == "" {
-			t.Error("Should still return generated ID even if write fails")
+		if cardID != "" {
+			t.Error("Should not return an unpersisted generated ID")
 		}
 	})
 }
@@ -317,7 +317,7 @@ func TestSpecialCharactersInVolumeLabel(t *testing.T) {
 		"Label\tWith\tTabs",
 		"Label🚀With😀Emoji",
 		strings.Repeat("A", 1000), // Very long label
-		"",                         // Empty label
+		"",                        // Empty label
 	}
 
 	for _, label := range testLabels {
@@ -641,7 +641,7 @@ func TestFormatBytesEdgeCases(t *testing.T) {
 		{1, "1 B"},
 		{1023, "1023 B"},
 		{1024, "1.0 KB"},
-		{-1, "-1 B"}, // Negative size
+		{-1, "-1 B"},                    // Negative size
 		{9223372036854775807, "8.0 EB"}, // Max int64
 	}
 

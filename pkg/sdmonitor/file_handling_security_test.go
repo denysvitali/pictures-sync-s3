@@ -53,7 +53,7 @@ func TestCountPhotosWithSymlinksAttacks(t *testing.T) {
 				os.Symlink(linkB, linkA)
 				return os.Symlink(linkA, linkB)
 			},
-			expectError: true, // Should detect and handle loop
+			expectError: false, // Should skip symlinks without traversing loops
 			description: "Symlink loops should not cause infinite traversal",
 		},
 		{
@@ -158,7 +158,7 @@ func TestCountPhotosWithMaliciousFilenames(t *testing.T) {
 		{
 			name:        "unicode_right_to_left",
 			filename:    "photo\u202E.jpg", // Right-to-left override
-			shouldCount: true, // May be counted but should be safe
+			shouldCount: true,              // May be counted but should be safe
 			description: "Unicode right-to-left override in filename",
 		},
 		{
@@ -441,7 +441,7 @@ func TestMountPathTraversal(t *testing.T) {
 			hasNullByte := strings.Contains(tt.mountPath, "\x00")
 			isAbsolute := filepath.IsAbs(cleanPath)
 
-			isInvalid := hasDotDot || hasNullByte
+			isInvalid := hasDotDot || hasNullByte || isAbsolute
 
 			if tt.shouldError && !isInvalid {
 				t.Errorf("%s: Dangerous mount path was not rejected", tt.description)

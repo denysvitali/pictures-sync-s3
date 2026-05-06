@@ -512,7 +512,7 @@ func TestFileCountCalculationErrors(t *testing.T) {
 				symlinkPhoto := filepath.Join(dcimPath, "link.jpg")
 				return os.Symlink(realPhoto, symlinkPhoto)
 			},
-			expectedFiles: 2, // Both real and symlink should be counted
+			expectedFiles: 1, // Symlink should not be counted separately
 			expectError:   false,
 		},
 	}
@@ -819,20 +819,13 @@ func TestCreateNewCardIDFailure(t *testing.T) {
 	// Try to create new card ID
 	newID, err := CreateNewCardID(tempDir, nil)
 
-	// BUG #11: CreateNewCardID returns the generated ID even if write fails
-	// The function logs a warning but doesn't return an error
-	// This means the card ID in memory won't match the card ID on disk
-	// On next insertion, a different ID will be generated
 	if err != nil {
-		t.Error("CreateNewCardID should not return error (current implementation)")
+		return
 	}
 	if newID == "" {
 		t.Error("Should still return generated ID even if write fails")
 	}
-
-	t.Log("BUG #11: CreateNewCardID returns ID even when write fails")
-	t.Log("BUG #11: This causes ID mismatch between memory and card")
-	t.Log("BUG #11: Next insertion will generate different ID -> data uploaded to different folder")
+	t.Error("CreateNewCardID should return an error when writing the ID fails")
 }
 
 // TestReformatDetectionWithDeletedLastSync tests edge case

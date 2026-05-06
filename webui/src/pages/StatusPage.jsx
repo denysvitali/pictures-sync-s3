@@ -145,6 +145,15 @@ function SystemStatusCard({ status }) {
           </div>
         )}
 
+        {status.status === 'error' && status.error && (
+          <div className="bg-danger/10 border border-danger/30 rounded-lg p-3">
+            <div className="flex items-start gap-2">
+              <Icon name="exclamation-triangle" className="w-4 h-4 text-danger shrink-0 mt-0.5" />
+              <p className="text-xs text-danger leading-relaxed">{status.error}</p>
+            </div>
+          </div>
+        )}
+
         {/* Status indicators */}
         <div className="grid grid-cols-2 gap-3">
           <StatusRow

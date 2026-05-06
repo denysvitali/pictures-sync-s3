@@ -17,14 +17,15 @@ const (
 
 // Monitor monitors for SD card insertion/removal
 type Monitor struct {
-	eventChan    chan Event
-	stopChan     chan struct{}
-	mountPath    string
-	lastDevice   string
-	devMode      bool // Development mode for testing without hardware
-	stopped      bool // Tracks if monitor has been stopped
-	mu           sync.RWMutex // Protects lastDevice and stopped
-	mountMu      sync.Mutex   // Protects mount/unmount operations (prevents concurrent mounts)
+	eventChan     chan Event
+	stopChan      chan struct{}
+	mountPath     string
+	lastDevice    string
+	ignoredDevice string       // Device to ignore until removal after a manual format attempt.
+	devMode       bool         // Development mode for testing without hardware
+	stopped       bool         // Tracks if monitor has been stopped
+	mu            sync.RWMutex // Protects lastDevice and stopped
+	mountMu       sync.Mutex   // Protects mount/unmount operations (prevents concurrent mounts)
 
 	// Cache for /proc/mounts to reduce I/O
 	cachedMounts    string
@@ -161,7 +162,23 @@ func (m *Monitor) checkDevices() {
 
 	m.mu.RLock()
 	currentDevice := m.lastDevice
+	ignoredDevice := m.ignoredDevice
 	m.mu.RUnlock()
+
+	if device == "" && ignoredDevice != "" {
+		m.mu.Lock()
+		m.ignoredDevice = ""
+		m.mu.Unlock()
+		ignoredDevice = ""
+	}
+	if device != "" && currentDevice == "" && device == ignoredDevice {
+		return
+	}
+	if device != "" && ignoredDevice != "" && device != ignoredDevice {
+		m.mu.Lock()
+		m.ignoredDevice = ""
+		m.mu.Unlock()
+	}
 
 	if device != "" && device != currentDevice {
 		// New device detected

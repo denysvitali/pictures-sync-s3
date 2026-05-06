@@ -1,6 +1,7 @@
 package sdmonitor
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,12 +23,12 @@ func TestBufferOverflowInCountPhotos(t *testing.T) {
 		// Simulate a scenario where file count could approach int max
 		// Create subdirectories to avoid filesystem limits
 		for i := 0; i < 100; i++ {
-			subdir := filepath.Join(dcimPath, "100MSDCF", "sub", string(rune(i)))
+			subdir := filepath.Join(dcimPath, "100MSDCF", "sub", fmt.Sprintf("%03d", i))
 			if err := os.MkdirAll(subdir, 0755); err != nil {
 				t.Fatal(err)
 			}
 			for j := 0; j < 1000; j++ {
-				filename := filepath.Join(subdir, "IMG_"+string(rune(i))+string(rune(j))+".jpg")
+				filename := filepath.Join(subdir, fmt.Sprintf("IMG_%03d_%04d.jpg", i, j))
 				if err := os.WriteFile(filename, []byte("fake"), 0644); err != nil {
 					t.Fatal(err)
 				}
@@ -409,20 +410,11 @@ func TestChannelOperationsAfterClose(t *testing.T) {
 		// Stop it
 		m.Stop()
 
-		// Try to send event (should not panic)
-		defer func() {
-			if r := recover(); r != nil {
-				t.Errorf("CRITICAL: Panic when sending to stopped monitor: %v", r)
-			}
-		}()
-
-		// The event channel is not closed, so this should work
-		// But stopChan is closed
+		// The stop channel should be closed and observable without sending to it.
 		select {
-		case m.stopChan <- struct{}{}:
-			t.Error("CRITICAL: Send to closed stopChan succeeded")
+		case <-m.stopChan:
 		default:
-			// Expected - closed channel
+			t.Error("Expected stopChan to be closed after Stop")
 		}
 	})
 

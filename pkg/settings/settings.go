@@ -5,11 +5,15 @@
 package settings
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"strings"
 	"sync"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Settings represents persistent application settings
@@ -29,6 +33,71 @@ type Settings struct {
 	GooglePhotosRemoteName string `json:"google_photos_remote_name"` // Google Photos rclone remote name
 
 	mu sync.RWMutex
+}
+
+// UnmarshalJSON rejects malformed configuration shapes before applying fields.
+func (s *Settings) UnmarshalJSON(data []byte) error {
+	if !utf8.Valid(data) {
+		return errors.New("settings JSON must be valid UTF-8")
+	}
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		return errors.New("settings JSON cannot be null")
+	}
+	if jsonNestingDepth(data) > 100 {
+		return errors.New("settings JSON nesting is too deep")
+	}
+
+	type settingsAlias Settings
+	var decoded settingsAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+
+	s.RemoteName = decoded.RemoteName
+	s.RemotePath = decoded.RemotePath
+	s.ReformatThreshold = decoded.ReformatThreshold
+	s.Transfers = decoded.Transfers
+	s.Checkers = decoded.Checkers
+	s.GooglePhotosEnabled = decoded.GooglePhotosEnabled
+	s.GooglePhotosRemoteName = decoded.GooglePhotosRemoteName
+	return nil
+}
+
+func jsonNestingDepth(data []byte) int {
+	depth := 0
+	maxDepth := 0
+	inString := false
+	escaped := false
+
+	for _, b := range data {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if inString {
+			if b == '\\' {
+				escaped = true
+			} else if b == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch b {
+		case '"':
+			inString = true
+		case '{', '[':
+			depth++
+			if depth > maxDepth {
+				maxDepth = depth
+			}
+		case '}', ']':
+			if depth > 0 {
+				depth--
+			}
+		}
+	}
+
+	return maxDepth
 }
 
 // Validation constants
@@ -71,8 +140,13 @@ func ValidateRemoteName(name string) error {
 	if strings.ContainsAny(name, "\x00\r\n") {
 		return errors.New("remote name contains invalid control characters")
 	}
-	if strings.ContainsAny(name, ";|&$`") {
+	if strings.ContainsAny(name, ";|&$`\"'\\") {
 		return errors.New("remote name contains potentially unsafe shell characters")
+	}
+	if strings.ContainsFunc(name, func(r rune) bool {
+		return r > unicode.MaxASCII || unicode.IsControl(r)
+	}) {
+		return errors.New("remote name contains non-ASCII or control characters")
 	}
 	return nil
 }

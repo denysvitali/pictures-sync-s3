@@ -1,6 +1,7 @@
 package sdmonitor
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -36,13 +37,23 @@ func HasDCIM(mountPath string) bool {
 // CountPhotos counts photo files in DCIM directory
 func CountPhotos(mountPath string) (int, int64, error) {
 	dcimPath := filepath.Join(mountPath, "DCIM")
+	info, err := os.Stat(dcimPath)
+	if err != nil {
+		return 0, 0, err
+	}
+	if !info.IsDir() {
+		return 0, 0, fmt.Errorf("DCIM is not a directory")
+	}
 
 	var count int
 	var totalSize int64
 
-	err := filepath.WalkDir(dcimPath, func(path string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(dcimPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
+		}
+		if d.Type()&fs.ModeSymlink != 0 {
+			return nil
 		}
 		if d.IsDir() {
 			return nil
@@ -62,4 +73,3 @@ func CountPhotos(mountPath string) (int, int64, error) {
 
 	return count, totalSize, err
 }
-

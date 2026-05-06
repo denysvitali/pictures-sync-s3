@@ -79,6 +79,5 @@ func JoinErrors(errs []error) error {
 		return nil
 	}
 
-	// Use standard library errors.Join
-	return errors.Join(nonNilErrs...)
+	return fmt.Errorf("multiple errors: %w", errors.Join(nonNilErrs...))
 }

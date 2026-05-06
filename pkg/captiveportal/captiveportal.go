@@ -45,6 +45,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -70,6 +71,7 @@ type Authenticator struct {
 	getLocalIPMAC  func() (string, string, error)
 	retryBackoff   func(attempt int) time.Duration
 	stopChan       chan struct{}
+	stopOnce       sync.Once
 	authenticators map[string]AuthFunc
 }
 
@@ -100,7 +102,9 @@ func (a *Authenticator) Start() {
 // Stop stops the authenticator
 func (a *Authenticator) Stop() {
 	log.Println("Captive portal authenticator stopping...")
-	close(a.stopChan)
+	a.stopOnce.Do(func() {
+		close(a.stopChan)
+	})
 }
 
 // run is the main loop that monitors network state and authenticates

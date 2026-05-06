@@ -111,6 +111,31 @@ func TestUpdateSyncProgress(t *testing.T) {
 	}
 }
 
+func TestSetErrorPersistsVisibleStateError(t *testing.T) {
+	mgr := setupTestManager(t)
+
+	if err := mgr.SetError("format SD card: mkfs.vfat not found"); err != nil {
+		t.Fatalf("SetError failed: %v", err)
+	}
+
+	current := mgr.GetState()
+	if current.Status != StatusError {
+		t.Fatalf("Status = %v, want %v", current.Status, StatusError)
+	}
+	if current.Error != "format SD card: mkfs.vfat not found" {
+		t.Fatalf("Error = %q, want format failure message", current.Error)
+	}
+
+	if err := mgr.SetStatus(StatusIdle); err != nil {
+		t.Fatalf("SetStatus failed: %v", err)
+	}
+
+	current = mgr.GetState()
+	if current.Error != "" {
+		t.Fatalf("Error = %q, want cleared error", current.Error)
+	}
+}
+
 func TestJSONSerialization(t *testing.T) {
 	mgr := setupTestManager(t)
 

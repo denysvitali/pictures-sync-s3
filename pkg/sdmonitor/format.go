@@ -3,6 +3,7 @@ package sdmonitor
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os/exec"
@@ -75,10 +76,9 @@ func (m *Monitor) FormatCurrentDevice(ctx context.Context, devicePath, label str
 	if err := m.unmount(); err != nil {
 		return fmt.Errorf("unmount SD card before format: %w", err)
 	}
-	m.mu.Lock()
-	m.lastDevice = ""
-	m.mu.Unlock()
+	m.ignoreDeviceUntilRemoval(devicePath)
 	m.mountsCacheTime = time.Time{}
+	log.Printf("SD card partition %s will be ignored until removal after format attempt", devicePath)
 
 	args := buildFormatArgs(devicePath, label)
 	// #nosec G204 -- devicePath is restricted to monitored SD-card partition patterns.
@@ -86,15 +86,18 @@ func (m *Monitor) FormatCurrentDevice(ctx context.Context, devicePath, label str
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		detail := strings.TrimSpace(stderr.String())
-		if detail != "" {
-			return fmt.Errorf("format SD card: %w: %s", err, detail)
-		}
-		return fmt.Errorf("format SD card: %w", err)
+		return formatCommandError(err, stderr.String())
 	}
 
 	log.Printf("Formatted SD card partition %s as FAT32", devicePath)
 	return nil
+}
+
+func (m *Monitor) ignoreDeviceUntilRemoval(devicePath string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.lastDevice = ""
+	m.ignoredDevice = devicePath
 }
 
 func buildFormatArgs(devicePath, label string) []string {
@@ -104,4 +107,17 @@ func buildFormatArgs(devicePath, label string) []string {
 	}
 	args = append(args, devicePath)
 	return args
+}
+
+func formatCommandError(err error, stderr string) error {
+	var execErr *exec.Error
+	if errors.As(err, &execErr) && errors.Is(execErr.Err, exec.ErrNotFound) {
+		return fmt.Errorf("format SD card: mkfs.vfat not found in PATH; include github.com/gokrazy/mkfs in the gokrazy image: %w", err)
+	}
+
+	detail := strings.TrimSpace(stderr)
+	if detail != "" {
+		return fmt.Errorf("format SD card: %w: %s", err, detail)
+	}
+	return fmt.Errorf("format SD card: %w", err)
 }

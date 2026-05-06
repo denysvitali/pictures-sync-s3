@@ -3,12 +3,14 @@ package signals
 import (
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 )
 
 // Handler manages OS signal handling
 type Handler struct {
-	sigChan chan os.Signal
+	sigChan  chan os.Signal
+	stopOnce sync.Once
 }
 
 // NewHandler creates a new signal handler
@@ -32,6 +34,8 @@ func (h *Handler) Channel() <-chan os.Signal {
 
 // Stop stops listening for signals
 func (h *Handler) Stop() {
-	signal.Stop(h.sigChan)
-	close(h.sigChan)
+	h.stopOnce.Do(func() {
+		signal.Stop(h.sigChan)
+		close(h.sigChan)
+	})
 }

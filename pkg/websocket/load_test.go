@@ -14,6 +14,12 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+func testOriginHeaders() http.Header {
+	headers := http.Header{}
+	headers.Set("Origin", "http://localhost:8080")
+	return headers
+}
+
 // BenchmarkWebSocketUpgrade benchmarks WebSocket upgrade handshake
 func BenchmarkWebSocketUpgrade(b *testing.B) {
 	tmpDir := b.TempDir()
@@ -31,7 +37,7 @@ func BenchmarkWebSocketUpgrade(b *testing.B) {
 		token := CreateWSToken()
 		b.StartTimer()
 
-		conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+		conn, _, err := websocket.DefaultDialer.Dial(wsURL, testOriginHeaders())
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -65,7 +71,7 @@ func BenchmarkWebSocketAuth(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			b.StopTimer()
 			token := CreateWSToken()
-			conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+			conn, _, err := websocket.DefaultDialer.Dial(wsURL, testOriginHeaders())
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -102,7 +108,7 @@ func BenchmarkWebSocketAuth(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			b.StopTimer()
-			conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+			conn, _, err := websocket.DefaultDialer.Dial(wsURL, testOriginHeaders())
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -138,7 +144,7 @@ func BenchmarkWebSocketMessageReceive(b *testing.B) {
 
 	// Setup authenticated connection
 	token := CreateWSToken()
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, testOriginHeaders())
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -214,7 +220,7 @@ func BenchmarkConcurrentConnections(b *testing.B) {
 						defer wg.Done()
 
 						token := CreateWSToken()
-						conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+						conn, _, err := websocket.DefaultDialer.Dial(wsURL, testOriginHeaders())
 						if err != nil {
 							errors <- err
 							return
@@ -339,7 +345,7 @@ func LoadTestWebSocket(t *testing.T, concurrency, messagesPerConn int) {
 			defer wg.Done()
 
 			token := CreateWSToken()
-			conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+			conn, _, err := websocket.DefaultDialer.Dial(wsURL, testOriginHeaders())
 			if err != nil {
 				errorCount.Add(1)
 				return
@@ -424,6 +430,7 @@ func LoadTestWebSocket(t *testing.T, concurrency, messagesPerConn int) {
 
 // TestWebSocketLoadTest runs various load test scenarios
 func TestWebSocketLoadTest(t *testing.T) {
+	resetWebSocketTestState(t)
 	if testing.Short() {
 		t.Skip("Skipping load test in short mode")
 	}
@@ -447,6 +454,7 @@ func TestWebSocketLoadTest(t *testing.T) {
 
 // TestWebSocketStress stress tests WebSocket under extreme load
 func TestWebSocketStress(t *testing.T) {
+	resetWebSocketTestState(t)
 	if testing.Short() {
 		t.Skip("Skipping stress test in short mode")
 	}
@@ -483,7 +491,7 @@ func TestWebSocketStress(t *testing.T) {
 					return
 				default:
 					token := CreateWSToken()
-					conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+					conn, _, err := websocket.DefaultDialer.Dial(wsURL, testOriginHeaders())
 					if err != nil {
 						errorCount.Add(1)
 						time.Sleep(10 * time.Millisecond)
@@ -571,7 +579,7 @@ func BenchmarkNotificationBroadcast(b *testing.B) {
 
 	for i := 0; i < numConnections; i++ {
 		token := CreateWSToken()
-		conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+		conn, _, err := websocket.DefaultDialer.Dial(wsURL, testOriginHeaders())
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -615,6 +623,8 @@ func BenchmarkNotificationBroadcast(b *testing.B) {
 
 // TestConnectionTimeout tests connection timeout behavior
 func TestConnectionTimeout(t *testing.T) {
+	resetWebSocketTestState(t)
+	authReadTimeout = 100 * time.Millisecond
 	tmpDir := t.TempDir()
 	stateMgr, eventMgr := setupManagers(t, tmpDir)
 
@@ -624,25 +634,28 @@ func TestConnectionTimeout(t *testing.T) {
 
 	wsURL := "ws" + server.URL[4:]
 
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, testOriginHeaders())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer conn.Close()
 
-	// Don't send auth - should timeout after 5 seconds
+	// Don't send auth - should timeout and return an authentication error.
 	start := time.Now()
 	var msg map[string]interface{}
 	err = conn.ReadJSON(&msg)
 
 	elapsed := time.Since(start)
 
-	if err == nil {
-		t.Error("expected timeout error, got nil")
+	if err != nil {
+		t.Fatalf("expected authentication error message, got read error: %v", err)
+	}
+	if msg["type"] != "error" {
+		t.Errorf("expected error message, got %v", msg["type"])
 	}
 
-	if elapsed < 4*time.Second || elapsed > 6*time.Second {
-		t.Errorf("expected ~5s timeout, got %v", elapsed)
+	if elapsed < 50*time.Millisecond || elapsed > time.Second {
+		t.Errorf("expected auth timeout around %v, got %v", authReadTimeout, elapsed)
 	}
 }
 
@@ -682,7 +695,7 @@ func BenchmarkMemoryUsagePerConnection(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		token := CreateWSToken()
-		conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+		conn, _, err := websocket.DefaultDialer.Dial(wsURL, testOriginHeaders())
 		if err != nil {
 			b.Fatal(err)
 		}

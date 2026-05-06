@@ -397,6 +397,10 @@ func (ctx *Context) HandleSDCardPreview(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "path parameter required", http.StatusBadRequest)
 		return
 	}
+	if filepath.IsAbs(requestedPath) || strings.Contains(requestedPath, "..") {
+		http.Error(w, "access denied", http.StatusForbidden)
+		return
+	}
 
 	requestCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()

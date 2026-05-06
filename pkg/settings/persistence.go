@@ -3,6 +3,7 @@ package settings
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/utils"
 )
@@ -13,7 +14,17 @@ const (
 
 // Load reads settings from disk, or returns defaults if not found
 func Load() (*Settings, error) {
-	return LoadFrom(SettingsFile)
+	return LoadFrom(settingsFilePath())
+}
+
+func settingsFilePath() string {
+	if baseDir := os.Getenv("PERM_DIR"); baseDir != "" {
+		return filepath.Join(baseDir, "pictures-sync", "settings.json")
+	}
+	if _, err := os.Stat("/perm"); os.IsNotExist(err) {
+		return filepath.Join(os.TempDir(), "pictures-sync", "settings.json")
+	}
+	return SettingsFile
 }
 
 // LoadFrom reads settings from a specific file path (useful for testing)
@@ -66,7 +77,7 @@ func applyDefaults(s *Settings) {
 
 // Save persists settings to disk
 func (s *Settings) Save() error {
-	return s.SaveTo(SettingsFile)
+	return s.SaveTo(settingsFilePath())
 }
 
 // SaveTo persists settings to a specific file path (useful for testing)

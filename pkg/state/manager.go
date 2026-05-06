@@ -3,6 +3,7 @@ package state
 import (
 	"fmt"
 	"log"
+	"os"
 	"sync"
 	"time"
 )
@@ -19,6 +20,10 @@ type Manager struct {
 
 // NewManager creates a new state manager
 func NewManager() (*Manager, error) {
+	if os.Getenv("PERM_DIR") != "" {
+		SetStateDir(getPermDir())
+	}
+
 	m := &Manager{
 		notifier:          newNotifier(),
 		progressSaveDelay: 5 * time.Second, // Only save progress every 5 seconds to reduce SD wear
@@ -96,6 +101,9 @@ func (m *Manager) SetStatus(status SyncStatus) error {
 	m.mu.Lock()
 
 	m.currentState.Status = status
+	if status != StatusError {
+		m.currentState.Error = ""
+	}
 
 	if err := m.save(); err != nil {
 		m.mu.Unlock()
@@ -113,6 +121,7 @@ func (m *Manager) SetStatus(status SyncStatus) error {
 func (m *Manager) SetError(errorMsg string) error {
 	m.mu.Lock()
 	m.currentState.Status = StatusError
+	m.currentState.Error = errorMsg
 	if m.currentState.CurrentSync != nil {
 		m.currentState.CurrentSync.Error = errorMsg
 		m.currentState.CurrentSync.Status = "error"
@@ -204,6 +213,7 @@ func (m *Manager) StartSync(cardID string, totalFiles, totalBytes int64) (*SyncR
 
 	m.currentState.CurrentSync = record
 	m.currentState.Status = StatusSyncing
+	m.currentState.Error = ""
 
 	if err := m.save(); err != nil {
 		m.mu.Unlock()
@@ -266,11 +276,13 @@ func (m *Manager) FinishSync(success bool, err error) error {
 	if success {
 		m.currentState.CurrentSync.Status = "success"
 		m.currentState.Status = StatusSuccess
+		m.currentState.Error = ""
 	} else {
 		m.currentState.CurrentSync.Status = "error"
 		m.currentState.Status = StatusError
 		if err != nil {
 			m.currentState.CurrentSync.Error = err.Error()
+			m.currentState.Error = err.Error()
 		}
 	}
 

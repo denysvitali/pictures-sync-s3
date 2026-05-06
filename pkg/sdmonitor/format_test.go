@@ -2,7 +2,10 @@ package sdmonitor
 
 import (
 	"context"
+	"errors"
+	"os/exec"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -87,6 +90,33 @@ func TestFormatCurrentDeviceIncludesProvidedLabel(t *testing.T) {
 	want := []string{"-F", "32", "-n", "CAMERA_1", "/dev/sda1"}
 	if !reflect.DeepEqual(args, want) {
 		t.Fatalf("Expected args %v, got %v", want, args)
+	}
+}
+
+func TestFormatCurrentDeviceIgnoresDeviceUntilRemovalAfterAttempt(t *testing.T) {
+	monitor := NewMonitor(t.TempDir())
+	monitor.lastDevice = "/dev/sda1"
+
+	monitor.ignoreDeviceUntilRemoval("/dev/sda1")
+
+	if monitor.ignoredDevice != "/dev/sda1" {
+		t.Fatalf("ignoredDevice = %q, want /dev/sda1", monitor.ignoredDevice)
+	}
+	if monitor.lastDevice != "" {
+		t.Fatalf("lastDevice = %q, want cleared device", monitor.lastDevice)
+	}
+}
+
+func TestFormatCommandErrorExplainsMissingFormatter(t *testing.T) {
+	err := formatCommandError(&exec.Error{Name: "mkfs.vfat", Err: exec.ErrNotFound}, "")
+	if err == nil {
+		t.Fatal("Expected error")
+	}
+	if !strings.Contains(err.Error(), "include github.com/gokrazy/mkfs") {
+		t.Fatalf("Error %q does not explain missing gokrazy formatter package", err)
+	}
+	if !errors.Is(err, exec.ErrNotFound) {
+		t.Fatalf("Error does not wrap exec.ErrNotFound: %v", err)
 	}
 }
 
