@@ -7,8 +7,56 @@ import (
 	"github.com/mdlayher/genetlink"
 	"github.com/mdlayher/netlink"
 	"github.com/mdlayher/netlink/nlenc"
+	"github.com/mdlayher/wifi"
 	"golang.org/x/sys/unix"
 )
+
+func TestEncodeTriggerScanDataUsesWildcardSSID(t *testing.T) {
+	data, err := encodeTriggerScanData(&wifi.Interface{Index: 7})
+	if err != nil {
+		t.Fatalf("encodeTriggerScanData returned error: %v", err)
+	}
+
+	ad, err := netlink.NewAttributeDecoder(data)
+	if err != nil {
+		t.Fatalf("NewAttributeDecoder returned error: %v", err)
+	}
+
+	var (
+		ifIndex   uint32
+		scanSSIDs [][]byte
+	)
+
+	for ad.Next() {
+		switch ad.Type() {
+		case unix.NL80211_ATTR_IFINDEX:
+			ifIndex = ad.Uint32()
+		case unix.NL80211_ATTR_SCAN_SSIDS:
+			if ad.TypeFlags()&netlink.Nested == 0 {
+				t.Fatal("NL80211_ATTR_SCAN_SSIDS is not marked nested")
+			}
+			ad.Nested(func(nad *netlink.AttributeDecoder) error {
+				for nad.Next() {
+					scanSSIDs = append(scanSSIDs, nad.Bytes())
+				}
+				return nil
+			})
+		}
+	}
+	if err := ad.Err(); err != nil {
+		t.Fatalf("decode trigger scan data: %v", err)
+	}
+
+	if ifIndex != 7 {
+		t.Fatalf("ifindex = %d, want 7", ifIndex)
+	}
+	if len(scanSSIDs) != 1 {
+		t.Fatalf("got %d scan SSID attributes, want 1", len(scanSSIDs))
+	}
+	if len(scanSSIDs[0]) != 0 {
+		t.Fatalf("scan SSID attribute = %v, want zero-length wildcard", scanSSIDs[0])
+	}
+}
 
 func TestParseScanInformationElements(t *testing.T) {
 	ies := []byte{

@@ -36,13 +36,18 @@ func (c *fakeScanClient) Scan(_ context.Context, _ *wifi.Interface) error {
 func TestScanInterfaceTriggersScanBeforeReadingAccessPoints(t *testing.T) {
 	oldDelay := scanWaitDelay
 	oldReadAccessPoints := readAccessPoints
+	oldTriggerScan := triggerScan
 	scanWaitDelay = 0
 	readAccessPoints = func(cl scanClient, intf *wifi.Interface) ([]*wifi.BSS, error) {
 		return cl.AccessPoints(intf)
 	}
+	triggerScan = func(ctx context.Context, cl scanClient, intf *wifi.Interface) error {
+		return cl.Scan(ctx, intf)
+	}
 	defer func() {
 		scanWaitDelay = oldDelay
 		readAccessPoints = oldReadAccessPoints
+		triggerScan = oldTriggerScan
 	}()
 
 	client := &fakeScanClient{
@@ -74,13 +79,18 @@ func TestScanInterfaceTriggersScanBeforeReadingAccessPoints(t *testing.T) {
 func TestScanInterfaceFallsBackToCachedAccessPoints(t *testing.T) {
 	oldDelay := scanWaitDelay
 	oldReadAccessPoints := readAccessPoints
+	oldTriggerScan := triggerScan
 	scanWaitDelay = 0
 	readAccessPoints = func(cl scanClient, intf *wifi.Interface) ([]*wifi.BSS, error) {
 		return cl.AccessPoints(intf)
 	}
+	triggerScan = func(ctx context.Context, cl scanClient, intf *wifi.Interface) error {
+		return cl.Scan(ctx, intf)
+	}
 	defer func() {
 		scanWaitDelay = oldDelay
 		readAccessPoints = oldReadAccessPoints
+		triggerScan = oldTriggerScan
 	}()
 
 	client := &fakeScanClient{

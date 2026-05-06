@@ -1,6 +1,7 @@
 package wifimanager
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"time"
@@ -17,7 +18,133 @@ const (
 	informationElementRSN  = 48
 	informationElementWPA  = 221
 	capabilityPrivacy      = 1 << 4
+
+	scanSSIDWildcardAttribute = 1
 )
+
+func triggerInterfaceScan(ctx context.Context, _ scanClient, intf *wifi.Interface) error {
+	return triggerScanNL80211(ctx, intf)
+}
+
+func triggerScanNL80211(ctx context.Context, intf *wifi.Interface) error {
+	if intf == nil {
+		return fmt.Errorf("nil WiFi interface")
+	}
+
+	conn, err := genetlink.Dial(&netlink.Config{Strict: true})
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	if deadline, ok := ctx.Deadline(); ok {
+		if err := conn.SetDeadline(deadline); err != nil {
+			return err
+		}
+	}
+
+	family, err := conn.GetFamily(unix.NL80211_GENL_NAME)
+	if err != nil {
+		return err
+	}
+
+	scanGroupID := uint32(0)
+	for _, group := range family.Groups {
+		if group.Name == unix.NL80211_MULTICAST_GROUP_SCAN {
+			scanGroupID = group.ID
+			break
+		}
+	}
+
+	if scanGroupID != 0 {
+		if err := conn.JoinGroup(scanGroupID); err != nil {
+			return err
+		}
+		defer func() { _ = conn.LeaveGroup(scanGroupID) }()
+	}
+
+	data, err := encodeTriggerScanData(intf)
+	if err != nil {
+		return err
+	}
+
+	_, err = conn.Send(
+		genetlink.Message{
+			Header: genetlink.Header{
+				Command: unix.NL80211_CMD_TRIGGER_SCAN,
+				Version: family.Version,
+			},
+			Data: data,
+		},
+		family.ID,
+		netlink.Request,
+	)
+	if err != nil {
+		return err
+	}
+
+	if scanGroupID == 0 {
+		return nil
+	}
+
+	return waitForScanDoneNL80211(ctx, conn, intf.Index, family.Version)
+}
+
+func encodeTriggerScanData(intf *wifi.Interface) ([]byte, error) {
+	if intf == nil {
+		return nil, fmt.Errorf("nil WiFi interface")
+	}
+
+	ae := netlink.NewAttributeEncoder()
+	ae.Uint32(unix.NL80211_ATTR_IFINDEX, uint32(intf.Index))
+	ae.Nested(unix.NL80211_ATTR_SCAN_SSIDS, func(ae *netlink.AttributeEncoder) error {
+		// nl80211 requires a zero-length SSID attribute for wildcard active scans.
+		ae.Bytes(scanSSIDWildcardAttribute, nil)
+		return nil
+	})
+	return ae.Encode()
+}
+
+func waitForScanDoneNL80211(ctx context.Context, conn *genetlink.Conn, intfIndex int, familyVersion uint8) error {
+	for ctx.Err() == nil {
+		msgs, _, err := conn.Receive()
+		if err != nil {
+			return err
+		}
+
+		for _, msg := range msgs {
+			if msg.Header.Version != familyVersion {
+				continue
+			}
+
+			switch msg.Header.Command {
+			case unix.NL80211_CMD_SCAN_ABORTED:
+				return fmt.Errorf("scan aborted by kernel")
+			case unix.NL80211_CMD_NEW_SCAN_RESULTS:
+				attrs, err := netlink.UnmarshalAttributes(msg.Data)
+				if err != nil {
+					return fmt.Errorf("scan completion validation failed: %w", err)
+				}
+
+				eventIndex, ok := nl80211InterfaceIndex(attrs)
+				if !ok || eventIndex == intfIndex {
+					return nil
+				}
+			}
+		}
+	}
+
+	return ctx.Err()
+}
+
+func nl80211InterfaceIndex(attrs []netlink.Attribute) (int, bool) {
+	for _, attr := range attrs {
+		if attr.Type == unix.NL80211_ATTR_IFINDEX {
+			return int(nlenc.Uint32(attr.Data)), true
+		}
+	}
+	return 0, false
+}
 
 func readAccessPointsNL80211(intf *wifi.Interface) ([]*wifi.BSS, error) {
 	if intf == nil {

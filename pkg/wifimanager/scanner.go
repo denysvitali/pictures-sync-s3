@@ -23,6 +23,8 @@ var (
 	// This allows the wireless driver and kernel to complete the scan operation and populate
 	// the access point list.
 	scanWaitDelay = 2 * time.Second
+
+	triggerScan = triggerInterfaceScan
 )
 
 // ScanResult represents a scanned WiFi network
@@ -122,7 +124,7 @@ func scanInterface(cl scanClient, intf *wifi.Interface) ([]*wifi.BSS, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), scanTimeout)
 	defer cancel()
 
-	if err := cl.Scan(ctx, intf); err != nil {
+	if err := triggerScan(ctx, cl, intf); err != nil {
 		log.Printf("ERROR: Failed to trigger scan on interface %s: %v", intf.Name, err)
 		log.Printf("Falling back to cached access points from interface %s...", intf.Name)
 		accessPoints, accessErr := readAccessPoints(cl, intf)
