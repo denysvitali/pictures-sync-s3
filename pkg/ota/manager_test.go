@@ -115,7 +115,7 @@ func TestShouldSkipUpdateTLSVerify(t *testing.T) {
 		{name: "https ipv4 loopback", rawURL: "https://127.0.0.1/update/", want: true},
 		{name: "https ipv6 loopback", rawURL: "https://[::1]/update/", want: true},
 		{name: "https loopback with auth and port", rawURL: "https://gokrazy:pass@127.0.0.1:443/update/", want: true},
-		{name: "http loopback", rawURL: "http://127.0.0.1/update/", want: false},
+		{name: "http loopback may redirect to self-signed https", rawURL: "http://127.0.0.1/update/", want: true},
 		{name: "https remote ip", rawURL: "https://192.168.1.50/update/", want: false},
 		{name: "https remote host", rawURL: "https://photo-backup.local/update/", want: false},
 		{name: "invalid", rawURL: "://", want: false},
@@ -160,6 +160,32 @@ func TestGokrazyUpdaterTargetSkipsTLSVerifyForLoopbackHTTPS(t *testing.T) {
 
 	if _, err := updater.NewTarget(context.Background(), server.URL+"/", client); err != nil {
 		t.Fatalf("updater.NewTarget should accept loopback self-signed TLS: %v", err)
+	}
+}
+
+func TestGokrazyUpdaterTargetSkipsTLSVerifyAfterLoopbackHTTPRedirect(t *testing.T) {
+	tlsServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/update/features" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"features":"streaming"}`))
+	}))
+	defer tlsServer.Close()
+
+	redirectServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, tlsServer.URL+r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	defer redirectServer.Close()
+
+	client := NewUpdateHTTPClient(redirectServer.URL+"/", time.Minute, false)
+	if !transportSkipsTLSVerify(client.Transport) {
+		t.Fatal("loopback HTTP client should allow a self-signed HTTPS updater redirect")
+	}
+
+	if _, err := updater.NewTarget(context.Background(), redirectServer.URL+"/", client); err != nil {
+		t.Fatalf("updater.NewTarget should accept loopback HTTP to self-signed HTTPS redirect: %v", err)
 	}
 }
 

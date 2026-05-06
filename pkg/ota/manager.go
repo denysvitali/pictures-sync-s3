@@ -517,9 +517,11 @@ func configureUpdateHTTPClient(client *http.Client, rawURL string, insecureSkipV
 
 func shouldSkipUpdateTLSVerify(rawURL string) bool {
 	u, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil || u.Scheme != "https" {
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return false
 	}
+	// gokrazy's loopback HTTP updater endpoint may redirect to its self-signed
+	// HTTPS endpoint before /update/features is read.
 	return isLoopbackHost(u.Hostname())
 }
 
