@@ -8,6 +8,8 @@ require (
 	github.com/dsoprea/go-exif/v3 v3.0.1
 	github.com/gokrazy/updater v0.0.0-20250705135802-db129c40879c
 	github.com/gorilla/websocket v1.5.3
+	github.com/mdlayher/genetlink v1.4.0
+	github.com/mdlayher/netlink v1.11.1
 	github.com/mdlayher/wifi v0.7.2
 	github.com/prometheus-community/pro-bing v0.8.0
 	github.com/rclone/rclone v1.74.0
@@ -96,8 +98,6 @@ require (
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect
 	github.com/mattn/go-runewidth v0.0.23 // indirect
-	github.com/mdlayher/genetlink v1.4.0 // indirect
-	github.com/mdlayher/netlink v1.11.1 // indirect
 	github.com/mdlayher/socket v0.6.0 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect

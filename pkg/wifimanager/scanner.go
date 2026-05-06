@@ -114,6 +114,8 @@ type scanClient interface {
 	Scan(ctx context.Context, ifi *wifi.Interface) error
 }
 
+var readAccessPoints = readAccessPointsWithFallback
+
 // scanInterface scans a single WiFi interface for access points.
 func scanInterface(cl scanClient, intf *wifi.Interface) ([]*wifi.BSS, error) {
 	log.Printf("Triggering WiFi scan on interface %s...", intf.Name)
@@ -123,7 +125,7 @@ func scanInterface(cl scanClient, intf *wifi.Interface) ([]*wifi.BSS, error) {
 	if err := cl.Scan(ctx, intf); err != nil {
 		log.Printf("ERROR: Failed to trigger scan on interface %s: %v", intf.Name, err)
 		log.Printf("Falling back to cached access points from interface %s...", intf.Name)
-		accessPoints, accessErr := cl.AccessPoints(intf)
+		accessPoints, accessErr := readAccessPoints(cl, intf)
 		if accessErr != nil {
 			log.Printf("ERROR: Failed to get cached access points on interface %s: %v", intf.Name, accessErr)
 			return nil, fmt.Errorf("scan failed: %w; cached access points unavailable: %w", err, accessErr)
@@ -136,13 +138,36 @@ func scanInterface(cl scanClient, intf *wifi.Interface) ([]*wifi.BSS, error) {
 		time.Sleep(scanWaitDelay)
 	}
 
-	accessPoints, err := cl.AccessPoints(intf)
+	accessPoints, err := readAccessPoints(cl, intf)
 	if err != nil {
 		log.Printf("ERROR: Failed to get access points after scan on interface %s: %v", intf.Name, err)
 		return nil, fmt.Errorf("access points unavailable after scan: %w", err)
 	}
 
 	return accessPoints, nil
+}
+
+func readAccessPointsWithFallback(cl scanClient, intf *wifi.Interface) ([]*wifi.BSS, error) {
+	accessPoints, err := readAccessPointsNL80211(intf)
+	if err == nil && len(accessPoints) > 0 {
+		return accessPoints, nil
+	}
+
+	if err != nil {
+		log.Printf("Raw nl80211 access point read failed on interface %s: %v; falling back to wifi library", intf.Name, err)
+	} else {
+		log.Printf("Raw nl80211 access point read returned no APs on interface %s; falling back to wifi library", intf.Name)
+	}
+
+	fallbackAccessPoints, fallbackErr := cl.AccessPoints(intf)
+	if fallbackErr != nil {
+		if err == nil {
+			return accessPoints, nil
+		}
+		return nil, fallbackErr
+	}
+
+	return fallbackAccessPoints, nil
 }
 
 // processAccessPoints processes a list of access points and adds unique ones to the map
