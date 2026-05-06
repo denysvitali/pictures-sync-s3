@@ -6,8 +6,11 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/gokrazy/updater"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -136,6 +139,27 @@ func TestNewUpdateHTTPClientSkipsTLSVerifyForHTTPSLoopback(t *testing.T) {
 	client = NewUpdateHTTPClient("https://photo-backup.local/update/", time.Minute, false)
 	if transportSkipsTLSVerify(client.Transport) {
 		t.Fatal("remote HTTPS client should not skip TLS verification")
+	}
+}
+
+func TestGokrazyUpdaterTargetSkipsTLSVerifyForLoopbackHTTPS(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/update/features" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"features":"streaming"}`))
+	}))
+	defer server.Close()
+
+	client := NewUpdateHTTPClient(server.URL+"/", time.Minute, false)
+	if !transportSkipsTLSVerify(client.Transport) {
+		t.Fatal("loopback HTTPS client should skip TLS verification")
+	}
+
+	if _, err := updater.NewTarget(context.Background(), server.URL+"/", client); err != nil {
+		t.Fatalf("updater.NewTarget should accept loopback self-signed TLS: %v", err)
 	}
 }
 
