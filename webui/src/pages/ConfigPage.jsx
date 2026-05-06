@@ -646,15 +646,15 @@ function OtaSection() {
     })
   }, [releases, status?.current_version])
 
-  const fetchStatus = useCallback(async () => {
-    setLoading(true)
+  const fetchStatus = useCallback(async ({ background = false } = {}) => {
+    if (!background) setLoading(true)
     try {
       const data = await getOtaStatus(deviceUrl)
       setStatus(data)
     } catch (err) {
       toast.error(describeError(err) || 'Failed to check OTA status')
     } finally {
-      setLoading(false)
+      if (!background) setLoading(false)
     }
   }, [deviceUrl, toast])
 
@@ -664,7 +664,7 @@ function OtaSection() {
 
   useEffect(() => {
     if (!installationRunning) return
-    const timer = window.setTimeout(fetchStatus, 5000)
+    const timer = window.setTimeout(() => fetchStatus({ background: true }), 5000)
     return () => window.clearTimeout(timer)
   }, [installationRunning, fetchStatus, status?.state])
 
@@ -714,7 +714,7 @@ function OtaSection() {
     try {
       await installOta(deviceUrl, selectedRelease)
       toast.success('Update installation started')
-      fetchStatus()
+      fetchStatus({ background: true })
     } catch (err) {
       toast.error(describeError(err) || 'Failed to start update')
     } finally {
