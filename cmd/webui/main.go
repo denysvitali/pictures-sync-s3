@@ -250,6 +250,7 @@ func main() {
 	http.HandleFunc("/api/settings", ctx.HandleSettings)
 	http.HandleFunc("/api/devices", ctx.HandleDevices)
 	http.HandleFunc("/api/devices/select", ctx.HandleDeviceSelect)
+	http.HandleFunc("/api/devices/format", ctx.HandleDeviceFormat)
 	http.HandleFunc("/api/sync/start", ctx.HandleSyncStart)
 	http.HandleFunc("/api/sync/cancel", ctx.HandleSyncCancel)
 	http.HandleFunc("/api/wifi/scan", ctx.HandleWiFiScan)

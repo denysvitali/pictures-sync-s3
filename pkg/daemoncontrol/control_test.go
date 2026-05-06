@@ -174,3 +174,57 @@ func TestRequestCancelSync_OK(t *testing.T) {
 		t.Fatal("Serve did not stop")
 	}
 }
+
+func TestRequestFormatSDCard_WithDevicePath(t *testing.T) {
+	withTempSocket(t)
+
+	const wantedDevicePath = "/dev/sda1"
+	called := false
+	var requestedPath string
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- ServeWithHandlers(ctx, Handlers{
+			ManualSync: func(context.Context, string) Response { return OK("accepted") },
+			CancelSync: func(context.Context) Response { return OK("cancelled") },
+			FormatSDCard: func(_ context.Context, devicePath string) Response {
+				called = true
+				requestedPath = devicePath
+				return OK("formatted")
+			},
+		})
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		if _, err := os.Stat(SocketPath()); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatal("daemon control socket was not created")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if err := RequestFormatSDCard(context.Background(), wantedDevicePath); err != nil {
+		t.Fatalf("RequestFormatSDCard failed: %v", err)
+	}
+	if !called {
+		t.Fatal("Expected format handler to be called")
+	}
+	if requestedPath != wantedDevicePath {
+		t.Fatalf("Expected device path %q, got %q", wantedDevicePath, requestedPath)
+	}
+
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("Serve returned error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Serve did not stop")
+	}
+}

@@ -76,6 +76,7 @@ type mockDaemonClient struct {
 	stateMgr      *state.Manager
 	manualSyncErr error
 	cancelSyncErr error
+	formatErr     error
 }
 
 func (m *mockDaemonClient) RequestManualSync(context.Context, string) error {
@@ -84,6 +85,10 @@ func (m *mockDaemonClient) RequestManualSync(context.Context, string) error {
 
 func (m *mockDaemonClient) RequestCancelSync(context.Context) error {
 	return m.cancelSyncErr
+}
+
+func (m *mockDaemonClient) RequestFormatSDCard(context.Context, string) error {
+	return m.formatErr
 }
 
 func (m *mockDaemonClient) RequestStatus(context.Context) (state.CurrentState, error) {
@@ -136,6 +141,62 @@ func (m *mockDaemonClient) RequestSDCardThumbnail(_ context.Context, path string
 		}
 	}
 	return sdcardbrowser.ReadThumbnail(state.MountDir, path)
+}
+
+func TestHandleDeviceFormat_POST(t *testing.T) {
+	ctx, cleanup := setupTestContext(t)
+	defer cleanup()
+
+	var requestedPath string
+	ctx.ManualSync = DaemonControlFunc{
+		ManualSync: func(context.Context, string) error { return nil },
+		CancelSync: func(context.Context) error { return nil },
+		FormatSDCard: func(_ context.Context, devicePath string) error {
+			requestedPath = devicePath
+			return nil
+		},
+	}
+
+	body := bytes.NewBufferString(`{"device_path":"/dev/sda1","confirmation":"FORMAT"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/devices/format", body)
+	w := httptest.NewRecorder()
+
+	ctx.HandleDeviceFormat(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected status %d, got %d: %s", http.StatusOK, w.Code, w.Body.String())
+	}
+	if requestedPath != "/dev/sda1" {
+		t.Fatalf("Expected device path %q, got %q", "/dev/sda1", requestedPath)
+	}
+}
+
+func TestHandleDeviceFormat_RequiresConfirmation(t *testing.T) {
+	ctx, cleanup := setupTestContext(t)
+	defer cleanup()
+
+	called := false
+	ctx.ManualSync = DaemonControlFunc{
+		ManualSync: func(context.Context, string) error { return nil },
+		CancelSync: func(context.Context) error { return nil },
+		FormatSDCard: func(context.Context, string) error {
+			called = true
+			return nil
+		},
+	}
+
+	body := bytes.NewBufferString(`{"device_path":"/dev/sda1","confirmation":"format"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/devices/format", body)
+	w := httptest.NewRecorder()
+
+	ctx.HandleDeviceFormat(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("Expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+	if called {
+		t.Fatal("Format should not be requested without exact confirmation")
+	}
 }
 
 // setupTestContext creates a test context with mock dependencies

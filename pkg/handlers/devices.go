@@ -101,6 +101,57 @@ func (ctx *Context) HandleDeviceSelect(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// HandleDeviceFormat formats the selected mounted SD card after explicit confirmation.
+func (ctx *Context) HandleDeviceFormat(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		DevicePath   string `json:"device_path"`
+		Confirmation string `json:"confirmation"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if req.DevicePath == "" {
+		http.Error(w, "device_path is required", http.StatusBadRequest)
+		return
+	}
+	if req.Confirmation != "FORMAT" {
+		http.Error(w, "confirmation must be FORMAT", http.StatusBadRequest)
+		return
+	}
+
+	requester := ctx.manualSyncClient()
+	requestCtx, cancel := context.WithTimeout(r.Context(), 2*time.Minute+5*time.Second)
+	defer cancel()
+
+	log.Printf("SD card format requested via WebUI for device: %s", req.DevicePath)
+	if err := requester.RequestFormatSDCard(requestCtx, req.DevicePath); err != nil {
+		statusCode := http.StatusServiceUnavailable
+		var commandErr *daemoncontrol.CommandError
+		if errors.As(err, &commandErr) {
+			switch commandErr.Code {
+			case daemoncontrol.CodeNoSDCardMounted, daemoncontrol.CodeInvalidDevice:
+				statusCode = http.StatusBadRequest
+			case daemoncontrol.CodeSyncAlreadyActive:
+				statusCode = http.StatusConflict
+			}
+		}
+		http.Error(w, err.Error(), statusCode)
+		return
+	}
+
+	JSONResponse(w, map[string]string{
+		"status":  "ok",
+		"message": "SD card formatted",
+	})
+}
+
 // HandleSyncStart starts a manual sync operation
 func (ctx *Context) HandleSyncStart(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

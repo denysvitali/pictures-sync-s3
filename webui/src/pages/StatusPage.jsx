@@ -8,6 +8,7 @@ import {
   startSync,
   cancelSync,
   selectDevice,
+  formatSDCard,
 } from '../api.js'
 import { Card, CardHeader, CardTitle } from '../components/Card.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
@@ -188,7 +189,7 @@ function StatusRow({ icon, label, value, ok }) {
   )
 }
 
-function DeviceInfoCard({ status, devices, onSelectDevice, isSelecting }) {
+function DeviceInfoCard({ status, devices, onSelectDevice, onFormatDevice, isSelecting, isFormatting }) {
   const deviceList = devices || []
   const canSelect = (status?.needs_device_select || deviceList.length > 1) && deviceList.length > 0
   const device = deviceList.find((d) => d.is_mounted) || deviceList[0]
@@ -202,6 +203,7 @@ function DeviceInfoCard({ status, devices, onSelectDevice, isSelecting }) {
   const deviceName = device?.volume_label || device?.device_name || (hasCard ? 'SD Card' : null)
   const deviceSize = device?.size_human || (device?.size ? formatBytes(device.size) : null)
   const devicePath = device?.device_path || status.sdcard_path || null
+  const canFormat = hasCard && devicePath && status.status !== 'syncing'
 
   return (
     <Card>
@@ -270,6 +272,20 @@ function DeviceInfoCard({ status, devices, onSelectDevice, isSelecting }) {
               </p>
             </div>
           )}
+
+          <div className="pt-2 border-t border-surface-700/50">
+            <Button
+              variant="danger"
+              size="md"
+              onClick={() => onFormatDevice?.(devicePath)}
+              loading={isFormatting}
+              disabled={!canFormat}
+              className="w-full"
+            >
+              <Icon name="trash" className="w-4 h-4" />
+              Format SD Card
+            </Button>
+          </div>
         </div>
       ) : (
         <div className="text-center py-6">
@@ -392,6 +408,7 @@ export default function StatusPage() {
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState(false)
   const [selectionLoading, setSelectionLoading] = useState(false)
+  const [formatLoading, setFormatLoading] = useState(false)
   const [error, setError] = useState(null)
   const consecutiveErrorsRef = useRef(0)
   const timerRef = useRef(null)
@@ -490,6 +507,29 @@ export default function StatusPage() {
     }
   }, [deviceUrl, toast, fetchData])
 
+  const handleFormatDevice = useCallback(async (devicePath) => {
+    if (!deviceUrl || !devicePath) return
+
+    const confirmation = window.prompt(
+      `Formatting ${devicePath} will erase all files on the SD card. Type FORMAT to continue.`
+    )
+    if (confirmation !== 'FORMAT') {
+      toast.info('Format cancelled')
+      return
+    }
+
+    setFormatLoading(true)
+    try {
+      await formatSDCard(deviceUrl, devicePath, confirmation)
+      toast.success('SD card formatted')
+      await fetchData()
+    } catch (err) {
+      toast.error(`Failed to format SD card: ${describeError(err)}`)
+    } finally {
+      setFormatLoading(false)
+    }
+  }, [deviceUrl, toast, fetchData])
+
   if (loading && !status) {
     return <PageLoader />
   }
@@ -556,7 +596,9 @@ export default function StatusPage() {
             status={status}
             devices={devices}
             onSelectDevice={handleSelectDevice}
+            onFormatDevice={handleFormatDevice}
             isSelecting={selectionLoading}
+            isFormatting={formatLoading}
           />
         </div>
       )}

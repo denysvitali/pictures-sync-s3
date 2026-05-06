@@ -21,17 +21,20 @@ const (
 	CommandStatus          = "status"
 	CommandHistory         = "history"
 	CommandDevices         = "devices"
+	CommandFormatSDCard    = "format_sdcard"
 	CommandSDCardFiles     = "sdcard_files"
 	CommandSDCardPreview   = "sdcard_preview"
 	CommandSDCardThumbnail = "sdcard_thumbnail"
 
 	CodeNoSDCardMounted   = "no_sd_card_mounted"
 	CodeSyncAlreadyActive = "sync_already_active"
+	CodeInvalidDevice     = "invalid_device"
 	CodeUnavailable       = "daemon_unavailable"
 	CodeInternalError     = "internal_error"
 
-	requestTimeout = 5 * time.Second
-	socketEnv      = "PICTURES_SYNC_DAEMON_SOCKET"
+	requestTimeout       = 5 * time.Second
+	formatRequestTimeout = 2*time.Minute + 5*time.Second
+	socketEnv            = "PICTURES_SYNC_DAEMON_SOCKET"
 )
 
 type Request struct {
@@ -64,6 +67,7 @@ type CancelSyncHandler func(context.Context) Response
 type StatusHandler func(context.Context) Response
 type HistoryHandler func(context.Context) Response
 type DevicesHandler func(context.Context) Response
+type FormatSDCardHandler func(context.Context, string) Response
 type SDCardFilesHandler func(context.Context, string) Response
 type SDCardPreviewHandler func(context.Context, string) Response
 type SDCardThumbnailHandler func(context.Context, string) Response
@@ -74,6 +78,7 @@ type Handlers struct {
 	Status          StatusHandler
 	History         HistoryHandler
 	Devices         DevicesHandler
+	FormatSDCard    FormatSDCardHandler
 	SDCardFiles     SDCardFilesHandler
 	SDCardPreview   SDCardPreviewHandler
 	SDCardThumbnail SDCardThumbnailHandler
@@ -165,6 +170,9 @@ func handleConn(ctx context.Context, conn net.Conn, handlers Handlers) {
 		_ = json.NewEncoder(conn).Encode(Error(CodeInternalError, "invalid daemon control request"))
 		return
 	}
+	if req.Command == CommandFormatSDCard {
+		_ = conn.SetDeadline(time.Now().Add(formatRequestTimeout))
+	}
 
 	switch req.Command {
 	case CommandManualSync:
@@ -177,6 +185,8 @@ func handleConn(ctx context.Context, conn net.Conn, handlers Handlers) {
 		_ = json.NewEncoder(conn).Encode(call0(ctx, handlers.History))
 	case CommandDevices:
 		_ = json.NewEncoder(conn).Encode(call0(ctx, handlers.Devices))
+	case CommandFormatSDCard:
+		_ = json.NewEncoder(conn).Encode(callPath(ctx, handlers.FormatSDCard, req.DevicePath))
 	case CommandSDCardFiles:
 		_ = json.NewEncoder(conn).Encode(callPath(ctx, handlers.SDCardFiles, req.Path))
 	case CommandSDCardPreview:
@@ -232,6 +242,11 @@ func RequestDevices(ctx context.Context) ([]sdmonitor.DeviceInfo, error) {
 	return devices, err
 }
 
+func RequestFormatSDCard(ctx context.Context, devicePath string) error {
+	_, err := sendRequestWithTimeout(ctx, Request{Command: CommandFormatSDCard, DevicePath: devicePath}, formatRequestTimeout)
+	return err
+}
+
 func RequestSDCardFiles(ctx context.Context, path string) (*sdcardbrowser.FileList, error) {
 	var result sdcardbrowser.FileList
 	if err := sendCommandData(ctx, Request{Command: CommandSDCardFiles, Path: path}, &result); err != nil {
@@ -276,7 +291,11 @@ func sendCommandData(ctx context.Context, req Request, out interface{}) error {
 }
 
 func sendRequest(ctx context.Context, req Request) (Response, error) {
-	requestCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+	return sendRequestWithTimeout(ctx, req, requestTimeout)
+}
+
+func sendRequestWithTimeout(ctx context.Context, req Request, timeout time.Duration) (Response, error) {
+	requestCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	var resp Response
@@ -290,7 +309,7 @@ func sendRequest(ctx context.Context, req Request) (Response, error) {
 	}
 	defer conn.Close()
 
-	deadline := time.Now().Add(requestTimeout)
+	deadline := time.Now().Add(timeout)
 	if ctxDeadline, ok := requestCtx.Deadline(); ok && ctxDeadline.Before(deadline) {
 		deadline = ctxDeadline
 	}

@@ -219,6 +219,7 @@ func (s *Service) Run() error {
 			Status:          s.handleStatusCommand,
 			History:         s.handleHistoryCommand,
 			Devices:         s.handleDevicesCommand,
+			FormatSDCard:    s.handleFormatSDCardCommand,
 			SDCardFiles:     s.handleSDCardFilesCommand,
 			SDCardPreview:   s.handleSDCardPreviewCommand,
 			SDCardThumbnail: s.handleSDCardThumbnailCommand,
@@ -381,6 +382,46 @@ func (s *Service) handleDevicesCommand(ctx context.Context) daemoncontrol.Respon
 	}
 
 	return daemoncontrol.OKData("devices", devices)
+}
+
+func (s *Service) handleFormatSDCardCommand(ctx context.Context, devicePath string) daemoncontrol.Response {
+	if ctx.Err() != nil {
+		return daemoncontrol.Error(daemoncontrol.CodeUnavailable, "pictures-sync daemon is shutting down")
+	}
+	if s.syncMgr.IsRunning() {
+		return daemoncontrol.Error(daemoncontrol.CodeSyncAlreadyActive, "cannot format SD card while sync is in progress")
+	}
+	if devicePath == "" {
+		return daemoncontrol.Error(daemoncontrol.CodeInvalidDevice, "device_path is required")
+	}
+	if !sdmonitor.IsSupportedDevicePath(devicePath) {
+		return daemoncontrol.Error(daemoncontrol.CodeInvalidDevice, "unsupported SD card device path")
+	}
+
+	log.Printf("Manual SD card format requested for %s", devicePath)
+	if err := s.monitor.FormatCurrentDevice(ctx, devicePath); err != nil {
+		log.Printf("SD card format failed: %v", err)
+		if !s.monitor.IsCardMounted() {
+			if stateErr := s.stateMgr.SetSDCard(false, ""); stateErr != nil {
+				log.Printf("Warning: Failed to clear SD card state after format failure: %v", stateErr)
+			}
+		}
+		switch err.Error() {
+		case "no SD card mounted":
+			return daemoncontrol.Error(daemoncontrol.CodeNoSDCardMounted, err.Error())
+		case "selected device is not mounted":
+			return daemoncontrol.Error(daemoncontrol.CodeInvalidDevice, err.Error())
+		default:
+			return daemoncontrol.Error(daemoncontrol.CodeInternalError, err.Error())
+		}
+	}
+
+	if err := s.stateMgr.SetSDCard(false, ""); err != nil {
+		log.Printf("Warning: Failed to clear SD card state after format: %v", err)
+	}
+	s.stateMgr.SetStatus(state.StatusIdle)
+
+	return daemoncontrol.OK("SD card formatted")
 }
 
 func (s *Service) handleSDCardFilesCommand(ctx context.Context, requestedPath string) daemoncontrol.Response {
