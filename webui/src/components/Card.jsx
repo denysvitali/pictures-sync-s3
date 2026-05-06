@@ -1,7 +1,7 @@
 export function Card({ children, className = '', ...props }) {
   return (
     <div
-      className={`bg-surface-800/50 border border-surface-700/50 rounded-xl p-4 ${className}`}
+      className={`bg-surface-800/55 border border-surface-700/60 rounded-lg p-4 shadow-sm shadow-black/10 ${className}`}
       {...props}
     >
       {children}
@@ -11,7 +11,7 @@ export function Card({ children, className = '', ...props }) {
 
 export function CardHeader({ children, className = '' }) {
   return (
-    <div className={`flex items-center justify-between mb-3 ${className}`}>
+    <div className={`flex items-center justify-between gap-3 mb-3 ${className}`}>
       {children}
     </div>
   )
@@ -19,7 +19,7 @@ export function CardHeader({ children, className = '' }) {
 
 export function CardTitle({ children, className = '' }) {
   return (
-    <h3 className={`text-sm font-semibold text-surface-200 uppercase tracking-wider ${className}`}>
+    <h3 className={`text-sm font-semibold text-surface-200 uppercase tracking-wide ${className}`}>
       {children}
     </h3>
   )

@@ -48,6 +48,13 @@ function signalVariant(strength) {
   return 'danger'
 }
 
+function signalClass(strength) {
+  const variant = signalVariant(strength)
+  if (variant === 'success') return 'text-success'
+  if (variant === 'warning') return 'text-warning'
+  return 'text-danger'
+}
+
 function WifiStatusCard({ status }) {
   if (!status) return null
 
@@ -114,13 +121,22 @@ function PasswordInput({ value, onChange, placeholder }) {
   )
 }
 
-function ScannedNetworkItem({ network, currentSsid, onConnect }) {
+function ScannedNetworkItem({ network, currentSsid, onConnect, onDisconnect }) {
   const [expanded, setExpanded] = useState(false)
   const [password, setPassword] = useState('')
   const [connecting, setConnecting] = useState(false)
   const isCurrent = currentSsid === network.ssid
 
   async function handleConnect() {
+    if (isCurrent) {
+      setConnecting(true)
+      try {
+        await onDisconnect(network.ssid)
+      } finally {
+        setConnecting(false)
+      }
+      return
+    }
     if (network.encrypted && !expanded) {
       setExpanded(true)
       return
@@ -135,10 +151,10 @@ function ScannedNetworkItem({ network, currentSsid, onConnect }) {
 
   return (
     <div className="border border-surface-700/30 rounded-lg overflow-hidden">
-      <div className="flex items-center gap-3 p-3">
+      <div className="flex flex-wrap items-center gap-3 p-3">
         <Icon
           name={signalIcon(network.signal)}
-          className={`w-5 h-5 text-${signalVariant(network.signal)}`}
+          className={`w-5 h-5 ${signalClass(network.signal)}`}
         />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
@@ -160,6 +176,7 @@ function ScannedNetworkItem({ network, currentSsid, onConnect }) {
           size="sm"
           loading={connecting}
           onClick={handleConnect}
+          className="ml-auto"
         >
           {isCurrent ? 'Disconnect' : 'Connect'}
         </Button>
@@ -228,6 +245,7 @@ function SavedNetworkItem({ network, index, total, onMoveUp, onMoveDown, onDisco
         variant="ghost"
         size="sm"
         onClick={() => onDisconnect(network.ssid)}
+        aria-label={`Remove ${network.ssid}`}
       >
         <Icon name="x" className="w-4 h-4" />
       </Button>
@@ -288,7 +306,10 @@ export default function WifiPage() {
 
   async function handleConnect(ssid, password) {
     try {
-      await connectWifi(deviceUrl, ssid, password)
+      const res = await connectWifi(deviceUrl, ssid, password)
+      if (res?.success === false) {
+        throw new Error(res.error || 'Connection failed')
+      }
       toast.success(`Connected to ${ssid}`)
       await fetchStatus()
       await fetchSavedNetworks()
@@ -299,7 +320,10 @@ export default function WifiPage() {
 
   async function handleDisconnect(ssid) {
     try {
-      await disconnectWifi(deviceUrl, ssid)
+      const res = await disconnectWifi(deviceUrl, ssid)
+      if (res?.success === false) {
+        throw new Error(res.error || 'Disconnect failed')
+      }
       toast.success(`Disconnected from ${ssid}`)
       await fetchStatus()
       await fetchSavedNetworks()
@@ -312,7 +336,10 @@ export default function WifiPage() {
     setSavedNetworks(newNetworks)
     try {
       const ssids = newNetworks.map((n) => n.ssid)
-      await reorderWifi(deviceUrl, ssids)
+      const res = await reorderWifi(deviceUrl, ssids)
+      if (res?.success === false) {
+        throw new Error(res.error || 'Reorder failed')
+      }
     } catch (err) {
       toast.error(`Reorder failed: ${describeError(err)}`)
       await fetchSavedNetworks()
@@ -342,8 +369,8 @@ export default function WifiPage() {
 
       {/* Scan Button */}
       <Card>
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
             <h3 className="text-sm font-semibold text-surface-200">Network Scan</h3>
             <p className="text-xs text-surface-400 mt-0.5">Search for nearby WiFi networks</p>
           </div>
@@ -373,6 +400,7 @@ export default function WifiPage() {
                 network={network}
                 currentSsid={status?.connected ? status.ssid : null}
                 onConnect={handleConnect}
+                onDisconnect={handleDisconnect}
               />
             ))}
           </div>

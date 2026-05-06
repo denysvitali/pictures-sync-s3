@@ -163,10 +163,10 @@ function SystemStatusCard({ status }) {
             ok={status.sdcard_mounted}
           />
           <StatusRow
-            icon="wifi"
-            label="WiFi"
-            value={status.status !== 'idle' || status.sdcard_mounted ? 'Connected' : 'Unknown'}
-            ok={status.status !== 'idle' || status.sdcard_mounted}
+            icon="cloud"
+            label="Device"
+            value="Reachable"
+            ok
           />
         </div>
 
@@ -209,9 +209,9 @@ function DeviceInfoCard({ status, devices, onSelectDevice, onFormatDevice, isSel
   const hasCard = status.sdcard_mounted
   const photoCount = status.current_sync?.files_total || status.last_sync?.files_total || 0
 
-  const deviceName = device?.volume_label || device?.device_name || (hasCard ? 'SD Card' : null)
-  const deviceSize = device?.size_human || (device?.size ? formatBytes(device.size) : null)
-  const devicePath = device?.device_path || status.sdcard_path || null
+  const deviceName = selectedDevice?.volume_label || selectedDevice?.device_name || (hasCard ? 'SD Card' : null)
+  const deviceSize = selectedDevice?.size_human || (selectedDevice?.size ? formatBytes(selectedDevice.size) : null)
+  const devicePath = selectedDevice?.device_path || status.sdcard_path || null
   const canFormat = hasCard && devicePath && status.status !== 'syncing'
 
   return (
@@ -232,16 +232,16 @@ function DeviceInfoCard({ status, devices, onSelectDevice, onFormatDevice, isSel
               </p>
               <p className="text-xs text-surface-500">
                 {deviceSize || (hasCard ? 'Mounted' : '')}
-                {device?.is_usb && ' (USB)'}
+                {selectedDevice?.is_usb && ' (USB)'}
               </p>
             </div>
           </div>
 
-          {device?.size > 0 && (
+          {selectedDevice?.size > 0 && (
             <div>
               <div className="flex justify-between text-xs mb-1">
                 <span className="text-surface-400">Storage used</span>
-                <span className="text-surface-300">{formatBytes(device.size)}</span>
+                <span className="text-surface-300">{formatBytes(selectedDevice.size)}</span>
               </div>
             </div>
           )}
@@ -569,7 +569,7 @@ export default function StatusPage() {
   return (
     <div className="space-y-4">
       {/* Refresh button */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-semibold text-surface-100">Overview</h2>
         <Button
           variant="ghost"

@@ -9,7 +9,7 @@ const variants = {
 export function StatusBadge({ variant = 'neutral', children, pulse = false }) {
   return (
     <span
-      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 text-xs font-medium rounded-full border ${variants[variant] || variants.neutral}`}
+      className={`inline-flex shrink-0 items-center gap-1.5 px-2.5 py-0.5 text-xs font-medium rounded-full border whitespace-nowrap ${variants[variant] || variants.neutral}`}
     >
       {pulse && (
         <span className={`w-1.5 h-1.5 rounded-full bg-current animate-pulse`} />

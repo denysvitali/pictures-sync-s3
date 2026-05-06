@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 
 function describeError(err) {
   if (!err) return 'Unknown error'
@@ -72,7 +72,7 @@ export default function GalleryPage() {
 
   const [source, setSource] = useState('cloud')
   const [cloudPath, setCloudPath] = useState('')
-  const [sdcardPath, setSdcardPath] = useState('')
+  const [sdcardPath, setSdcardPath] = useState('DCIM')
   const [files, setFiles] = useState([])
   const [allSDCardFiles, setAllSDCardFiles] = useState([])
   const [total, setTotal] = useState(0)
@@ -82,6 +82,8 @@ export default function GalleryPage() {
   const [videoPreview, setVideoPreview] = useState(null)
   const [showThumbnails, setShowThumbnails] = useState(false)
   const [deviceStatus, setDeviceStatus] = useState(null)
+  const [loadError, setLoadError] = useState(null)
+  const requestIdRef = useRef(0)
 
   const currentPath = source === 'sdcard' ? sdcardPath : cloudPath
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total])
@@ -107,9 +109,15 @@ export default function GalleryPage() {
 
   const fetchFiles = useCallback(async () => {
     if (!deviceUrl) return
+    const requestId = requestIdRef.current + 1
+    requestIdRef.current = requestId
+    const isLatest = () => requestId === requestIdRef.current
+
     setLoading(true)
+    setLoadError(null)
     try {
       const status = await fetchDeviceStatus()
+      if (!isLatest()) return
       if (source === 'sdcard') {
         if (status && !status.sdcard_mounted) {
           setAllSDCardFiles([])
@@ -118,6 +126,8 @@ export default function GalleryPage() {
           return
         }
         const data = await getSDCardFiles(deviceUrl, currentPath || 'DCIM')
+        if (!isLatest()) return
+        if (data?.error) throw new Error(data.error)
         const fileArr = Array.isArray(data?.files) ? data.files : []
         fileArr.sort((a, b) => {
           if (a.is_dir && !b.is_dir) return -1
@@ -134,6 +144,8 @@ export default function GalleryPage() {
           page,
           pageSize: PAGE_SIZE,
         })
+        if (!isLatest()) return
+        if (data?.error) throw new Error(data.error)
         const fileArr = Array.isArray(data?.files) ? data.files : []
         fileArr.sort((a, b) => {
           if (a.is_dir && !b.is_dir) return -1
@@ -144,13 +156,15 @@ export default function GalleryPage() {
         setTotal(data?.total ?? fileArr.length)
       }
     } catch (err) {
+      if (!isLatest()) return
+      setLoadError(describeError(err))
       toast.error(`Could not load files: ${describeError(err)}`)
       setFiles([])
       setTotal(0)
     } finally {
-      setLoading(false)
+      if (isLatest()) setLoading(false)
     }
-  }, [deviceUrl, currentPath, page, source, fetchDeviceStatus])
+  }, [deviceUrl, currentPath, page, source, fetchDeviceStatus, toast])
 
   useEffect(() => {
     fetchFiles()
@@ -160,12 +174,14 @@ export default function GalleryPage() {
     setSourcePath(path)
     setPage(1)
     setFiles([])
+    setLoadError(null)
   }, [setSourcePath])
 
   const handleSourceChange = useCallback((newSource) => {
     setSource(newSource)
     setPage(1)
     setFiles([])
+    setLoadError(null)
   }, [])
 
   const handleFolderClick = useCallback(
@@ -279,11 +295,11 @@ export default function GalleryPage() {
   return (
     <div className="min-h-screen">
       {/* Source toggle */}
-      <div className="flex items-center justify-between gap-3 mb-6">
-        <div className="flex bg-surface-800 rounded-lg p-1">
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="grid grid-cols-2 rounded-lg bg-surface-800 p-1 sm:flex">
           <button
             onClick={() => handleSourceChange('cloud')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+            className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
               source === 'cloud'
                 ? 'bg-brand-600 text-white shadow'
                 : 'text-surface-400 hover:text-surface-200'
@@ -294,7 +310,7 @@ export default function GalleryPage() {
           </button>
           <button
             onClick={() => handleSourceChange('sdcard')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+            className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
               source === 'sdcard'
                 ? 'bg-brand-600 text-white shadow'
                 : 'text-surface-400 hover:text-surface-200'
@@ -305,10 +321,10 @@ export default function GalleryPage() {
           </button>
         </div>
         {source === 'sdcard' && (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => setShowThumbnails((enabled) => !enabled)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              className={`flex min-h-10 items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
                 showThumbnails
                   ? 'bg-brand-600 text-white shadow'
                   : 'bg-surface-800 text-surface-300 hover:text-surface-100'
@@ -404,6 +420,16 @@ export default function GalleryPage() {
         <div className="flex items-center justify-center py-20">
           <LoadingSpinner size="lg" />
         </div>
+      ) : loadError ? (
+        <Card className="text-center py-12">
+          <Icon name="exclamation-triangle" className="w-12 h-12 text-danger mx-auto mb-3" />
+          <p className="text-surface-200 text-sm font-medium">Could not load files</p>
+          <p className="mx-auto mt-2 max-w-md text-xs text-surface-500">{loadError}</p>
+          <Button variant="secondary" size="sm" className="mt-4" onClick={fetchFiles}>
+            <Icon name="arrow-path" className="w-4 h-4" />
+            Retry
+          </Button>
+        </Card>
       ) : files.length === 0 ? (
         <Card className="text-center py-12">
           <Icon name="folder" className="w-12 h-12 text-surface-500 mx-auto mb-3" />

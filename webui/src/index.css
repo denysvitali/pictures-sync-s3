@@ -1,6 +1,10 @@
 @import "tailwindcss";
 
 @theme {
+  --spacing-shell-sidebar: 16rem;
+  --spacing-mobile-nav: 4.75rem;
+  --spacing-app-header: 4rem;
+
   --color-brand-50: #ecfeff;
   --color-brand-100: #cffafe;
   --color-brand-200: #a5f3fc;
@@ -13,17 +17,17 @@
   --color-brand-900: #164e63;
   --color-brand-950: #083344;
 
-  --color-surface-50: #f8fafc;
-  --color-surface-100: #f1f5f9;
-  --color-surface-200: #e2e8f0;
-  --color-surface-300: #cbd5e1;
-  --color-surface-400: #94a3b8;
-  --color-surface-500: #64748b;
-  --color-surface-600: #475569;
-  --color-surface-700: #334155;
-  --color-surface-800: #1e293b;
-  --color-surface-900: #0f172a;
-  --color-surface-950: #020617;
+  --color-surface-50: #fafafa;
+  --color-surface-100: #f4f4f5;
+  --color-surface-200: #e4e4e7;
+  --color-surface-300: #d4d4d8;
+  --color-surface-400: #a1a1aa;
+  --color-surface-500: #71717a;
+  --color-surface-600: #52525b;
+  --color-surface-700: #3f3f46;
+  --color-surface-800: #27272a;
+  --color-surface-900: #18181b;
+  --color-surface-950: #09090b;
 
   --color-success: #22c55e;
   --color-warning: #eab308;
@@ -40,6 +44,9 @@
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    background: #09090b;
+    color: #f4f4f5;
+    overflow-x: hidden;
   }
 
   ::-webkit-scrollbar {
@@ -57,6 +64,24 @@
 }
 
 @layer utilities {
+  .app-background {
+    background:
+      radial-gradient(circle at top left, rgba(6, 182, 212, 0.12), transparent 28rem),
+      linear-gradient(135deg, rgba(9, 9, 11, 1), rgba(24, 24, 27, 0.96) 45%, rgba(9, 9, 11, 1));
+  }
+
+  .content-bottom-safe {
+    padding-bottom: calc(var(--spacing-mobile-nav) + env(safe-area-inset-bottom));
+  }
+
+  .toast-bottom-safe {
+    bottom: calc(var(--spacing-mobile-nav) + env(safe-area-inset-bottom));
+  }
+
+  .sticky-under-header {
+    top: calc(var(--spacing-app-header) + env(safe-area-inset-top));
+  }
+
   .safe-area-top {
     padding-top: env(safe-area-inset-top);
   }
@@ -66,7 +91,7 @@
   }
 
   .glass {
-    background: rgba(15, 23, 42, 0.8);
+    background: rgba(24, 24, 27, 0.82);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
   }

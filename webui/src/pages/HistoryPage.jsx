@@ -208,6 +208,7 @@ export default function HistoryPage() {
   const [refreshing, setRefreshing] = useState(false)
   const [filter, setFilter] = useState('all')
   const [search, setSearch] = useState('')
+  const [error, setError] = useState(null)
 
   const fetchHistory = useCallback(async (isRefresh = false) => {
     if (!deviceUrl) return
@@ -215,6 +216,7 @@ export default function HistoryPage() {
     else setLoading(true)
 
     try {
+      setError(null)
       const [historyData, statusData] = await Promise.all([
         getHistory(deviceUrl),
         getStatus(deviceUrl),
@@ -234,7 +236,9 @@ export default function HistoryPage() {
       })
       setHistory(entries)
     } catch (err) {
-      toast.error(`Could not load history: ${describeError(err)}`)
+      const detailed = describeError(err)
+      setError(detailed)
+      toast.error(`Could not load history: ${detailed}`)
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -244,6 +248,17 @@ export default function HistoryPage() {
   useEffect(() => {
     fetchHistory()
   }, [fetchHistory])
+
+  const hasActiveSync = useMemo(
+    () => history.some((entry) => ['syncing', 'in-progress', 'running'].includes(entry.status)),
+    [history]
+  )
+
+  useEffect(() => {
+    if (!hasActiveSync) return
+    const timer = window.setTimeout(() => fetchHistory(true), 4000)
+    return () => window.clearTimeout(timer)
+  }, [hasActiveSync, fetchHistory, history])
 
   const filtered = useMemo(() => {
     let result = history
@@ -281,7 +296,7 @@ export default function HistoryPage() {
   return (
     <div className="space-y-4">
       {/* Toolbar */}
-      <div className="sticky top-[57px] z-20 -mx-4 px-4 pb-3 bg-surface-950/95 backdrop-blur-sm border-b border-surface-700/30">
+      <div className="sticky sticky-under-header z-20 -mx-3 px-3 pb-3 bg-surface-950/95 backdrop-blur-sm border-b border-surface-700/30 sm:-mx-5 sm:px-5 lg:-mx-8 lg:px-8">
         {/* Search + Refresh */}
         <div className="flex items-center gap-2 mb-3">
           <div className="relative flex-1">
@@ -346,6 +361,16 @@ export default function HistoryPage() {
       {/* Content */}
       {loading ? (
         <PageLoader />
+      ) : error && history.length === 0 ? (
+        <Card className="text-center py-12">
+          <Icon name="exclamation-triangle" className="w-12 h-12 text-danger mx-auto mb-3" />
+          <p className="text-surface-200 text-sm font-medium">Could not load history</p>
+          <p className="mx-auto mt-2 max-w-md text-xs text-surface-500">{error}</p>
+          <Button variant="secondary" size="sm" className="mt-4" onClick={() => fetchHistory()}>
+            <Icon name="arrow-path" className="w-4 h-4" />
+            Retry
+          </Button>
+        </Card>
       ) : filtered.length === 0 ? (
         history.length === 0 ? (
           <EmptyState />

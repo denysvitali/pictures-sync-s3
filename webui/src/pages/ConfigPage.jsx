@@ -268,6 +268,9 @@ function RemoteStorageSection() {
       toast.error('rclone.conf content is required')
       return
     }
+    if (config?.configured && !window.confirm('Replace the existing remote storage configuration?')) {
+      return
+    }
 
     setSaving(true)
     try {
@@ -281,7 +284,7 @@ function RemoteStorageSection() {
     } finally {
       setSaving(false)
     }
-  }, [deviceUrl, draftConfig, toast])
+  }, [deviceUrl, draftConfig, config?.configured, toast])
 
   return (
     <AccordionSection title="Remote Storage" icon="cloud" defaultOpen badge={
@@ -297,8 +300,8 @@ function RemoteStorageSection() {
         </div>
       ) : (
         <div className="space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
               <p className="text-sm text-surface-200">
                 {config?.configured ? 'Remote backend is configured' : 'No remote backend configured'}
               </p>
@@ -312,7 +315,7 @@ function RemoteStorageSection() {
                 <p className="text-xs text-surface-400 mt-1">Path: {config.remote_path}</p>
               )}
             </div>
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <Button
                 variant="secondary"
                 size="sm"
@@ -320,7 +323,7 @@ function RemoteStorageSection() {
                 disabled={saving}
               >
                 <Icon name="pencil" className="w-4 h-4" />
-                {editing ? 'Cancel' : 'Edit Config'}
+                {editing ? 'Cancel' : 'Replace Config'}
               </Button>
               <Button
                 variant="secondary"
@@ -491,9 +494,12 @@ function SyncSettingsSection() {
   const [googlePhotos, setGooglePhotos] = useState(false)
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
 
   useEffect(() => {
     let cancelled = false
+    setLoading(true)
+    setLoadError(null)
     getSettings(deviceUrl)
       .then((data) => {
         if (cancelled) return
@@ -503,12 +509,16 @@ function SyncSettingsSection() {
           setGooglePhotos(!!data.google_photos)
         }
       })
-      .catch(() => {})
+      .catch((err) => { if (!cancelled) setLoadError(describeError(err)) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [deviceUrl])
 
   const handleSave = useCallback(async () => {
+    if (loadError) {
+      toast.error('Reload sync settings before saving')
+      return
+    }
     const t = parseInt(transfers, 10)
     if (isNaN(t) || t < 1 || t > 64) {
       toast.error('Transfers must be between 1 and 64')
@@ -528,7 +538,7 @@ function SyncSettingsSection() {
     } finally {
       setSaving(false)
     }
-  }, [deviceUrl, transfers, bandwidth, googlePhotos, toast])
+  }, [deviceUrl, transfers, bandwidth, googlePhotos, loadError, toast])
 
   return (
     <AccordionSection title="Sync Settings" icon="settings">
@@ -538,13 +548,18 @@ function SyncSettingsSection() {
         </div>
       ) : (
         <div className="space-y-1">
+          {loadError ? (
+            <div className="mb-3 rounded-lg border border-danger/20 bg-danger/10 p-3 text-xs text-danger">
+              {loadError}
+            </div>
+          ) : null}
           <Field label="Parallel Transfers" hint="Number of simultaneous file transfers (1-64)">
             <TextInput
               value={transfers}
               onChange={setTransfers}
               placeholder="4"
               type="number"
-              disabled={saving}
+              disabled={saving || !!loadError}
             />
           </Field>
           <Field label="Bandwidth Limit" hint="e.g. 10M, 1G, or leave empty for unlimited">
@@ -552,7 +567,7 @@ function SyncSettingsSection() {
               value={bandwidth}
               onChange={setBandwidth}
               placeholder="unlimited"
-              disabled={saving}
+              disabled={saving || !!loadError}
             />
           </Field>
           <div className="py-2">
@@ -560,11 +575,11 @@ function SyncSettingsSection() {
               checked={googlePhotos}
               onChange={setGooglePhotos}
               label="Enable Google Photos integration"
-              disabled={saving}
+              disabled={saving || !!loadError}
             />
           </div>
           <div className="flex justify-end pt-2">
-            <Button variant="primary" size="sm" loading={saving} onClick={handleSave}>
+            <Button variant="primary" size="sm" loading={saving} disabled={!!loadError} onClick={handleSave}>
               Save Settings
             </Button>
           </div>
@@ -646,6 +661,12 @@ function OtaSection() {
   useEffect(() => {
     fetchStatus()
   }, [fetchStatus])
+
+  useEffect(() => {
+    if (!installationRunning) return
+    const timer = window.setTimeout(fetchStatus, 5000)
+    return () => window.clearTimeout(timer)
+  }, [installationRunning, fetchStatus, status?.state])
 
   useEffect(() => {
     if (!selectedRelease && releases.length > 0) {
@@ -739,8 +760,8 @@ function OtaSection() {
             </div>
           ) : null}
           {status?.ab_partitions ? (
-            <div className="grid grid-cols-2 gap-3">
-          <div className="bg-surface-900 rounded-lg p-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="bg-surface-900 rounded-lg p-3">
                 <p className="text-xs text-surface-400 mb-1">A/B Partitions</p>
                 <p className="text-xs text-surface-500">
                   Active {activePartitionLabel}
@@ -779,7 +800,7 @@ function OtaSection() {
               </div>
             </div>
           ) : null}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="bg-surface-900 rounded-lg p-3">
               <p className="text-xs text-surface-400 mb-1">Current Version</p>
               <p className="text-sm font-medium text-surface-100">
@@ -1105,9 +1126,12 @@ function DangerZoneBreakglass() {
   const [keys, setKeys] = useState('')
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
 
   useEffect(() => {
     let cancelled = false
+    setLoading(true)
+    setLoadError(null)
     getBreakglassAuthorizedKeys(deviceUrl)
       .then((data) => {
         if (!cancelled && data?.authorized_keys) {
@@ -1117,12 +1141,16 @@ function DangerZoneBreakglass() {
           )
         }
       })
-      .catch(() => {})
+      .catch((err) => { if (!cancelled) setLoadError(describeError(err)) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [deviceUrl])
 
   const handleSave = useCallback(async () => {
+    if (loadError) {
+      toast.error('Reload breakglass keys before saving')
+      return
+    }
     const parsed = keys
       .split('\n')
       .map((k) => k.trim())
@@ -1137,7 +1165,7 @@ function DangerZoneBreakglass() {
     } finally {
       setSaving(false)
     }
-  }, [deviceUrl, keys, toast])
+  }, [deviceUrl, keys, loadError, toast])
 
   return (
     <div className="space-y-1">
@@ -1150,6 +1178,11 @@ function DangerZoneBreakglass() {
         </div>
       ) : (
         <>
+          {loadError ? (
+            <div className="mb-3 rounded-lg border border-danger/20 bg-danger/10 p-3 text-xs text-danger">
+              {loadError}
+            </div>
+          ) : null}
           <Field
             label="Authorized Keys"
             hint="One SSH public key per line. These keys allow breakglass SSH access."
@@ -1158,13 +1191,13 @@ function DangerZoneBreakglass() {
               value={keys}
               onChange={(e) => setKeys(e.target.value)}
               placeholder="ssh-ed25519 AAAA..."
-              disabled={saving}
+              disabled={saving || !!loadError}
               rows={4}
               className={`${inputClass} resize-y font-mono text-xs`}
             />
           </Field>
           <div className="flex justify-end pt-2">
-            <Button variant="danger" size="sm" loading={saving} onClick={handleSave}>
+            <Button variant="danger" size="sm" loading={saving} disabled={!!loadError} onClick={handleSave}>
               <Icon name="lock" className="w-4 h-4" />
               Save SSH Keys
             </Button>
@@ -1193,7 +1226,7 @@ function DangerZoneSection() {
 
 export default function ConfigPage() {
   return (
-    <div className="max-w-2xl mx-auto px-4 py-6 space-y-0">
+    <div className="mx-auto max-w-4xl space-y-0">
       <div className="mb-6">
         <h1 className="text-lg font-bold text-surface-50">Configuration</h1>
         <p className="text-sm text-surface-400 mt-1">
