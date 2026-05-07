@@ -9,6 +9,7 @@ import (
 
 	"github.com/diskfs/go-diskfs"
 	"github.com/diskfs/go-diskfs/filesystem"
+	"github.com/diskfs/go-diskfs/partition/mbr"
 )
 
 func TestIsSupportedDevicePath(t *testing.T) {
@@ -140,16 +141,100 @@ func TestFormatFAT32DeviceHonorsCanceledContext(t *testing.T) {
 	}
 }
 
-func TestFormatDeviceRejectsLargeCardWithoutExFATFormatter(t *testing.T) {
-	t.Setenv("PATH", t.TempDir())
-	imagePath := createFormatTestImage(t, sdxcExFATThreshold+1024)
-
-	err := formatDeviceExpectError(context.Background(), imagePath, "")
+func TestFormatDeviceRejectsUnsupportedDevicePath(t *testing.T) {
+	err := formatDeviceExpectError(context.Background(), "/tmp/sdcard.img", "")
 	if err == nil {
 		t.Fatal("Expected error")
 	}
-	if !strings.Contains(err.Error(), "exFAT formatter not found") {
-		t.Fatalf("Expected missing exFAT formatter error, got %v", err)
+	if !strings.Contains(err.Error(), "unsupported SD card device path") {
+		t.Fatalf("Expected unsupported device path error, got %v", err)
+	}
+}
+
+func TestFormatTargetForDevicePath(t *testing.T) {
+	tests := []struct {
+		name          string
+		devicePath    string
+		wantDisk      string
+		wantPartition string
+	}{
+		{name: "usb card reader", devicePath: "/dev/sda1", wantDisk: "/dev/sda", wantPartition: "/dev/sda1"},
+		{name: "mmc card reader", devicePath: "/dev/mmcblk1p1", wantDisk: "/dev/mmcblk1", wantPartition: "/dev/mmcblk1p1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := formatTargetForDevicePath(tt.devicePath)
+			if err != nil {
+				t.Fatalf("formatTargetForDevicePath() error = %v", err)
+			}
+			if got.diskPath != tt.wantDisk || got.partitionPath != tt.wantPartition {
+				t.Fatalf("formatTargetForDevicePath() = %+v, want disk %q partition %q", got, tt.wantDisk, tt.wantPartition)
+			}
+		})
+	}
+}
+
+func TestSinglePartitionTableUsesAvailableCardCapacity(t *testing.T) {
+	const diskSize = 64 * 1024 * 1024
+
+	table, err := singlePartitionTable(diskSize, mbr.Fat32LBA)
+	if err != nil {
+		t.Fatalf("singlePartitionTable() error = %v", err)
+	}
+	if len(table.Partitions) != 1 {
+		t.Fatalf("partition count = %d, want 1", len(table.Partitions))
+	}
+
+	partition := table.Partitions[0]
+	if partition.Index != 1 {
+		t.Fatalf("partition index = %d, want 1", partition.Index)
+	}
+	if partition.Type != mbr.Fat32LBA {
+		t.Fatalf("partition type = %v, want %v", partition.Type, mbr.Fat32LBA)
+	}
+	if partition.Start != partitionStartSector {
+		t.Fatalf("partition start = %d, want %d", partition.Start, partitionStartSector)
+	}
+
+	wantSectors := uint32(diskSize/partitionSectorSize) - partitionStartSector
+	if partition.Size != wantSectors {
+		t.Fatalf("partition size = %d sectors, want %d", partition.Size, wantSectors)
+	}
+}
+
+func TestRepartitionDeviceCreatesSinglePartition(t *testing.T) {
+	imagePath := createFormatTestImage(t, 64*1024*1024)
+
+	if err := repartitionDevice(context.Background(), imagePath, mbr.Fat32LBA); err != nil {
+		t.Fatalf("repartitionDevice() error = %v", err)
+	}
+
+	disk, err := diskfs.Open(imagePath, diskfs.WithOpenMode(diskfs.ReadOnly), diskfs.WithSectorSize(diskfs.SectorSize512))
+	if err != nil {
+		t.Fatalf("Open partitioned image: %v", err)
+	}
+	defer disk.Backend.Close()
+
+	table, err := disk.GetPartitionTable()
+	if err != nil {
+		t.Fatalf("GetPartitionTable() error = %v", err)
+	}
+	partitions := table.GetPartitions()
+	if len(partitions) != 4 {
+		t.Fatalf("partition table entries = %d, want 4", len(partitions))
+	}
+	if partitions[0].GetStart() != int64(partitionStartSector)*partitionSectorSize {
+		t.Fatalf("partition start = %d, want %d", partitions[0].GetStart(), int64(partitionStartSector)*partitionSectorSize)
+	}
+	wantSize := (int64(64*1024*1024)/partitionSectorSize - int64(partitionStartSector)) * partitionSectorSize
+	if partitions[0].GetSize() != wantSize {
+		t.Fatalf("partition size = %d, want %d", partitions[0].GetSize(), wantSize)
+	}
+	for i, partition := range partitions[1:] {
+		if partition.GetSize() != 0 {
+			t.Fatalf("extra partition %d size = %d, want 0", i+2, partition.GetSize())
+		}
 	}
 }
 

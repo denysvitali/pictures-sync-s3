@@ -14,15 +14,19 @@ import (
 	"time"
 	"unsafe"
 
+	diskfs "github.com/diskfs/go-diskfs"
 	"github.com/diskfs/go-diskfs/backend"
 	"github.com/diskfs/go-diskfs/backend/file"
 	"github.com/diskfs/go-diskfs/filesystem/fat32"
+	"github.com/diskfs/go-diskfs/partition/mbr"
 	"golang.org/x/sys/unix"
 )
 
 const formatTimeout = 2 * time.Minute
 const sdxcExFATThreshold = 32 * 1024 * 1024 * 1024
 const signatureWipeBytes int64 = 4 * 1024 * 1024
+const partitionStartSector uint32 = 2048
+const partitionSectorSize int64 = 512
 
 var validVolumeLabelPattern = regexp.MustCompile(`^[A-Za-z0-9 _-]{1,11}$`)
 
@@ -54,7 +58,7 @@ func ValidateVolumeLabel(label string) error {
 	return nil
 }
 
-// FormatCurrentDevice unmounts and formats the currently mounted SD-card partition.
+// FormatCurrentDevice unmounts the current SD card, recreates one full-card partition, and formats it.
 func (m *Monitor) FormatCurrentDevice(ctx context.Context, devicePath, label string) error {
 	if !IsSupportedDevicePath(devicePath) {
 		return fmt.Errorf("unsupported SD card device path: %s", devicePath)
@@ -93,7 +97,7 @@ func (m *Monitor) FormatCurrentDevice(ctx context.Context, devicePath, label str
 		return err
 	}
 
-	log.Printf("Formatted SD card partition %s as %s", devicePath, filesystemType)
+	log.Printf("Repartitioned SD card and formatted %s as %s", devicePath, filesystemType)
 	return nil
 }
 
@@ -135,7 +139,12 @@ func formatFAT32Device(ctx context.Context, devicePath, label string) (err error
 }
 
 func formatDevice(ctx context.Context, devicePath, label string) (string, error) {
-	size, err := deviceSizeForFormat(ctx, devicePath)
+	target, err := formatTargetForDevicePath(devicePath)
+	if err != nil {
+		return "", err
+	}
+
+	size, err := deviceSizeForFormat(ctx, target.diskPath)
 	if err != nil {
 		return "", err
 	}
@@ -145,30 +154,182 @@ func formatDevice(ctx context.Context, devicePath, label string) (string, error)
 		if !ok {
 			return "", fmt.Errorf("format SD card: exFAT formatter not found; cards larger than 32 GiB need exFAT for reliable camera/device compatibility")
 		}
-		if _, err := prepareDeviceForFormat(ctx, devicePath); err != nil {
+		if err := ensureNoMountedPartitions(target.diskPath); err != nil {
 			return "", err
 		}
-		if err := runMkfsExFAT(ctx, formatter, label, devicePath); err != nil {
+		if err := repartitionDevice(ctx, target.diskPath, mbr.NTFS); err != nil {
+			return "", err
+		}
+		if err := waitForPartitionDevice(ctx, target.partitionPath); err != nil {
+			return "", err
+		}
+		if _, err := prepareDeviceForFormat(ctx, target.partitionPath); err != nil {
+			return "", err
+		}
+		if err := runMkfsExFAT(ctx, formatter, label, target.partitionPath); err != nil {
 			return "", fmt.Errorf("format SD card as exFAT: %w", err)
 		}
 		return "exFAT", nil
 	}
 
-	if _, err := prepareDeviceForFormat(ctx, devicePath); err != nil {
+	if err := ensureNoMountedPartitions(target.diskPath); err != nil {
+		return "", err
+	}
+	if err := repartitionDevice(ctx, target.diskPath, mbr.Fat32LBA); err != nil {
+		return "", err
+	}
+	if err := waitForPartitionDevice(ctx, target.partitionPath); err != nil {
+		return "", err
+	}
+	if _, err := prepareDeviceForFormat(ctx, target.partitionPath); err != nil {
 		return "", err
 	}
 
 	if formatter, ok := findFormatter("mkfs.vfat", "mkfs.fat"); ok {
-		if err := runMkfs(ctx, formatter, fat32Args(label, devicePath)); err != nil {
+		if err := runMkfs(ctx, formatter, fat32Args(label, target.partitionPath)); err != nil {
 			return "", fmt.Errorf("format SD card as FAT32: %w", err)
 		}
 		return "FAT32", nil
 	}
 
-	if err := formatFAT32Device(ctx, devicePath, label); err != nil {
+	if err := formatFAT32Device(ctx, target.partitionPath, label); err != nil {
 		return "", err
 	}
 	return "FAT32", nil
+}
+
+type formatTarget struct {
+	diskPath      string
+	partitionPath string
+}
+
+func formatTargetForDevicePath(devicePath string) (formatTarget, error) {
+	if !IsSupportedDevicePath(devicePath) {
+		return formatTarget{}, fmt.Errorf("unsupported SD card device path: %s", devicePath)
+	}
+
+	baseName := filepath.Base(devicePath)
+	diskName, partitionName := extractDiskAndPartitionName(baseName)
+	if partitionName != baseName {
+		return formatTarget{}, fmt.Errorf("unsupported SD card device path: %s", devicePath)
+	}
+
+	return formatTarget{
+		diskPath:      filepath.Join(filepath.Dir(devicePath), diskName),
+		partitionPath: filepath.Join(filepath.Dir(devicePath), firstPartitionName(diskName)),
+	}, nil
+}
+
+func firstPartitionName(diskName string) string {
+	if strings.HasPrefix(diskName, "mmcblk") || strings.HasPrefix(diskName, "nvme") {
+		return diskName + "p1"
+	}
+	return diskName + "1"
+}
+
+func ensureNoMountedPartitions(diskPath string) error {
+	mounts, err := os.ReadFile("/proc/mounts")
+	if err != nil {
+		return fmt.Errorf("format SD card: read mounts: %w", err)
+	}
+
+	diskName := filepath.Base(diskPath)
+	for _, line := range strings.Split(string(mounts), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		deviceName := filepath.Base(fields[0])
+		if isPartitionName(diskName, deviceName) {
+			return fmt.Errorf("format SD card: partition %s is still mounted at %s", fields[0], fields[1])
+		}
+	}
+	return nil
+}
+
+func repartitionDevice(ctx context.Context, diskPath string, partitionType mbr.Type) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("partition SD card: %w", err)
+	}
+
+	disk, err := diskfs.Open(diskPath, diskfs.WithOpenMode(diskfs.ReadWriteExclusive), diskfs.WithSectorSize(diskfs.SectorSize512))
+	if err != nil {
+		return fmt.Errorf("partition SD card: open disk: %w", err)
+	}
+	defer disk.Backend.Close()
+
+	osFile, err := disk.Backend.Sys()
+	if err != nil {
+		return fmt.Errorf("partition SD card: access disk file: %w", err)
+	}
+	if err := wipeFilesystemSignatures(osFile, disk.Size); err != nil {
+		return err
+	}
+	if err := osFile.Sync(); err != nil {
+		return fmt.Errorf("partition SD card: sync wiped signatures: %w", err)
+	}
+
+	table, err := singlePartitionTable(disk.Size, partitionType)
+	if err != nil {
+		return err
+	}
+	if err := disk.Partition(table); err != nil {
+		return fmt.Errorf("partition SD card: write partition table: %w", err)
+	}
+	if err := osFile.Sync(); err != nil {
+		return fmt.Errorf("partition SD card: sync partition table: %w", err)
+	}
+	flushBlockDeviceBuffers(osFile)
+	return nil
+}
+
+func singlePartitionTable(diskSize int64, partitionType mbr.Type) (*mbr.Table, error) {
+	totalSectors := diskSize / partitionSectorSize
+	if totalSectors <= int64(partitionStartSector) {
+		return nil, fmt.Errorf("partition SD card: disk too small for aligned partition")
+	}
+
+	partitionSectors := totalSectors - int64(partitionStartSector)
+	if partitionSectors > math.MaxUint32 {
+		return nil, fmt.Errorf("partition SD card: disk too large for MBR partition table")
+	}
+
+	return &mbr.Table{
+		LogicalSectorSize:  int(partitionSectorSize),
+		PhysicalSectorSize: int(partitionSectorSize),
+		Partitions: []*mbr.Partition{
+			{
+				Index: 1,
+				Type:  partitionType,
+				Start: partitionStartSector,
+				Size:  uint32(partitionSectors),
+			},
+		},
+	}, nil
+}
+
+func waitForPartitionDevice(ctx context.Context, partitionPath string) error {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+
+	for {
+		if _, err := os.Stat(partitionPath); err == nil {
+			return nil
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("format SD card: check partition device: %w", err)
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("format SD card: wait for partition device: %w", ctx.Err())
+		case <-deadline.C:
+			return fmt.Errorf("format SD card: partition device %s did not appear", partitionPath)
+		case <-ticker.C:
+		}
+	}
 }
 
 func deviceSizeForFormat(ctx context.Context, devicePath string) (int64, error) {
