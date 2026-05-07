@@ -92,6 +92,7 @@ export async function apiRequest(path, options = {}) {
 }
 
 export const getStatus = (d) => apiRequest('/api/status', { deviceUrl: d })
+export const getWSToken = (d) => apiRequest('/api/ws-token', { deviceUrl: d })
 export const getVersion = (d) => apiRequest('/api/version', { deviceUrl: d })
 export const getHistory = (d) => apiRequest('/api/history', { deviceUrl: d })
 export const getWifiStatus = (d) => apiRequest('/api/wifi/status', { deviceUrl: d })
@@ -168,3 +169,16 @@ export const getFileViewUrl = (d, filePath) =>
   `${normalizeBaseUrl(d)}/api/files/view?path=${encodeURIComponent(filePath || '')}`
 export const getThumbnailUrl = (d, filePath) =>
   `${normalizeBaseUrl(d)}/api/thumbnail?path=${encodeURIComponent(filePath || '')}`
+
+export function getWebSocketUrl(deviceUrl) {
+  const base = normalizeBaseUrl(deviceUrl)
+  if (!base) {
+    throw new Error('Device URL is not configured. Set a device URL first.')
+  }
+  const url = new URL(base)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  url.pathname = '/ws'
+  url.search = ''
+  url.hash = ''
+  return url.toString()
+}

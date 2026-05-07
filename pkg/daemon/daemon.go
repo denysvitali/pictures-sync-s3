@@ -457,6 +457,9 @@ func (s *Service) handleRedetectSDCardCommand(ctx context.Context) daemoncontrol
 	if err := s.stateMgr.SetSDCard(true, s.monitor.GetMountPath()); err != nil {
 		log.Printf("Warning: Failed to update SD card state after re-detect: %v", err)
 	}
+	if err := s.stateMgr.SetSDCardDevice(s.monitor.GetCurrentDevice()); err != nil {
+		log.Printf("Warning: Failed to update SD card device after re-detect: %v", err)
+	}
 	if err := s.stateMgr.SetStatus(state.StatusDetected); err != nil {
 		log.Printf("Warning: Failed to update status after re-detect: %v", err)
 	}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -144,6 +145,46 @@ func (m *Manager) SetSDCard(mounted bool, path string) error {
 	m.mu.Lock()
 	m.currentState.SDCardMounted = mounted
 	m.currentState.SDCardPath = path
+	if !mounted {
+		m.currentState.SDCardDevicePath = ""
+		m.currentState.SDCardPhotoCount = 0
+		m.currentState.SDCardPhotoBytes = 0
+	}
+
+	if err := m.save(); err != nil {
+		m.mu.Unlock()
+		return err
+	}
+
+	stateCopy := m.currentState
+	m.mu.Unlock()
+
+	m.notifyListenersAsync(stateCopy)
+	return nil
+}
+
+// SetSDCardDevice records the currently mounted SD-card device path.
+func (m *Manager) SetSDCardDevice(devicePath string) error {
+	m.mu.Lock()
+	m.currentState.SDCardDevicePath = devicePath
+
+	if err := m.save(); err != nil {
+		m.mu.Unlock()
+		return err
+	}
+
+	stateCopy := m.currentState
+	m.mu.Unlock()
+
+	m.notifyListenersAsync(stateCopy)
+	return nil
+}
+
+// SetSDCardPhotoSummary records the photo count found on the currently mounted card.
+func (m *Manager) SetSDCardPhotoSummary(count, bytes int64) error {
+	m.mu.Lock()
+	m.currentState.SDCardPhotoCount = count
+	m.currentState.SDCardPhotoBytes = bytes
 
 	if err := m.save(); err != nil {
 		m.mu.Unlock()
@@ -203,12 +244,13 @@ func (m *Manager) StartSync(cardID string, totalFiles, totalBytes int64) (*SyncR
 	}
 
 	record := &SyncRecord{
-		ID:         fmt.Sprintf("%d", time.Now().Unix()),
-		StartTime:  time.Now(),
-		Status:     "syncing",
-		FilesTotal: totalFiles,
-		BytesTotal: totalBytes,
-		CardID:     cardID,
+		ID:            fmt.Sprintf("%d", time.Now().Unix()),
+		StartTime:     time.Now(),
+		Status:        "syncing",
+		ProgressPhase: "preparing",
+		FilesTotal:    totalFiles,
+		BytesTotal:    totalBytes,
+		CardID:        cardID,
 	}
 
 	m.currentState.CurrentSync = record
@@ -245,6 +287,7 @@ func (m *Manager) UpdateSyncProgress(filesSynced, bytesSynced int64, currentFile
 	m.currentState.CurrentSync.CurrentFileSize = currentFileSize
 	m.currentState.CurrentSync.TransferSpeed = transferSpeed
 	m.currentState.CurrentSync.ETA = eta
+	m.currentState.CurrentSync.ProgressPhase = progressPhase(currentFile, transferSpeed)
 
 	// Throttle disk writes - only save every progressSaveDelay seconds
 	shouldSave := time.Since(m.lastProgressSave) >= m.progressSaveDelay
@@ -275,6 +318,13 @@ func (m *Manager) FinishSync(success bool, err error) error {
 	m.currentState.CurrentSync.EndTime = time.Now()
 	if success {
 		m.currentState.CurrentSync.Status = "success"
+		m.currentState.CurrentSync.ProgressPhase = "completed"
+		m.currentState.CurrentSync.FilesSynced = m.currentState.CurrentSync.FilesTotal
+		m.currentState.CurrentSync.BytesSynced = m.currentState.CurrentSync.BytesTotal
+		m.currentState.CurrentSync.CurrentFile = ""
+		m.currentState.CurrentSync.CurrentFileSize = 0
+		m.currentState.CurrentSync.TransferSpeed = 0
+		m.currentState.CurrentSync.ETA = ""
 		m.currentState.Status = StatusSuccess
 		m.currentState.Error = ""
 	} else {
@@ -306,6 +356,17 @@ func (m *Manager) FinishSync(success bool, err error) error {
 
 	m.notifyListenersAsync(stateCopy)
 	return nil
+}
+
+func progressPhase(currentFile string, transferSpeed float64) string {
+	switch {
+	case strings.HasPrefix(currentFile, "[Checking]"):
+		return "checking"
+	case transferSpeed > 0:
+		return "uploading"
+	default:
+		return "preparing"
+	}
 }
 
 // GetHistory returns the sync history

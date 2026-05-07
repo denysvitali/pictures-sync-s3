@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/diskfs/go-diskfs"
@@ -137,6 +138,58 @@ func TestFormatFAT32DeviceHonorsCanceledContext(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Error does not wrap context.Canceled: %v", err)
 	}
+}
+
+func TestFormatDeviceRejectsLargeCardWithoutExFATFormatter(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	imagePath := createFormatTestImage(t, sdxcExFATThreshold+1024)
+
+	err := formatDeviceExpectError(context.Background(), imagePath, "")
+	if err == nil {
+		t.Fatal("Expected error")
+	}
+	if !strings.Contains(err.Error(), "exFAT formatter not found") {
+		t.Fatalf("Expected missing exFAT formatter error, got %v", err)
+	}
+}
+
+func TestPrepareDeviceForFormatWipesStaleSignatures(t *testing.T) {
+	imagePath := createFormatTestImage(t, 16*1024*1024)
+	f, err := os.OpenFile(imagePath, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("Open image: %v", err)
+	}
+	if _, err := f.WriteAt([]byte("EXFAT   "), 3); err != nil {
+		_ = f.Close()
+		t.Fatalf("Write start signature: %v", err)
+	}
+	if _, err := f.WriteAt([]byte("EXFATBACKUP"), 16*1024*1024-1024); err != nil {
+		_ = f.Close()
+		t.Fatalf("Write end signature: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("Close image: %v", err)
+	}
+
+	if _, err := prepareDeviceForFormat(context.Background(), imagePath); err != nil {
+		t.Fatalf("prepareDeviceForFormat() error = %v", err)
+	}
+
+	data, err := os.ReadFile(imagePath)
+	if err != nil {
+		t.Fatalf("Read image: %v", err)
+	}
+	if strings.Contains(string(data[:4096]), "EXFAT") {
+		t.Fatal("Start signature was not wiped")
+	}
+	if strings.Contains(string(data[len(data)-4096:]), "EXFATBACKUP") {
+		t.Fatal("End signature was not wiped")
+	}
+}
+
+func formatDeviceExpectError(ctx context.Context, devicePath, label string) error {
+	_, err := formatDevice(ctx, devicePath, label)
+	return err
 }
 
 func createFormatTestImage(t *testing.T, size int64) string {

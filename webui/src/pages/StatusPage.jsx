@@ -3,6 +3,8 @@ import { useDevice } from '../DeviceContext.jsx'
 import { useToast } from '../components/Toast.jsx'
 import {
   getStatus,
+  getWSToken,
+  getWebSocketUrl,
   getHistory,
   getDevices,
   startSync,
@@ -100,6 +102,16 @@ function getProgressPercent(sync) {
   return Math.min(100, Math.round((sync.files_synced / sync.files_total) * 100))
 }
 
+function getProgressLabel(sync) {
+  if (!sync) return ''
+  const phase = sync.progress_phase || 'preparing'
+  const current = sync.files_synced || 0
+  const total = sync.files_total || 0
+  if (phase === 'checking') return `Checking ${current} of ${total} files`
+  if (phase === 'uploading') return `Uploading ${current} of ${total} files`
+  return `${current} of ${total} files`
+}
+
 function SystemStatusCard({ status }) {
   const statusConf = SYNC_STATUS_CONFIG[status.status] || SYNC_STATUS_CONFIG.idle
 
@@ -118,7 +130,7 @@ function SystemStatusCard({ status }) {
           <div className="bg-surface-900/50 rounded-lg p-3">
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs text-surface-400">
-                {status.current_sync.files_synced || 0} of {status.current_sync.files_total || 0} files
+                {getProgressLabel(status.current_sync)}
               </span>
               <span className="text-xs font-medium text-brand-400">
                 {getProgressPercent(status.current_sync)}%
@@ -137,7 +149,7 @@ function SystemStatusCard({ status }) {
             )}
             <div className="grid grid-cols-2 gap-2 mt-2 text-xs text-surface-500">
               <p>
-                Upload: {formatSpeed(status.current_sync.transfer_speed)}
+                Speed: {formatSpeed(status.current_sync.transfer_speed)}
               </p>
               <p className="text-right">
                 ETA: {status.current_sync.eta || '--'}
@@ -171,14 +183,10 @@ function SystemStatusCard({ status }) {
           />
         </div>
 
-        {/* Current remote */}
-        {status.last_sync && (
-          <div className="flex items-center gap-2 text-sm text-surface-300">
-            <Icon name="cloud" className="w-4 h-4 text-surface-400" />
-            <span className="truncate">
-              {status.last_sync.card_id ? `Card ${status.last_sync.card_id}` : 'No card data'}
-            </span>
-          </div>
+        {status.last_sync && !status.sdcard_mounted && (
+          <p className="text-xs text-surface-500">
+            Last sync {formatTimeAgo(status.last_sync.end_time || status.last_sync.start_time)}
+          </p>
         )}
       </div>
     </Card>
@@ -222,12 +230,12 @@ function DeviceInfoCard({
     ? (selectedDevice?.device_path || deviceList[0]?.device_path || '')
     : ''
   const photoCount = hasCard
-    ? (status.current_sync?.files_total || status.last_sync?.files_total || 0)
+    ? (status.current_sync?.files_total || status.sdcard_photo_count || 0)
     : 0
 
   const deviceName = selectedDevice?.volume_label || selectedDevice?.device_name || (hasCard ? 'SD Card' : null)
   const deviceSize = selectedDevice?.size_human || (selectedDevice?.size ? formatBytes(selectedDevice.size) : null)
-  const devicePath = selectedDevice?.device_path || status.sdcard_path || null
+  const devicePath = selectedDevice?.device_path || status.sdcard_device_path || null
   const canFormat = hasCard && devicePath && status.status !== 'syncing'
 
   return (
@@ -453,6 +461,9 @@ export default function StatusPage() {
   const [error, setError] = useState(null)
   const consecutiveErrorsRef = useRef(0)
   const timerRef = useRef(null)
+  const wsReconnectRef = useRef(null)
+  const lastSyncIdRef = useRef(null)
+  const lastMountedRef = useRef(null)
 
   const fetchData = useCallback(async (isAutoRefresh = false) => {
     if (!deviceUrl) return
@@ -488,6 +499,87 @@ export default function StatusPage() {
   useEffect(() => {
     fetchData()
   }, [fetchData])
+
+  useEffect(() => {
+    if (!deviceUrl) return undefined
+
+    let cancelled = false
+    let reconnectAttempts = 0
+    let socket = null
+    lastSyncIdRef.current = null
+    lastMountedRef.current = null
+
+    const refreshHistory = async (syncID) => {
+      if (!syncID || lastSyncIdRef.current === syncID) return
+      lastSyncIdRef.current = syncID
+      try {
+        const historyData = await getHistory(deviceUrl)
+        if (!cancelled) setHistory(Array.isArray(historyData) ? historyData : [])
+      } catch {
+        // Status updates are still useful if history refresh fails.
+      }
+    }
+
+    const refreshDevices = async (mounted) => {
+      if (lastMountedRef.current === mounted) return
+      lastMountedRef.current = mounted
+      try {
+        const devicesData = await getDevices(deviceUrl)
+        if (!cancelled) setDevices(Array.isArray(devicesData) ? devicesData : [])
+      } catch {
+        if (!cancelled) setDevices([])
+      }
+    }
+
+    const scheduleReconnect = () => {
+      if (cancelled) return
+      const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 15000)
+      reconnectAttempts += 1
+      wsReconnectRef.current = window.setTimeout(connect, delay)
+    }
+
+    const connect = async () => {
+      try {
+        const tokenData = await getWSToken(deviceUrl)
+        if (cancelled) return
+
+        socket = new WebSocket(getWebSocketUrl(deviceUrl))
+        socket.onopen = () => {
+          reconnectAttempts = 0
+          socket.send(JSON.stringify({ type: 'auth', token: tokenData.ws_token }))
+        }
+        socket.onmessage = (event) => {
+          let message = null
+          try {
+            message = JSON.parse(event.data)
+          } catch {
+            return
+          }
+
+          if (message.type === 'state' && message.data) {
+            setStatus(message.data)
+            setError(null)
+            setLoading(false)
+            consecutiveErrorsRef.current = 0
+            refreshHistory(message.data.last_sync?.id)
+            refreshDevices(Boolean(message.data.sdcard_mounted))
+          }
+        }
+        socket.onclose = scheduleReconnect
+        socket.onerror = () => socket?.close()
+      } catch {
+        scheduleReconnect()
+      }
+    }
+
+    connect()
+
+    return () => {
+      cancelled = true
+      if (wsReconnectRef.current) window.clearTimeout(wsReconnectRef.current)
+      if (socket) socket.close()
+    }
+  }, [deviceUrl])
 
   // Auto-refresh while syncing with exponential backoff on errors
   useEffect(() => {

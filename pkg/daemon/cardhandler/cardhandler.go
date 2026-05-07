@@ -68,6 +68,7 @@ func (h *Handler) HandleInserted(event sdmonitor.Event) {
 
 	// Update state
 	h.stateMgr.SetSDCard(true, event.MountPath)
+	h.stateMgr.SetSDCardDevice(event.DevPath)
 	h.stateMgr.SetStatus(state.StatusDetected)
 
 	// Atomic check-and-set to prevent race condition:
@@ -115,6 +116,7 @@ func (h *Handler) HandleManualSync(devicePath string) error {
 	log.Printf("Manual sync accepted by daemon for mounted SD card at: %s", mountPath)
 
 	h.stateMgr.SetSDCard(true, mountPath)
+	h.stateMgr.SetSDCardDevice(device)
 	h.stateMgr.SetStatus(state.StatusDetected)
 	h.syncStarting = true
 
@@ -165,6 +167,7 @@ func (h *Handler) processSyncOperation(event sdmonitor.Event) {
 
 	// Check for DCIM directory
 	if !sdmonitor.HasDCIM(event.MountPath) {
+		h.stateMgr.SetSDCardPhotoSummary(0, 0)
 		h.handleNoDCIM(event.MountPath)
 		return
 	}
@@ -179,6 +182,7 @@ func (h *Handler) processSyncOperation(event sdmonitor.Event) {
 	}
 
 	log.Printf("Found %d photos (%.2f MB)", totalFiles, float64(totalBytes)/(1024*1024))
+	h.stateMgr.SetSDCardPhotoSummary(int64(totalFiles), totalBytes)
 
 	if totalFiles == 0 {
 		log.Println("No photos found on SD card")

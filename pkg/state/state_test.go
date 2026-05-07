@@ -109,6 +109,38 @@ func TestUpdateSyncProgress(t *testing.T) {
 	if state.CurrentSync.ETA != eta {
 		t.Errorf("ETA = %v, want %v", state.CurrentSync.ETA, eta)
 	}
+	if state.CurrentSync.ProgressPhase != "uploading" {
+		t.Errorf("ProgressPhase = %v, want uploading", state.CurrentSync.ProgressPhase)
+	}
+}
+
+func TestSetSDCardClearsCurrentCardSummaryOnRemoval(t *testing.T) {
+	mgr := setupTestManager(t)
+
+	if err := mgr.SetSDCard(true, "/mnt/sdcard"); err != nil {
+		t.Fatalf("SetSDCard mounted failed: %v", err)
+	}
+	if err := mgr.SetSDCardDevice("/dev/sda1"); err != nil {
+		t.Fatalf("SetSDCardDevice failed: %v", err)
+	}
+	if err := mgr.SetSDCardPhotoSummary(7278, 241986*1024*1024); err != nil {
+		t.Fatalf("SetSDCardPhotoSummary failed: %v", err)
+	}
+
+	if err := mgr.SetSDCard(false, ""); err != nil {
+		t.Fatalf("SetSDCard unmounted failed: %v", err)
+	}
+
+	current := mgr.GetState()
+	if current.SDCardMounted {
+		t.Fatal("SDCardMounted = true, want false")
+	}
+	if current.SDCardDevicePath != "" {
+		t.Fatalf("SDCardDevicePath = %q, want cleared", current.SDCardDevicePath)
+	}
+	if current.SDCardPhotoCount != 0 || current.SDCardPhotoBytes != 0 {
+		t.Fatalf("SD card photo summary = %d/%d, want cleared", current.SDCardPhotoCount, current.SDCardPhotoBytes)
+	}
 }
 
 func TestSetErrorPersistsVisibleStateError(t *testing.T) {
@@ -327,8 +359,8 @@ func TestFinishSync(t *testing.T) {
 		t.Fatalf("StartSync failed: %v", err)
 	}
 
-	// Update progress to completion
-	mgr.UpdateSyncProgress(100, 1024*1024*50, "IMG_100.jpg", 1024*1024, 500000, "0s")
+	// Update partial progress; a successful finish should still mark totals complete.
+	mgr.UpdateSyncProgress(25, 1024*1024*12, "IMG_025.jpg", 1024*1024, 500000, "2m")
 
 	// Finish sync successfully
 	err = mgr.FinishSync(true, nil)
@@ -349,6 +381,12 @@ func TestFinishSync(t *testing.T) {
 	}
 	if state.LastSync.Status != "success" {
 		t.Errorf("LastSync.Status = %v, want success", state.LastSync.Status)
+	}
+	if state.LastSync.FilesSynced != state.LastSync.FilesTotal {
+		t.Errorf("LastSync.FilesSynced = %v, want total %v", state.LastSync.FilesSynced, state.LastSync.FilesTotal)
+	}
+	if state.LastSync.BytesSynced != state.LastSync.BytesTotal {
+		t.Errorf("LastSync.BytesSynced = %v, want total %v", state.LastSync.BytesSynced, state.LastSync.BytesTotal)
 	}
 
 	// Check history

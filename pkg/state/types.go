@@ -19,6 +19,7 @@ type SyncRecord struct {
 	StartTime       time.Time `json:"start_time"`
 	EndTime         time.Time `json:"end_time"`
 	Status          string    `json:"status"`
+	ProgressPhase   string    `json:"progress_phase,omitempty"`
 	FilesTotal      int64     `json:"files_total"`
 	FilesSynced     int64     `json:"files_synced"`
 	BytesTotal      int64     `json:"bytes_total"`
@@ -52,6 +53,9 @@ type CurrentState struct {
 	LastSync          *SyncRecord  `json:"last_sync,omitempty"`
 	SDCardMounted     bool         `json:"sdcard_mounted"`
 	SDCardPath        string       `json:"sdcard_path,omitempty"`
+	SDCardDevicePath  string       `json:"sdcard_device_path,omitempty"`
+	SDCardPhotoCount  int64        `json:"sdcard_photo_count"`
+	SDCardPhotoBytes  int64        `json:"sdcard_photo_bytes"`
 	AvailableDevices  []DeviceInfo `json:"available_devices,omitempty"`
 	NeedsDeviceSelect bool         `json:"needs_device_select"`
 }
