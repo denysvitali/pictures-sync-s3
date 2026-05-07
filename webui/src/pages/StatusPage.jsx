@@ -126,6 +126,42 @@ function getProgressLabel(sync) {
   return `${current} of ${total} files`
 }
 
+function isSameSync(prevSync, nextSync) {
+  if (!prevSync || !nextSync) return false
+  if (prevSync.id && nextSync.id) return prevSync.id === nextSync.id
+  if (prevSync.start_time && nextSync.start_time) return prevSync.start_time === nextSync.start_time
+  return Boolean(
+    prevSync.card_id &&
+    nextSync.card_id &&
+    prevSync.card_id === nextSync.card_id &&
+    prevSync.files_total === nextSync.files_total
+  )
+}
+
+function mergeStatusProgress(prevStatus, nextStatus) {
+  if (!prevStatus || !nextStatus) return nextStatus
+
+  const prevSync = prevStatus.current_sync
+  const nextSync = nextStatus.current_sync
+  if (nextStatus.status !== 'syncing' || !isSameSync(prevSync, nextSync)) {
+    return nextStatus
+  }
+
+  const prevFiles = Number(prevSync.files_synced || 0)
+  const nextFiles = Number(nextSync.files_synced || 0)
+  const prevBytes = Number(prevSync.bytes_synced || 0)
+  const nextBytes = Number(nextSync.bytes_synced || 0)
+
+  if (nextFiles < prevFiles || nextBytes < prevBytes) {
+    return {
+      ...nextStatus,
+      current_sync: prevSync,
+    }
+  }
+
+  return nextStatus
+}
+
 function SystemStatusCard({ status }) {
   const statusConf = SYNC_STATUS_CONFIG[status.status] || SYNC_STATUS_CONFIG.idle
 
@@ -523,7 +559,7 @@ export default function StatusPage() {
         getStatus(deviceUrl),
         getHistory(deviceUrl),
       ])
-      setStatus(statusData)
+      setStatus((currentStatus) => mergeStatusProgress(currentStatus, statusData))
       setHistory(Array.isArray(historyData) ? historyData : [])
       try {
         const devicesData = await getDevices(deviceUrl)
@@ -606,7 +642,7 @@ export default function StatusPage() {
           }
 
           if (message.type === 'state' && message.data) {
-            setStatus(message.data)
+            setStatus((currentStatus) => mergeStatusProgress(currentStatus, message.data))
             setError(null)
             setLoading(false)
             consecutiveErrorsRef.current = 0
