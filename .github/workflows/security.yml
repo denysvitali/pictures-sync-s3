@@ -387,10 +387,11 @@ jobs:
       - name: Check for data races
         run: |
           if grep -q "WARNING: DATA RACE" race-report.txt; then
-            echo "::warning::Data races detected — see race-report.txt artifact"
-          else
-            echo "No data races detected"
+            echo "Data races detected!"
+            cat race-report.txt
+            exit 1
           fi
+          echo "No data races detected"
 
       - name: Run tests with memory sanitizer
         run: |
