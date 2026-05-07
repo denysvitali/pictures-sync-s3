@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/denysvitali/pictures-sync-s3/pkg/auth"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 	"github.com/denysvitali/pictures-sync-s3/pkg/utils"
 	"github.com/gokrazy/updater"
@@ -823,15 +824,9 @@ func isLoopbackHost(host string) bool {
 }
 
 func defaultUpdateURLFromPassword() string {
-	password := "photo-backup"
-	if data, err := os.ReadFile("/etc/gokr-pw.txt"); err == nil {
-		if trimmed := strings.TrimSpace(string(data)); trimmed != "" {
-			password = trimmed
-		}
-	}
 	u := &url.URL{
 		Scheme: "http",
-		User:   url.UserPassword("gokrazy", password),
+		User:   url.UserPassword("gokrazy", auth.CurrentGokrazyPassword("photo-backup")),
 		Host:   "127.0.0.1",
 		Path:   "/",
 	}

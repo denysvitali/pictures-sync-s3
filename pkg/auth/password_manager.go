@@ -11,9 +11,11 @@ import (
 
 const (
 	// #nosec G101 -- this is a well-known gokrazy system file path, not a credential
-	DefaultGokrazyPasswordFile = "/etc/gokr-pw.txt"
-	MinPasswordLength          = 8
-	MaxPasswordLength          = 256
+	DefaultGokrazyPasswordFile = "/perm/gokr-pw.txt"
+	// #nosec G101 -- this is a well-known gokrazy system file path, not a credential
+	RootGokrazyPasswordFile = "/etc/gokr-pw.txt"
+	MinPasswordLength       = 8
+	MaxPasswordLength       = 256
 )
 
 type PasswordManager struct {
@@ -53,7 +55,7 @@ func (m *PasswordManager) Path() string {
 }
 
 func (m *PasswordManager) Load() error {
-	data, err := os.ReadFile(m.path)
+	data, err := readPasswordFile(m.path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			m.mu.Lock()
@@ -73,6 +75,30 @@ func (m *PasswordManager) Load() error {
 	m.password = password
 	m.mu.Unlock()
 	return nil
+}
+
+func readPasswordFile(path string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	if err == nil || !os.IsNotExist(err) || path != DefaultGokrazyPasswordFile {
+		return data, err
+	}
+	return os.ReadFile(RootGokrazyPasswordFile)
+}
+
+func CurrentGokrazyPassword(fallback string) string {
+	if strings.TrimSpace(fallback) == "" {
+		fallback = "dev"
+	}
+	for _, path := range []string{DefaultGokrazyPasswordFile, RootGokrazyPasswordFile} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		if password := strings.TrimSpace(string(data)); password != "" {
+			return password
+		}
+	}
+	return fallback
 }
 
 func (m *PasswordManager) ChangePassword(currentPassword, newPassword string) error {
