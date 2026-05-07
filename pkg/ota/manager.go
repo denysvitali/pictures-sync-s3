@@ -38,7 +38,15 @@ const (
 )
 
 type Installer interface {
-	InstallRoot(ctx context.Context, r io.Reader) error
+	InstallRoot(ctx context.Context, r io.Reader, progress InstallProgressFunc) error
+}
+
+type InstallProgressFunc func(InstallProgress)
+
+type InstallProgress struct {
+	Phase           string
+	Message         string
+	ProgressPercent float64
 }
 
 type GokrazyInstaller struct {
@@ -47,7 +55,7 @@ type GokrazyInstaller struct {
 	InsecureSkipVerify bool
 }
 
-func (i GokrazyInstaller) InstallRoot(ctx context.Context, r io.Reader) error {
+func (i GokrazyInstaller) InstallRoot(ctx context.Context, r io.Reader, progress InstallProgressFunc) error {
 	baseURL := normalizeUpdateBaseURL(i.BaseURL)
 	if baseURL == "" {
 		baseURL = DefaultUpdateURL
@@ -59,12 +67,15 @@ func (i GokrazyInstaller) InstallRoot(ctx context.Context, r io.Reader) error {
 	if err != nil {
 		return fmt.Errorf("connect to gokrazy updater: %w", err)
 	}
+	reportInstallProgress(progress, "flashing", "Downloading and flashing OTA image", 10)
 	if err := target.StreamTo(ctx, "root", r); err != nil {
 		return fmt.Errorf("stream root image: %w", err)
 	}
+	reportInstallProgress(progress, "switching", "Switching root partition", 90)
 	if err := target.Switch(ctx); err != nil {
 		return fmt.Errorf("switch root partition: %w", err)
 	}
+	reportInstallProgress(progress, "rebooting", "Requesting reboot", 95)
 	if err := target.Reboot(ctx); err != nil {
 		return fmt.Errorf("reboot: %w", err)
 	}
@@ -94,15 +105,20 @@ type Manager struct {
 }
 
 type Status struct {
-	State       string    `json:"state"`
-	Message     string    `json:"message,omitempty"`
-	Release     string    `json:"release,omitempty"`
-	Asset       string    `json:"asset,omitempty"`
-	AssetURL    string    `json:"asset_url,omitempty"`
-	PublishedAt time.Time `json:"published_at,omitempty"`
-	StartedAt   time.Time `json:"started_at,omitempty"`
-	FinishedAt  time.Time `json:"finished_at,omitempty"`
-	Error       string    `json:"error,omitempty"`
+	State            string    `json:"state"`
+	Phase            string    `json:"phase,omitempty"`
+	Message          string    `json:"message,omitempty"`
+	Release          string    `json:"release,omitempty"`
+	Asset            string    `json:"asset,omitempty"`
+	AssetURL         string    `json:"asset_url,omitempty"`
+	PublishedAt      time.Time `json:"published_at,omitempty"`
+	StartedAt        time.Time `json:"started_at,omitempty"`
+	FinishedAt       time.Time `json:"finished_at,omitempty"`
+	ProgressPercent  float64   `json:"progress_percent,omitempty"`
+	DownloadedBytes  int64     `json:"downloaded_bytes,omitempty"`
+	TotalBytes       int64     `json:"total_bytes,omitempty"`
+	DownloadSpeedBps float64   `json:"download_speed_bps,omitempty"`
+	Error            string    `json:"error,omitempty"`
 }
 
 type InstallHistoryEntry struct {
@@ -234,7 +250,13 @@ func (m *Manager) StartWithRelease(ctx context.Context, release string) (Status,
 		m.mu.Unlock()
 		return status, errors.New("OTA installation is already running")
 	}
-	m.status = Status{State: "checking", Message: "Checking GitHub releases", StartedAt: time.Now()}
+	m.status = Status{
+		State:           "checking",
+		Phase:           "checking",
+		Message:         "Checking GitHub releases",
+		StartedAt:       time.Now(),
+		ProgressPercent: 2,
+	}
 	status := m.status
 	m.mu.Unlock()
 
@@ -283,13 +305,16 @@ func (m *Manager) run(ctx context.Context, releaseTag string) {
 	}
 
 	m.set(Status{
-		State:       "downloading",
-		Message:     "Downloading OTA image",
-		Release:     release.TagName,
-		Asset:       asset.Name,
-		AssetURL:    asset.BrowserDownloadURL,
-		PublishedAt: release.PublishedAt,
-		StartedAt:   m.Status().StartedAt,
+		State:           "downloading",
+		Phase:           "downloading",
+		Message:         "Preparing OTA download",
+		Release:         release.TagName,
+		Asset:           asset.Name,
+		AssetURL:        asset.BrowserDownloadURL,
+		PublishedAt:     release.PublishedAt,
+		StartedAt:       m.Status().StartedAt,
+		ProgressPercent: 5,
+		TotalBytes:      asset.Size,
 	})
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, asset.BrowserDownloadURL, nil)
@@ -308,23 +333,35 @@ func (m *Manager) run(ctx context.Context, releaseTag string) {
 		return
 	}
 
-	gz, err := gzip.NewReader(resp.Body)
+	totalBytes := asset.Size
+	if totalBytes <= 0 && resp.ContentLength > 0 {
+		totalBytes = resp.ContentLength
+	}
+	body := newDownloadProgressReader(resp.Body, totalBytes, m.updateDownloadProgress)
+
+	gz, err := gzip.NewReader(body)
 	if err != nil {
 		m.fail(fmt.Errorf("open gzip OTA asset: %w", err))
 		return
 	}
 	defer gz.Close()
 
-	m.updateState("installing", "Installing OTA image")
-	if err := m.installer().InstallRoot(ctx, gz); err != nil {
+	m.updateInstallProgress(InstallProgress{
+		Phase:           "flashing",
+		Message:         "Downloading and flashing OTA image",
+		ProgressPercent: 10,
+	})
+	if err := m.installer().InstallRoot(ctx, gz, m.updateInstallProgress); err != nil {
 		m.fail(err)
 		return
 	}
 
 	status := m.Status()
 	status.State = "installed"
+	status.Phase = "installed"
 	status.Message = "OTA image installed; reboot requested"
 	status.FinishedAt = time.Now()
+	status.ProgressPercent = 100
 	m.set(status)
 	m.recordInstallHistory(m.historyFromStatus(status))
 }
@@ -394,21 +431,127 @@ func (m *Manager) set(status Status) {
 	m.status = status
 }
 
-func (m *Manager) updateState(state, message string) {
+func (m *Manager) updateInstallProgress(progress InstallProgress) {
 	status := m.Status()
-	status.State = state
-	status.Message = message
+	status.State = "installing"
+	status.Phase = progress.Phase
+	status.Message = progress.Message
+	if progress.ProgressPercent > status.ProgressPercent {
+		status.ProgressPercent = progress.ProgressPercent
+	}
+	m.set(status)
+}
+
+func (m *Manager) updateDownloadProgress(progress downloadProgress) {
+	status := m.Status()
+	status.DownloadedBytes = progress.downloaded
+	status.TotalBytes = progress.total
+	status.DownloadSpeedBps = progress.speedBps
+	if progress.total > 0 {
+		downloadPercent := (float64(progress.downloaded) / float64(progress.total)) * 75
+		status.ProgressPercent = minFloat64(85, maxFloat64(status.ProgressPercent, 10+downloadPercent))
+	}
+	if status.Phase == "" || status.Phase == "downloading" {
+		status.Phase = "flashing"
+		status.Message = "Downloading and flashing OTA image"
+		status.State = "installing"
+	}
 	m.set(status)
 }
 
 func (m *Manager) fail(err error) {
 	status := m.Status()
 	status.State = "failed"
+	status.Phase = "failed"
 	status.Error = err.Error()
 	status.Message = "OTA installation failed"
 	status.FinishedAt = time.Now()
 	m.set(status)
 	m.recordInstallHistory(m.historyFromStatus(status))
+}
+
+func reportInstallProgress(progress InstallProgressFunc, phase, message string, progressPercent float64) {
+	if progress == nil {
+		return
+	}
+	progress(InstallProgress{
+		Phase:           phase,
+		Message:         message,
+		ProgressPercent: progressPercent,
+	})
+}
+
+type downloadProgress struct {
+	downloaded int64
+	total      int64
+	speedBps   float64
+}
+
+type downloadProgressReader struct {
+	reader         io.Reader
+	total          int64
+	started        time.Time
+	lastReport     time.Time
+	downloaded     int64
+	reportProgress func(downloadProgress)
+}
+
+func newDownloadProgressReader(reader io.Reader, total int64, reportProgress func(downloadProgress)) *downloadProgressReader {
+	now := time.Now()
+	return &downloadProgressReader{
+		reader:         reader,
+		total:          total,
+		started:        now,
+		lastReport:     now,
+		reportProgress: reportProgress,
+	}
+}
+
+func (r *downloadProgressReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	if n > 0 {
+		r.downloaded += int64(n)
+		r.report(false)
+	}
+	if err != nil {
+		r.report(true)
+	}
+	return n, err
+}
+
+func (r *downloadProgressReader) report(force bool) {
+	if r.reportProgress == nil {
+		return
+	}
+	now := time.Now()
+	if !force && now.Sub(r.lastReport) < time.Second && (r.total <= 0 || r.downloaded < r.total) {
+		return
+	}
+	elapsed := now.Sub(r.started).Seconds()
+	speed := 0.0
+	if elapsed > 0 {
+		speed = float64(r.downloaded) / elapsed
+	}
+	r.lastReport = now
+	r.reportProgress(downloadProgress{
+		downloaded: r.downloaded,
+		total:      r.total,
+		speedBps:   speed,
+	})
+}
+
+func minFloat64(a, b float64) float64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxFloat64(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func (m *Manager) client() *http.Client {

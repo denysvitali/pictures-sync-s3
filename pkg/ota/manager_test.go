@@ -264,11 +264,23 @@ func TestGokrazyInstallerResolvesHTTPRedirectBeforeStreamingRoot(t *testing.T) {
 		HTTPClient: client,
 	}
 
-	if err := installer.InstallRoot(context.Background(), bytes.NewReader([]byte("root-image"))); err != nil {
+	var phases []string
+	if err := installer.InstallRoot(context.Background(), bytes.NewReader([]byte("root-image")), func(progress InstallProgress) {
+		phases = append(phases, progress.Phase)
+	}); err != nil {
 		t.Fatalf("InstallRoot returned error: %v", err)
 	}
 	if rootMethod != http.MethodPut {
 		t.Fatalf("/update/root method = %q, want %q", rootMethod, http.MethodPut)
+	}
+	wantPhases := []string{"flashing", "switching", "rebooting"}
+	if len(phases) != len(wantPhases) {
+		t.Fatalf("progress phases = %#v, want %#v", phases, wantPhases)
+	}
+	for i := range wantPhases {
+		if phases[i] != wantPhases[i] {
+			t.Fatalf("progress phases = %#v, want %#v", phases, wantPhases)
+		}
 	}
 }
 

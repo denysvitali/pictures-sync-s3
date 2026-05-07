@@ -62,14 +62,84 @@ function formatBytes(size) {
 }
 
 function formatDate(value) {
-  const timestamp = Date.parse(value)
-  if (Number.isNaN(timestamp)) return 'Unknown time'
-  return new Date(timestamp).toLocaleString()
+  return formatReleaseDate(value)
 }
 
 function formatPartition(partition) {
   if (!partition) return '--'
   return `root${partition}`
+}
+
+function formatSpeed(bytesPerSecond) {
+  if (!bytesPerSecond || bytesPerSecond < 0) return ''
+  return `${formatBytes(bytesPerSecond)}/s`
+}
+
+function clampPercent(value) {
+  if (!Number.isFinite(value)) return 0
+  return Math.max(0, Math.min(100, value))
+}
+
+function getOtaProgress(status) {
+  if (!status) return { percent: 0, label: 'Idle' }
+  if (Number.isFinite(status.progress_percent)) {
+    return { percent: clampPercent(status.progress_percent), label: formatOtaPhase(status) }
+  }
+
+  const fallback = {
+    checking: 2,
+    downloading: 20,
+    installing: 70,
+    installed: 100,
+    failed: 100,
+  }
+  return { percent: fallback[status.state] || 0, label: formatOtaPhase(status) }
+}
+
+function formatOtaPhase(status) {
+  const phase = status?.phase || status?.state
+  const labels = {
+    checking: 'Checking releases',
+    downloading: 'Downloading',
+    flashing: 'Flashing inactive partition',
+    switching: 'Switching partitions',
+    rebooting: 'Requesting reboot',
+    installed: 'Installed',
+    failed: 'Failed',
+    idle: 'Idle',
+  }
+  return labels[phase] || status?.message || 'Update in progress'
+}
+
+function OtaProgress({ status }) {
+  if (!status || status.state === 'idle') return null
+
+  const progress = getOtaProgress(status)
+  const width = `${progress.percent.toFixed(0)}%`
+  const downloadText = status.downloaded_bytes
+    ? `${formatBytes(status.downloaded_bytes)}${status.total_bytes ? ` of ${formatBytes(status.total_bytes)}` : ''}`
+    : ''
+  const speedText = formatSpeed(status.download_speed_bps)
+  const detail = [downloadText, speedText].filter(Boolean).join(' · ')
+  const barColor = status.state === 'failed' ? 'bg-danger' : 'bg-brand-500'
+
+  return (
+    <div className="bg-surface-900 rounded-lg p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs text-surface-400 mb-1">Update progress</p>
+          <p className="text-sm font-medium text-surface-100">{progress.label}</p>
+          {status.message ? <p className="text-xs text-surface-500 mt-1">{status.message}</p> : null}
+        </div>
+        <span className="text-sm font-semibold text-surface-100 tabular-nums">{width}</span>
+      </div>
+      <div className="mt-3 h-2 rounded-full bg-surface-700 overflow-hidden">
+        <div className={`h-full rounded-full transition-all duration-500 ${barColor}`} style={{ width }} />
+      </div>
+      {detail ? <p className="text-xs text-surface-500 mt-2">{detail}</p> : null}
+      {status.error ? <p className="text-xs text-danger mt-2">{status.error}</p> : null}
+    </div>
+  )
 }
 
 function getDeviceHost(deviceUrl) {
@@ -759,6 +829,7 @@ function OtaSection() {
               </div>
             </div>
           ) : null}
+          <OtaProgress status={status} />
           {status?.ab_partitions ? (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="bg-surface-900 rounded-lg p-3">
@@ -812,7 +883,7 @@ function OtaSection() {
                 </p>
               ) : null}
               <p className="text-xs text-surface-500 mt-1">
-                {status?.current_build_date || 'Build date unknown'}
+                {status?.current_build_date ? formatReleaseDate(status.current_build_date) : 'Build date unknown'}
               </p>
             </div>
             <div className="bg-surface-900 rounded-lg p-3">
@@ -821,7 +892,7 @@ function OtaSection() {
                 {status?.latest_version || 'unknown'}
               </p>
               <p className="text-xs text-surface-500 mt-1">
-                {status?.releases?.[0] ? formatReleaseDate(status.releases[0].published_at) : 'No release date'}
+                {releases[0] ? formatReleaseDate(releases[0].published_at) : 'No release date'}
               </p>
             </div>
           </div>
