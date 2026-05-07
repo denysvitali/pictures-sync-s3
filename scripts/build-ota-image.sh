@@ -11,6 +11,7 @@ GOKRAZY_IMAGE_MODE="${GOKRAZY_IMAGE_MODE:-ota}"
 TARGET_STORAGE_BYTES="${TARGET_STORAGE_BYTES:-}"
 IMAGE_PATH="${IMAGE_DIR}/${IMAGE_NAME}"
 HOSTAPD_BINARY="${HOSTAPD_BINARY:-}"
+EXFAT_MKFS_BINARY="${EXFAT_MKFS_BINARY:-}"
 BUILD_DATE="${BUILD_DATE:-$(date -u '+%Y-%m-%dT%H:%M:%SZ')}"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 INSTANCE_DIR="$GOKRAZY_PARENT_DIR/$GOKRAZY_INSTANCE"
@@ -40,6 +41,14 @@ if [ -z "$HOSTAPD_BINARY" ]; then
 fi
 if [ -z "$HOSTAPD_BINARY" ] || [ ! -x "$HOSTAPD_BINARY" ]; then
   echo "Error: HOSTAPD_BINARY must point to an executable hostapd binary for the target architecture"
+  exit 1
+fi
+
+if [ -z "$EXFAT_MKFS_BINARY" ]; then
+  EXFAT_MKFS_BINARY="$(command -v mkfs.exfat || true)"
+fi
+if [ -z "$EXFAT_MKFS_BINARY" ] || [ ! -x "$EXFAT_MKFS_BINARY" ]; then
+  echo "Error: EXFAT_MKFS_BINARY must point to an executable mkfs.exfat binary for the target architecture"
   exit 1
 fi
 
@@ -112,7 +121,10 @@ cat > "$INSTANCE_DIR/config.json" <<EOF
       "GoBuildFlags": [
         "-trimpath",
         "-ldflags=${VERSION_LDFLAGS}"
-      ]
+      ],
+      "ExtraFilePaths": {
+        "/usr/bin/mkfs.exfat": "$EXFAT_MKFS_BINARY"
+      }
     },
     "github.com/denysvitali/pictures-sync-s3/cmd/webui": {
       "GoBuildFlags": [

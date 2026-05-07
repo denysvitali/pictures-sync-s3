@@ -241,10 +241,22 @@ func wipeFilesystemSignatures(f *os.File, size int64) error {
 }
 
 func findFormatter(names ...string) (string, bool) {
+	searchDirs := []string{"/usr/bin", "/usr/local/bin", "/bin", "/user"}
+
 	for _, name := range names {
 		path, err := exec.LookPath(name)
 		if err == nil {
 			return path, true
+		}
+		if filepath.IsAbs(name) {
+			continue
+		}
+		for _, dir := range searchDirs {
+			candidate := filepath.Join(dir, name)
+			info, err := os.Stat(candidate)
+			if err == nil && !info.IsDir() && info.Mode()&0111 != 0 {
+				return candidate, true
+			}
 		}
 	}
 	return "", false

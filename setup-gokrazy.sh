@@ -36,6 +36,12 @@ if [ -z "$HOSTAPD_BINARY" ] || [ ! -x "$HOSTAPD_BINARY" ]; then
     exit 1
 fi
 
+EXFAT_MKFS_BINARY=${EXFAT_MKFS_BINARY:-$(command -v mkfs.exfat || true)}
+if [ -z "$EXFAT_MKFS_BINARY" ] || [ ! -x "$EXFAT_MKFS_BINARY" ]; then
+    echo "Error: EXFAT_MKFS_BINARY must point to an executable mkfs.exfat binary for the target architecture"
+    exit 1
+fi
+
 GOKRAZY_MODULE_REPLACE=${GOKRAZY_MODULE_REPLACE:-}
 if [ -z "$GOKRAZY_MODULE_REPLACE" ] && [ -f "$SCRIPT_DIR/../gokrazy/go.mod" ]; then
     GOKRAZY_MODULE_REPLACE="$SCRIPT_DIR/../gokrazy"
@@ -136,6 +142,11 @@ cat > "$CONFIG_FILE" <<EOF
 EOF
 
 cat >> "$CONFIG_FILE" <<EOF
+    "github.com/denysvitali/pictures-sync-s3/cmd/pictures-sync": {
+      "ExtraFilePaths": {
+        "/usr/bin/mkfs.exfat": "$EXFAT_MKFS_BINARY"
+      }
+    },
     "tailscale.com/cmd/tailscale": {},
     "github.com/denysvitali/pictures-sync-s3/cmd/tailscale-init": {
       "Environment": [
@@ -196,6 +207,7 @@ echo "Configuration files:"
 echo "  - Config: $CONFIG_FILE"
 echo "  - Go module: $INSTANCE_DIR/go.mod (with replace directive for local code)"
 echo "  - hostapd: $HOSTAPD_BINARY"
+echo "  - mkfs.exfat: $EXFAT_MKFS_BINARY"
 if [ -n "$WIFI_SSID" ]; then
     echo "  - WiFi: $WIFI_FILE (copy to device /perm/wifi.json)"
 fi

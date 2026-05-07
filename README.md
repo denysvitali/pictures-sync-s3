@@ -158,6 +158,11 @@ Supporting packages:
            "-authorized_keys=/perm/breakglass/authorized_keys"
          ]
        },
+       "github.com/denysvitali/pictures-sync-s3/cmd/pictures-sync": {
+         "ExtraFilePaths": {
+           "/usr/bin/mkfs.exfat": "/path/to/target-arm64/mkfs.exfat"
+         }
+       },
        "tailscale.com/cmd/tailscale": {},
        "github.com/denysvitali/pictures-sync-s3/cmd/tailscale-init": {
          "CommandLineFlags": [],
@@ -184,8 +189,9 @@ Supporting packages:
 4. Build and write to SD card:
    ```bash
    # Insert SD card and identify device (e.g., /dev/sdb)
-   # HOSTAPD_BINARY must point to a target-compatible hostapd binary.
+   # These binaries must point to target-compatible executables.
    export HOSTAPD_BINARY=/path/to/hostapd
+   export EXFAT_MKFS_BINARY=/path/to/mkfs.exfat
    gok -i <instance-name> overwrite --full /dev/sdX
    ```
 
