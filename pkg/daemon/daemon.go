@@ -377,6 +377,21 @@ func (s *Service) handleDevicesCommand(ctx context.Context) daemoncontrol.Respon
 			MountPath:   d.MountPath,
 			HasDCIM:     d.HasDCIM,
 			VolumeLabel: d.VolumeLabel,
+			Partitions:  make([]state.PartitionInfo, len(d.Partitions)),
+		}
+		for j, p := range d.Partitions {
+			stateDevices[i].Partitions[j] = state.PartitionInfo{
+				DevicePath:  p.DevicePath,
+				DeviceName:  p.DeviceName,
+				Size:        p.Size,
+				SizeHuman:   p.SizeHuman,
+				FileSystem:  p.FileSystem,
+				UUID:        p.UUID,
+				VolumeLabel: p.VolumeLabel,
+				IsMounted:   p.IsMounted,
+				MountPath:   p.MountPath,
+				HasDCIM:     p.HasDCIM,
+			}
 		}
 	}
 	if err := s.stateMgr.SetAvailableDevices(stateDevices); err != nil {

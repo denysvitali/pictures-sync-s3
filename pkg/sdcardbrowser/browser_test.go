@@ -36,6 +36,25 @@ func TestListFilesClassifiesLocalMedia(t *testing.T) {
 	}
 }
 
+func TestListFilesDefaultsToMountRoot(t *testing.T) {
+	mountPath := t.TempDir()
+	if err := os.Mkdir(filepath.Join(mountPath, "PRIVATE"), 0755); err != nil {
+		t.Fatalf("mkdir PRIVATE: %v", err)
+	}
+
+	result, err := ListFiles(mountPath, "")
+	if err != nil {
+		t.Fatalf("ListFiles: %v", err)
+	}
+
+	if result.Path != "" {
+		t.Fatalf("path = %q, want root", result.Path)
+	}
+	if len(result.Files) != 1 || result.Files[0].Name != "PRIVATE" {
+		t.Fatalf("unexpected root listing: %+v", result.Files)
+	}
+}
+
 func TestOpenFileStreamsAnyRegularFile(t *testing.T) {
 	mountPath := t.TempDir()
 	writeTestFile(t, mountPath, "DCIM/video.MP4", "0123456789")

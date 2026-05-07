@@ -52,6 +52,20 @@ function getDeviceDisplayName(device) {
   return `${base} (${details.join(' · ')})`
 }
 
+function partitionTitle(partition) {
+  return partition?.volume_label || partition?.device_name || partition?.device_path || 'Partition'
+}
+
+function partitionDetails(partition) {
+  const details = []
+  if (partition?.size_human) details.push(partition.size_human)
+  else if (partition?.size) details.push(formatBytes(partition.size))
+  if (partition?.file_system) details.push(partition.file_system)
+  if (partition?.is_mounted) details.push('mounted')
+  if (partition?.has_dcim) details.push('DCIM')
+  return details.join(' · ')
+}
+
 function describeError(err) {
   if (!err) return 'Unknown error'
   const msg = err.message || String(err)
@@ -237,6 +251,7 @@ function DeviceInfoCard({
   const deviceSize = selectedDevice?.size_human || (selectedDevice?.size ? formatBytes(selectedDevice.size) : null)
   const devicePath = selectedDevice?.device_path || status.sdcard_device_path || null
   const canFormat = hasCard && devicePath && status.status !== 'syncing'
+  const partitions = selectedDevice?.partitions || []
 
   return (
     <Card>
@@ -279,6 +294,40 @@ function DeviceInfoCard({
               <span className="text-sm font-semibold text-surface-100">
                 {photoCount.toLocaleString()}
               </span>
+            </div>
+          )}
+
+          {partitions.length > 0 && (
+            <div className="pt-2 border-t border-surface-700/50">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <span className="text-xs text-surface-500">Partitions</span>
+                <span className="text-xs text-surface-500">{partitions.length}</span>
+              </div>
+              <div className="space-y-2">
+                {partitions.map((partition) => (
+                  <div
+                    key={partition.device_path || partition.device_name}
+                    className="rounded-md border border-surface-700/60 bg-surface-900/40 px-3 py-2"
+                  >
+                    <div className="flex min-w-0 items-center justify-between gap-2">
+                      <span className="truncate text-sm font-medium text-surface-200">
+                        {partitionTitle(partition)}
+                      </span>
+                      <span className="max-w-[48%] shrink-0 truncate text-xs text-surface-500">
+                        {partition.device_path}
+                      </span>
+                    </div>
+                    <div className="mt-1 text-xs text-surface-500">
+                      {partitionDetails(partition) || 'No filesystem metadata'}
+                    </div>
+                    {partition.mount_path && (
+                      <div className="mt-1 truncate text-[11px] text-surface-600">
+                        {partition.mount_path}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 

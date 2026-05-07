@@ -6,22 +6,38 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/utils"
 )
 
-// DeviceInfo contains information about a storage device
-type DeviceInfo struct {
+// PartitionInfo contains information about one partition on a storage device.
+type PartitionInfo struct {
 	DevicePath  string `json:"device_path"`
 	DeviceName  string `json:"device_name"`
 	Size        int64  `json:"size"`
 	SizeHuman   string `json:"size_human"`
-	IsUSB       bool   `json:"is_usb"`
+	FileSystem  string `json:"file_system,omitempty"`
+	UUID        string `json:"uuid,omitempty"`
+	VolumeLabel string `json:"volume_label,omitempty"`
 	IsMounted   bool   `json:"is_mounted"`
 	MountPath   string `json:"mount_path,omitempty"`
 	HasDCIM     bool   `json:"has_dcim"`
-	VolumeLabel string `json:"volume_label,omitempty"`
+}
+
+// DeviceInfo contains information about a storage device
+type DeviceInfo struct {
+	DevicePath  string          `json:"device_path"`
+	DeviceName  string          `json:"device_name"`
+	Size        int64           `json:"size"`
+	SizeHuman   string          `json:"size_human"`
+	IsUSB       bool            `json:"is_usb"`
+	IsMounted   bool            `json:"is_mounted"`
+	MountPath   string          `json:"mount_path,omitempty"`
+	HasDCIM     bool            `json:"has_dcim"`
+	VolumeLabel string          `json:"volume_label,omitempty"`
+	Partitions  []PartitionInfo `json:"partitions,omitempty"`
 }
 
 // Device enumeration patterns
@@ -160,6 +176,7 @@ func getDeviceInfo(devicePath string) (DeviceInfo, error) {
 
 	// Get volume label
 	info.VolumeLabel = getVolumeLabel(devicePath)
+	info.Partitions = listPartitions(diskName)
 
 	return info, nil
 }
@@ -270,34 +287,104 @@ func isUSBInUevent(path string) bool {
 
 // checkMountStatus checks if a device is mounted and updates DeviceInfo
 func checkMountStatus(info *DeviceInfo) {
+	mounted, mountPath := mountStatus(info.DevicePath)
+	info.IsMounted = mounted
+	info.MountPath = mountPath
+	if mounted {
+		info.HasDCIM = HasDCIM(mountPath)
+	}
+}
+
+func mountStatus(devicePath string) (bool, string) {
 	data, err := os.ReadFile("/proc/mounts")
 	if err != nil {
-		return
+		return false, ""
 	}
 
 	lines := strings.Split(string(data), "\n")
 	for _, line := range lines {
-		if strings.HasPrefix(line, info.DevicePath) {
-			fields := strings.Fields(line)
-			if len(fields) >= 2 {
-				info.IsMounted = true
-				info.MountPath = fields[1]
-				// Check for DCIM if mounted
-				info.HasDCIM = HasDCIM(info.MountPath)
-			}
-			break
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[0] == devicePath {
+			return true, fields[1]
 		}
 	}
+
+	return false, ""
+}
+
+func listPartitions(diskName string) []PartitionInfo {
+	entries, err := os.ReadDir(filepath.Join("/sys/block", diskName))
+	if err != nil {
+		return nil
+	}
+
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if isPartitionName(diskName, entry.Name()) {
+			names = append(names, entry.Name())
+		}
+	}
+	sort.Strings(names)
+
+	partitions := make([]PartitionInfo, 0, len(names))
+	for _, name := range names {
+		partitions = append(partitions, getPartitionInfo(name))
+	}
+	return partitions
+}
+
+func isPartitionName(diskName, name string) bool {
+	var suffix string
+	if strings.HasPrefix(diskName, "mmcblk") || strings.HasPrefix(diskName, "nvme") {
+		prefix := diskName + "p"
+		if !strings.HasPrefix(name, prefix) {
+			return false
+		}
+		suffix = strings.TrimPrefix(name, prefix)
+	} else {
+		if !strings.HasPrefix(name, diskName) {
+			return false
+		}
+		suffix = strings.TrimPrefix(name, diskName)
+	}
+	if suffix == "" {
+		return false
+	}
+	for _, r := range suffix {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func getPartitionInfo(partitionName string) PartitionInfo {
+	devicePath := filepath.Join("/dev", partitionName)
+	info := PartitionInfo{
+		DevicePath:  devicePath,
+		DeviceName:  partitionName,
+		FileSystem:  getBlkIDValue(devicePath, "TYPE"),
+		UUID:        getBlkIDValue(devicePath, "UUID"),
+		VolumeLabel: getVolumeLabel(devicePath),
+	}
+
+	if size, err := getDeviceSize(devicePath); err == nil {
+		info.Size = size
+		info.SizeHuman = formatBytes(size)
+	}
+
+	info.IsMounted, info.MountPath = mountStatus(devicePath)
+	if info.IsMounted {
+		info.HasDCIM = HasDCIM(info.MountPath)
+	}
+
+	return info
 }
 
 // GetVolumeID attempts to get a unique ID for the SD card
 func GetVolumeID(device string) string {
-	// Try to read volume ID from blkid
-	// #nosec G204 -- device path is a /dev block device controlled by the system
-	cmd := exec.Command("blkid", "-s", "UUID", "-o", "value", device)
-	output, err := cmd.Output()
-	if err == nil && len(output) > 0 {
-		return strings.TrimSpace(string(output))
+	if uuid := getBlkIDValue(device, "UUID"); uuid != "" {
+		return uuid
 	}
 
 	// Fallback to device name
@@ -306,8 +393,12 @@ func GetVolumeID(device string) string {
 
 // getVolumeLabel gets the volume label using blkid
 func getVolumeLabel(devicePath string) string {
+	return getBlkIDValue(devicePath, "LABEL")
+}
+
+func getBlkIDValue(devicePath, field string) string {
 	// #nosec G204 -- devicePath is a /dev block device controlled by the system
-	cmd := exec.Command("blkid", "-s", "LABEL", "-o", "value", devicePath)
+	cmd := exec.Command("blkid", "-s", field, "-o", "value", devicePath)
 	if output, err := cmd.Output(); err == nil && len(output) > 0 {
 		return strings.TrimSpace(string(output))
 	}

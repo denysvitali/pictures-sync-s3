@@ -34,15 +34,30 @@ type SyncRecord struct {
 
 // DeviceInfo represents a detected storage device
 type DeviceInfo struct {
+	DevicePath  string          `json:"device_path"`
+	DeviceName  string          `json:"device_name"`
+	Size        int64           `json:"size"`
+	SizeHuman   string          `json:"size_human"`
+	IsUSB       bool            `json:"is_usb"`
+	IsMounted   bool            `json:"is_mounted"`
+	MountPath   string          `json:"mount_path,omitempty"`
+	HasDCIM     bool            `json:"has_dcim"`
+	VolumeLabel string          `json:"volume_label,omitempty"`
+	Partitions  []PartitionInfo `json:"partitions,omitempty"`
+}
+
+// PartitionInfo represents a partition on a detected storage device.
+type PartitionInfo struct {
 	DevicePath  string `json:"device_path"`
 	DeviceName  string `json:"device_name"`
 	Size        int64  `json:"size"`
 	SizeHuman   string `json:"size_human"`
-	IsUSB       bool   `json:"is_usb"`
+	FileSystem  string `json:"file_system,omitempty"`
+	UUID        string `json:"uuid,omitempty"`
+	VolumeLabel string `json:"volume_label,omitempty"`
 	IsMounted   bool   `json:"is_mounted"`
 	MountPath   string `json:"mount_path,omitempty"`
 	HasDCIM     bool   `json:"has_dcim"`
-	VolumeLabel string `json:"volume_label,omitempty"`
 }
 
 // CurrentState represents the current system state

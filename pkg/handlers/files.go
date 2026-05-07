@@ -245,11 +245,7 @@ func (ctx *Context) HandleSDCardFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get path from query param (defaults to DCIM)
 	requestedPath := r.URL.Query().Get("path")
-	if requestedPath == "" {
-		requestedPath = "DCIM"
-	}
 
 	log.Printf("[Gallery] list sdcard start path=%q remote=%s", requestedPath, r.RemoteAddr)
 

@@ -39,10 +39,6 @@ type Preview struct {
 
 // ListFiles lists files under the SD card mount path.
 func ListFiles(mountPath, requestedPath string) (*FileList, error) {
-	if requestedPath == "" {
-		requestedPath = "DCIM"
-	}
-
 	cleanFullPath, err := resolvePath(mountPath, requestedPath)
 	if err != nil {
 		return nil, err
@@ -173,14 +169,10 @@ func resolvePath(mountPath, requestedPath string) (string, error) {
 	}
 
 	cleanMountPath := filepath.Clean(mountPath)
-	if !strings.HasSuffix(cleanMountPath, string(os.PathSeparator)) {
-		cleanMountPath += string(os.PathSeparator)
-	}
-
 	fullPath := filepath.Join(mountPath, filepath.Clean("/"+requestedPath))
 	cleanFullPath := filepath.Clean(fullPath)
 
-	if !strings.HasPrefix(cleanFullPath, cleanMountPath) {
+	if cleanFullPath != cleanMountPath && !strings.HasPrefix(cleanFullPath, cleanMountPath+string(os.PathSeparator)) {
 		return "", fmt.Errorf("access denied")
 	}
 

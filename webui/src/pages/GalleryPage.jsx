@@ -72,7 +72,7 @@ export default function GalleryPage() {
 
   const [source, setSource] = useState('cloud')
   const [cloudPath, setCloudPath] = useState('')
-  const [sdcardPath, setSdcardPath] = useState('DCIM')
+  const [sdcardPath, setSdcardPath] = useState('')
   const [files, setFiles] = useState([])
   const [allSDCardFiles, setAllSDCardFiles] = useState([])
   const [total, setTotal] = useState(0)
@@ -125,7 +125,7 @@ export default function GalleryPage() {
           setTotal(0)
           return
         }
-        const data = await getSDCardFiles(deviceUrl, currentPath || 'DCIM')
+        const data = await getSDCardFiles(deviceUrl, currentPath)
         if (!isLatest()) return
         if (data?.error) throw new Error(data.error)
         const fileArr = Array.isArray(data?.files) ? data.files : []
