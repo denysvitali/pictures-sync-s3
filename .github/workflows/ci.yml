@@ -303,15 +303,17 @@ jobs:
 
       - name: Build twice and compare
         run: |
-          # First build
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o build1 ./cmd/pictures-sync
+          # Use isolated build caches so cache contents from earlier
+          # jobs cannot influence one build but not the other.
+          export GOFLAGS=-mod=readonly
+          GOCACHE=$(mktemp -d) CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build -trimpath -o build1 ./cmd/pictures-sync
           sha256sum build1 > build1.sha256
 
-          # Wait a moment
           sleep 2
 
-          # Second build
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o build2 ./cmd/pictures-sync
+          GOCACHE=$(mktemp -d) CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build -trimpath -o build2 ./cmd/pictures-sync
           sha256sum build2 > build2.sha256
 
           # Compare
