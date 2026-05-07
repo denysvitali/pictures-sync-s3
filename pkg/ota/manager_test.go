@@ -107,6 +107,51 @@ func TestLatestReleaseRejectsFlashOnlyAsset(t *testing.T) {
 	}
 }
 
+func TestSubscribeReceivesStatusUpdates(t *testing.T) {
+	manager := &Manager{status: Status{State: "idle"}}
+	updates := manager.Subscribe()
+	defer manager.Unsubscribe(updates)
+
+	manager.set(Status{
+		State:           "installing",
+		Phase:           "flashing",
+		Message:         "Downloading and flashing OTA image",
+		ProgressPercent: 42,
+	})
+
+	select {
+	case status := <-updates:
+		if status.State != "installing" {
+			t.Fatalf("status state = %q, want installing", status.State)
+		}
+		if status.Phase != "flashing" {
+			t.Fatalf("status phase = %q, want flashing", status.Phase)
+		}
+		if status.ProgressPercent != 42 {
+			t.Fatalf("progress = %.1f, want 42", status.ProgressPercent)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for OTA status update")
+	}
+}
+
+func TestUnsubscribeStopsStatusUpdates(t *testing.T) {
+	manager := &Manager{status: Status{State: "idle"}}
+	updates := manager.Subscribe()
+	manager.Unsubscribe(updates)
+
+	manager.set(Status{State: "installing"})
+
+	select {
+	case _, ok := <-updates:
+		if ok {
+			t.Fatal("unsubscribed channel received a status update")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("unsubscribed channel was not closed")
+	}
+}
+
 func TestShouldSkipUpdateTLSVerify(t *testing.T) {
 	tests := []struct {
 		name   string

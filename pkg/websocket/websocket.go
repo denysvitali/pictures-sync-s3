@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/events"
+	"github.com/denysvitali/pictures-sync-s3/pkg/ota"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 	"github.com/gorilla/websocket"
 	"golang.org/x/time/rate"
@@ -342,7 +343,7 @@ func CleanupExpiredWSTokens(ctx context.Context) {
 }
 
 // HandleWebSocket provides real-time status updates
-func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager) http.HandlerFunc {
+func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager, otaManagers ...*ota.Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Extract client IP for rate limiting
 		clientIP := r.RemoteAddr
@@ -408,9 +409,20 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager) http.Han
 		// Subscribe to state updates and events
 		updates := stateMgr.Subscribe()
 		events := eventMgr.Subscribe()
+		var otaUpdates chan ota.Status
+		var otaMgr *ota.Manager
+		if len(otaManagers) > 0 {
+			otaMgr = otaManagers[0]
+		}
+		if otaMgr != nil {
+			otaUpdates = otaMgr.Subscribe()
+		}
 		// IMPORTANT: Unsubscribe when WebSocket closes to prevent memory leak
 		defer stateMgr.Unsubscribe(updates)
 		defer eventMgr.Unsubscribe(events)
+		if otaMgr != nil {
+			defer otaMgr.Unsubscribe(otaUpdates)
+		}
 
 		// Send initial state (reload from disk first to get latest from pictures-sync service)
 		stateMgr.Reload()
@@ -479,6 +491,20 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager) http.Han
 				message := map[string]any{
 					"type": "event",
 					"data": event,
+				}
+				if err := conn.WriteJSON(message); err != nil {
+					return
+				}
+			case otaStatus, ok := <-otaUpdates:
+				if otaUpdates == nil {
+					continue
+				}
+				if !ok {
+					return
+				}
+				message := map[string]any{
+					"type": "ota_status",
+					"data": otaStatus,
 				}
 				if err := conn.WriteJSON(message); err != nil {
 					return

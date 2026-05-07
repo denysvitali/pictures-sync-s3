@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useDevice } from '../DeviceContext.jsx'
 import { useToast } from '../components/Toast.jsx'
 import { Card, CardHeader, CardTitle } from '../components/Card.jsx'
@@ -17,6 +17,8 @@ import {
   changeGokrazyPassword,
   getBreakglassAuthorizedKeys,
   saveBreakglassAuthorizedKeys,
+  getWSToken,
+  getWebSocketUrl,
   getOtaStatus,
   installOta,
   getSystemTime,
@@ -140,6 +142,26 @@ function OtaProgress({ status }) {
       {status.error ? <p className="text-xs text-danger mt-2">{status.error}</p> : null}
     </div>
   )
+}
+
+function mergePushedOtaStatus(current, pushed) {
+  const metadata = current
+    ? {
+        current_version: current.current_version,
+        current_commit: current.current_commit,
+        current_build_date: current.current_build_date,
+        current_go_version: current.current_go_version,
+        current_module: current.current_module,
+        current_dirty: current.current_dirty,
+        ab_partitions: current.ab_partitions,
+        latest_version: current.latest_version,
+        installed_versions: current.installed_versions,
+        releases: current.releases,
+        install_history: current.install_history,
+        update_available: current.update_available,
+      }
+    : {}
+  return { ...metadata, ...pushed }
 }
 
 function getDeviceHost(deviceUrl) {
@@ -671,6 +693,8 @@ function OtaSection() {
   const [loading, setLoading] = useState(true)
   const [installing, setInstalling] = useState(false)
   const [selectedRelease, setSelectedRelease] = useState('')
+  const wsReconnectRef = useRef(null)
+  const terminalRefreshRef = useRef('')
 
   const installationRunning = !!status?.state && ['checking', 'downloading', 'installing'].includes(status.state)
   const installedVersions = useMemo(
@@ -731,6 +755,68 @@ function OtaSection() {
   useEffect(() => {
     fetchStatus()
   }, [fetchStatus])
+
+  useEffect(() => {
+    if (!deviceUrl) return undefined
+
+    let cancelled = false
+    let reconnectAttempts = 0
+    let socket = null
+    terminalRefreshRef.current = ''
+
+    const scheduleReconnect = () => {
+      if (cancelled) return
+      const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 15000)
+      reconnectAttempts += 1
+      wsReconnectRef.current = window.setTimeout(connect, delay)
+    }
+
+    const connect = async () => {
+      try {
+        const tokenData = await getWSToken(deviceUrl)
+        if (cancelled) return
+
+        socket = new WebSocket(getWebSocketUrl(deviceUrl))
+        socket.onopen = () => {
+          reconnectAttempts = 0
+          socket.send(JSON.stringify({ type: 'auth', token: tokenData.ws_token }))
+        }
+        socket.onmessage = (event) => {
+          let message = null
+          try {
+            message = JSON.parse(event.data)
+          } catch {
+            return
+          }
+
+          if (message.type !== 'ota_status' || !message.data) return
+
+          setStatus((current) => mergePushedOtaStatus(current, message.data))
+          setLoading(false)
+
+          const state = message.data.state
+          const startedAt = message.data.started_at || ''
+          const terminalKey = `${state}:${startedAt}`
+          if ((state === 'installed' || state === 'failed') && terminalRefreshRef.current !== terminalKey) {
+            terminalRefreshRef.current = terminalKey
+            fetchStatus({ background: true })
+          }
+        }
+        socket.onclose = scheduleReconnect
+        socket.onerror = () => socket?.close()
+      } catch {
+        scheduleReconnect()
+      }
+    }
+
+    connect()
+
+    return () => {
+      cancelled = true
+      if (wsReconnectRef.current) window.clearTimeout(wsReconnectRef.current)
+      if (socket) socket.close()
+    }
+  }, [deviceUrl, fetchStatus])
 
   useEffect(() => {
     if (!installationRunning) return

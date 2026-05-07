@@ -102,6 +102,7 @@ type Manager struct {
 	mu             sync.Mutex
 	status         Status
 	installHistory []InstallHistoryEntry
+	subscribers    []chan Status
 }
 
 type Status struct {
@@ -169,6 +170,7 @@ func NewManager() *Manager {
 		},
 		status:         Status{State: "idle"},
 		installHistory: make([]InstallHistoryEntry, 0),
+		subscribers:    make([]chan Status, 0),
 	}
 	_ = mgr.loadInstallHistory()
 	return mgr
@@ -187,6 +189,28 @@ func (m *Manager) InstallationHistory() []InstallHistoryEntry {
 	history := make([]InstallHistoryEntry, len(m.installHistory))
 	copy(history, m.installHistory)
 	return history
+}
+
+func (m *Manager) Subscribe() chan Status {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	ch := make(chan Status, 16)
+	m.subscribers = append(m.subscribers, ch)
+	return ch
+}
+
+func (m *Manager) Unsubscribe(ch chan Status) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for i, subscriber := range m.subscribers {
+		if subscriber == ch {
+			m.subscribers = append(m.subscribers[:i], m.subscribers[i+1:]...)
+			close(ch)
+			break
+		}
+	}
 }
 
 func (m *Manager) loadInstallHistory() error {
@@ -258,7 +282,9 @@ func (m *Manager) StartWithRelease(ctx context.Context, release string) (Status,
 		ProgressPercent: 2,
 	}
 	status := m.status
+	subscribers := m.subscribersSnapshotLocked()
 	m.mu.Unlock()
+	publishStatus(status, subscribers)
 
 	runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Hour)
 	go func() {
@@ -427,8 +453,26 @@ func (m *Manager) fetchReleases(ctx context.Context) ([]Release, error) {
 
 func (m *Manager) set(status Status) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.status = status
+	subscribers := m.subscribersSnapshotLocked()
+	m.mu.Unlock()
+
+	publishStatus(status, subscribers)
+}
+
+func (m *Manager) subscribersSnapshotLocked() []chan Status {
+	subscribers := make([]chan Status, len(m.subscribers))
+	copy(subscribers, m.subscribers)
+	return subscribers
+}
+
+func publishStatus(status Status, subscribers []chan Status) {
+	for _, ch := range subscribers {
+		select {
+		case ch <- status:
+		default:
+		}
+	}
 }
 
 func (m *Manager) updateInstallProgress(progress InstallProgress) {
