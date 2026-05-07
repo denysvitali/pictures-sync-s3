@@ -71,7 +71,8 @@ jobs:
             echo "No vulnerabilities detected"
           elif grep -q "Vulnerability" govulncheck-report.txt; then
             echo "status=vulnerable" >> $GITHUB_OUTPUT
-            echo "::warning::Vulnerabilities found in dependencies — see report"
+            echo "Vulnerabilities found!"
+            exit 1
           else
             echo "status=unknown" >> $GITHUB_OUTPUT
           fi
@@ -169,7 +170,6 @@ jobs:
         uses: securego/gosec@9c4bb74a6258fe3818db8354b376ecca985704aa
         with:
           args: '-fmt sarif -out gosec-results.sarif -exclude-dir=test-data -severity medium ./...'
-        continue-on-error: true
 
       - name: Upload Gosec SARIF report
         uses: github/codeql-action/upload-sarif@v4
@@ -318,7 +318,6 @@ jobs:
           # Check for common patterns
           password_matches="$(grep -r -i "password\s*=\s*['\"]" --include="*.go" . || true)"
           password_matches="$(printf "%s\n" "$password_matches" \
-            | grep -v '_test\.go:' \
             | grep -v 'pkg/wifimanager/config.go:var FirstBootWiFiPassword = "photo-backup-setup"' \
             | grep -v 'cmd/webui/main.go:.*authPassword = "dev"' \
             || true)"
@@ -361,27 +360,9 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-        with:
-          version: 10.33.2
-
-      - name: Build embedded webui bundle
-        run: |
-          cd webui
-          corepack enable
-          pnpm install --frozen-lockfile || pnpm install
-          pnpm build
-
       - name: Run tests with race detector
         run: |
-          PKGS=$(go list ./... | grep -v -E '/(sdmonitor|ledcontroller|captiveportal)$')
-          go test -race -short $PKGS 2>&1 | tee race-report.txt
+          go test -race -short ./... 2>&1 | tee race-report.txt
         continue-on-error: true
 
       - name: Check for data races
@@ -422,7 +403,8 @@ jobs:
 
           # Check govulncheck
           if [ "${{ needs.govulncheck.result }}" != "success" ]; then
-            echo "⚠️  govulncheck flagged vulnerabilities (informational)"
+            echo "❌ govulncheck failed - vulnerabilities detected"
+            FAILED=true
           else
             echo "✓ govulncheck passed"
           fi

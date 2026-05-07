@@ -50,10 +50,7 @@ jobs:
           pnpm build
 
       - name: Run tests
-        # Some packages need root (mount) or hardware; skip them here.
-        run: |
-          PKGS=$(go list ./... | grep -v -E '/(sdmonitor|ledcontroller|captiveportal)$')
-          go test -short $PKGS || go test -short $PKGS
+        run: go test -short ./...
 
   build-and-publish-flash-image:
     needs: test

@@ -74,19 +74,9 @@ jobs:
           pnpm build
 
       - name: Run tests with race detector
-        # Some packages require root (mount syscalls) or real hardware
-        # (wireless interfaces, LED GPIO). Run them separately as
-        # non-blocking so CI gives a useful signal in unprivileged runners.
         run: |
-          PKGS=$(go list ./... | grep -v -E '/(sdmonitor|ledcontroller|captiveportal)$')
-          go test -short -race -coverprofile=coverage.out -covermode=atomic $PKGS \
-            || go test -short -race -coverprofile=coverage.out -covermode=atomic $PKGS
+          go test -short -race -coverprofile=coverage.out -covermode=atomic ./...
         timeout-minutes: 15
-
-      - name: Run hardware/root-dependent tests (informational)
-        run: |
-          go test -short ./pkg/sdmonitor/... ./pkg/ledcontroller/... ./pkg/captiveportal/... || true
-        continue-on-error: true
 
       - name: Generate coverage report
         run: |
