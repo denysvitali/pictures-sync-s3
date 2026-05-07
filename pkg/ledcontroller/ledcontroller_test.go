@@ -298,9 +298,11 @@ func TestPatternNotStopping(t *testing.T) {
 	mock.SetStatus(state.StatusSyncing)
 	time.Sleep(300 * time.Millisecond)
 
-	// Change to steady pattern (should stop blinking)
+	// Change to steady pattern. Allow enough time for the previous
+	// blink goroutine to observe the status change and exit; on slow
+	// CI runners 100 ms was racy.
 	mock.SetStatus(state.StatusIdle)
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
 
 	// Record initial brightness
 	data, _ := os.ReadFile(brightnessFile)
