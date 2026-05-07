@@ -50,8 +50,9 @@ func (c *ConnectionRateLimiter) GetLimiter(ip string) *rate.Limiter {
 	defer c.mu.Unlock()
 	entry, exists := c.limiters[ip]
 	if !exists {
+		limit, burst := getConnectionRateConfig()
 		entry = &rateLimiterEntry{
-			limiter:  rate.NewLimiter(connectionRateLimit, connectionRateBurst),
+			limiter:  rate.NewLimiter(limit, burst),
 			lastSeen: now,
 		}
 		c.limiters[ip] = entry
@@ -101,6 +102,10 @@ var (
 	connRateLimiterOnce sync.Once
 	connectionRateLimit = rate.Every(12 * time.Second)
 	connectionRateBurst = 2
+	// wsConfigMutex guards the mutable package-level config knobs above
+	// (connRateLimiter pointer, rate/burst, and authReadTimeout) which can be
+	// re-set in tests while connection handlers concurrently read them.
+	wsConfigMutex sync.RWMutex
 	allowedOrigins      = []string{} // Configurable whitelist (empty = same-host only by default)
 	allowedOriginsMutex sync.RWMutex
 	// trustLANOrigins controls whether origins on private/RFC1918 networks (and
@@ -164,10 +169,37 @@ func AllowWSTokenIssuance(ip string) bool {
 
 // getConnectionRateLimiter returns the singleton rate limiter instance
 func getConnectionRateLimiter() *ConnectionRateLimiter {
+	wsConfigMutex.RLock()
+	if connRateLimiter != nil {
+		l := connRateLimiter
+		wsConfigMutex.RUnlock()
+		return l
+	}
+	wsConfigMutex.RUnlock()
+	wsConfigMutex.Lock()
+	defer wsConfigMutex.Unlock()
 	connRateLimiterOnce.Do(func() {
 		connRateLimiter = NewConnectionRateLimiter()
 	})
+	if connRateLimiter == nil {
+		connRateLimiter = NewConnectionRateLimiter()
+	}
 	return connRateLimiter
+}
+
+// getAuthReadTimeout returns the configured auth read timeout in a
+// concurrency-safe way (tests mutate this value).
+func getAuthReadTimeout() time.Duration {
+	wsConfigMutex.RLock()
+	defer wsConfigMutex.RUnlock()
+	return authReadTimeout
+}
+
+// getConnectionRateConfig returns the current rate limit and burst.
+func getConnectionRateConfig() (rate.Limit, int) {
+	wsConfigMutex.RLock()
+	defer wsConfigMutex.RUnlock()
+	return connectionRateLimit, connectionRateBurst
 }
 
 // isPrivateIP checks if an IP address is in a private RFC 1918 range or Tailscale range
@@ -475,7 +507,7 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager, otaManag
 		defer conn.Close()
 
 		// Set a deadline for receiving the auth token.
-		conn.SetReadDeadline(time.Now().Add(authReadTimeout))
+		conn.SetReadDeadline(time.Now().Add(getAuthReadTimeout()))
 
 		// First message MUST be the auth token
 		var authMsg struct {

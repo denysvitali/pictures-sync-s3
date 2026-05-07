@@ -40,8 +40,10 @@ type FileListResult struct {
 
 // TestConnection tests the rclone configuration
 func (m *Manager) TestConnection() error {
+	rcloneConfigMu.Lock()
+	defer rcloneConfigMu.Unlock()
 	// Load rclone config from custom path
-	if err := m.loadRcloneConfig(); err != nil {
+	if err := m.loadRcloneConfigLocked(); err != nil {
 		return err
 	}
 
@@ -73,13 +75,15 @@ func (m *Manager) TestConnection() error {
 
 // ListRemotes lists configured remotes
 func (m *Manager) ListRemotes() ([]string, error) {
+	rcloneConfigMu.Lock()
+	defer rcloneConfigMu.Unlock()
 	// Load rclone config from custom path
-	if err := m.loadRcloneConfig(); err != nil {
+	if err := m.loadRcloneConfigLocked(); err != nil {
 		return nil, err
 	}
 
-	// Get the storage from the configuration
-	storage, err := m.getConfigStorage()
+	// Get the storage from the configuration (already under rcloneConfigMu)
+	storage, err := m.getConfigStorageLocked()
 	if err != nil {
 		return nil, err
 	}
@@ -100,8 +104,10 @@ func (m *Manager) ListRemotes() ([]string, error) {
 
 // ListCardIDs lists all card IDs (card-* directories) in the photos folder
 func (m *Manager) ListCardIDs() ([]FileInfo, error) {
+	rcloneConfigMu.Lock()
+	defer rcloneConfigMu.Unlock()
 	// Load rclone config
-	if err := m.loadRcloneConfig(); err != nil {
+	if err := m.loadRcloneConfigLocked(); err != nil {
 		return nil, err
 	}
 
@@ -221,8 +227,10 @@ func (m *Manager) ListFiles(path string) ([]FileInfo, error) {
 	path = strings.TrimPrefix(path, "/")
 	path = strings.TrimPrefix(path, "\\")
 
+	rcloneConfigMu.Lock()
+	defer rcloneConfigMu.Unlock()
 	// Load rclone config from custom path
-	if err := m.loadRcloneConfig(); err != nil {
+	if err := m.loadRcloneConfigLocked(); err != nil {
 		return nil, err
 	}
 
@@ -313,8 +321,10 @@ func (m *Manager) GetFile(path string, w io.Writer) error {
 	path = strings.TrimPrefix(path, "/")
 	path = strings.TrimPrefix(path, "\\")
 
+	rcloneConfigMu.Lock()
+	defer rcloneConfigMu.Unlock()
 	// Load rclone config from custom path
-	if err := m.loadRcloneConfig(); err != nil {
+	if err := m.loadRcloneConfigLocked(); err != nil {
 		return err
 	}
 
@@ -404,8 +414,10 @@ func (m *Manager) GetPublicLink(path string) (string, error) {
 		return "", fmt.Errorf("path must reference a file")
 	}
 
+	rcloneConfigMu.Lock()
+	defer rcloneConfigMu.Unlock()
 	// Load rclone config from custom path
-	if err := m.loadRcloneConfig(); err != nil {
+	if err := m.loadRcloneConfigLocked(); err != nil {
 		return "", err
 	}
 
@@ -437,9 +449,21 @@ func (m *Manager) GetPublicLink(path string) (string, error) {
 	return link, nil
 }
 
-// getConfigStorage loads and returns the configuration storage
+// getConfigStorage loads and returns the configuration storage. It acquires
+// rcloneConfigMu for its lifetime; the returned storage is only valid while
+// the caller holds the mutex (which this helper does NOT keep held).
+//
+// Prefer getConfigStorageLocked when the caller already owns rcloneConfigMu.
 func (m *Manager) getConfigStorage() (*configfile.Storage, error) {
-	if err := m.loadRcloneConfig(); err != nil {
+	rcloneConfigMu.Lock()
+	defer rcloneConfigMu.Unlock()
+	return m.getConfigStorageLocked()
+}
+
+// getConfigStorageLocked loads and returns the configuration storage.
+// Caller MUST hold rcloneConfigMu.
+func (m *Manager) getConfigStorageLocked() (*configfile.Storage, error) {
+	if err := m.loadRcloneConfigLocked(); err != nil {
 		return nil, err
 	}
 

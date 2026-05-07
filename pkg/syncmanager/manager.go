@@ -160,8 +160,32 @@ func (m *Manager) UnsubscribeProgress(ch chan Progress) {
 	}
 }
 
-// loadRcloneConfig loads the rclone configuration from the custom path
+// rcloneConfigMu serializes access to rclone's package-level configuration
+// globals (SetConfigPath, Install, Data) which are not safe for concurrent
+// mutation. All call sites that touch the global rclone config — both the
+// initial load and any subsequent reads of the parsed config (storage.Load,
+// storage.GetSectionList, fs.NewFs, etc.) — must hold this lock for the
+// entire duration of the operation, otherwise another goroutine can swap
+// the global config out from under them and the race detector will fire.
+var rcloneConfigMu sync.Mutex
+
+// LockRcloneConfig acquires the package-level rclone config mutex. Callers
+// must pair this with UnlockRcloneConfig (typically via defer) and hold the
+// lock for the full duration of any rclone config / fs operation.
+func LockRcloneConfig()   { rcloneConfigMu.Lock() }
+func UnlockRcloneConfig() { rcloneConfigMu.Unlock() }
+
+// loadRcloneConfig loads the rclone configuration from the custom path.
+// It serializes against other rclone-config mutations via rcloneConfigMu.
 func (m *Manager) loadRcloneConfig() error {
+	rcloneConfigMu.Lock()
+	defer rcloneConfigMu.Unlock()
+	return m.loadRcloneConfigLocked()
+}
+
+// loadRcloneConfigLocked performs the actual rclone config load. Caller MUST
+// hold rcloneConfigMu.
+func (m *Manager) loadRcloneConfigLocked() error {
 	if err := config.SetConfigPath(m.configPath); err != nil {
 		return fmt.Errorf("failed to set config path: %w", err)
 	}

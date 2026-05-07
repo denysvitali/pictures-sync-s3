@@ -29,6 +29,7 @@ type Monitor struct {
 	mountMu       sync.Mutex   // Protects mount/unmount operations (prevents concurrent mounts)
 
 	// Cache for /proc/mounts to reduce I/O
+	mountsCacheMu   sync.Mutex // Protects cachedMounts and mountsCacheTime
 	cachedMounts    string
 	mountsCacheTime time.Time
 	mountsCacheTTL  time.Duration
@@ -139,8 +140,11 @@ func (m *Monitor) GetCurrentDevice() string {
 func (m *Monitor) RedetectCurrentDevice() error {
 	m.mu.Lock()
 	m.ignoredDevice = ""
-	m.mountsCacheTime = time.Time{}
 	m.mu.Unlock()
+
+	m.mountsCacheMu.Lock()
+	m.mountsCacheTime = time.Time{}
+	m.mountsCacheMu.Unlock()
 
 	m.checkDevices()
 
@@ -161,7 +165,9 @@ func (m *Monitor) pollDevices() {
 			return
 		case <-ticker.C:
 			// Invalidate cache at each poll to get fresh data
+			m.mountsCacheMu.Lock()
 			m.mountsCacheTime = time.Time{}
+			m.mountsCacheMu.Unlock()
 			m.checkDevices()
 		}
 	}
@@ -254,6 +260,9 @@ func (m *Monitor) checkDevices() {
 
 // getCachedMounts returns cached /proc/mounts content or refreshes if expired
 func (m *Monitor) getCachedMounts() (string, error) {
+	m.mountsCacheMu.Lock()
+	defer m.mountsCacheMu.Unlock()
+
 	// Check if cache is still valid
 	if time.Since(m.mountsCacheTime) < m.mountsCacheTTL {
 		return m.cachedMounts, nil

@@ -3,6 +3,7 @@ package sdmonitor
 import (
 	"log"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -22,7 +23,7 @@ func TestPotentialDeadlock(t *testing.T) {
 	}
 
 	// Track if checkDevices completes
-	checkDevicesComplete := false
+	var checkDevicesComplete atomic.Bool
 	var wg sync.WaitGroup
 	wg.Add(1)
 
@@ -43,13 +44,13 @@ func TestPotentialDeadlock(t *testing.T) {
 		log.Println("Test: Attempting to send event...")
 		monitor.eventChan <- event // This could block if buffer is full
 		log.Println("Test: Event sent successfully")
-		checkDevicesComplete = true
+		checkDevicesComplete.Store(true)
 	}()
 
 	// Wait a bit to see if it completes
 	time.Sleep(100 * time.Millisecond)
 
-	if !checkDevicesComplete {
+	if !checkDevicesComplete.Load() {
 		t.Log("checkDevices appears to be blocked on channel send")
 		// Try to receive to unblock
 		select {
@@ -69,7 +70,7 @@ func TestPotentialDeadlock(t *testing.T) {
 
 	select {
 	case <-done:
-		if checkDevicesComplete {
+		if checkDevicesComplete.Load() {
 			t.Log("checkDevices completed successfully")
 		} else {
 			t.Error("checkDevices blocked but then completed after receive")

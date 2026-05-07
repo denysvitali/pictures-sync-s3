@@ -89,7 +89,9 @@ func (m *Monitor) FormatCurrentDevice(ctx context.Context, devicePath, label str
 		return fmt.Errorf("unmount SD card before format: %w", err)
 	}
 	m.ignoreDeviceUntilRemoval(devicePath)
+	m.mountsCacheMu.Lock()
 	m.mountsCacheTime = time.Time{}
+	m.mountsCacheMu.Unlock()
 	log.Printf("SD card partition %s will be ignored until removal after format attempt", devicePath)
 
 	filesystemType, err := formatDevice(formatCtx, devicePath, label)

@@ -60,8 +60,18 @@ func (m *Manager) load() error {
 	return m.loadHistory()
 }
 
-// save persists current state to disk (caller must hold lock)
+// save persists current state to disk. It acquires an RLock to safely read
+// currentState, so callers MUST NOT already hold m.mu (read or write).
+// Internal callers that already hold the write lock should use saveLocked.
 func (m *Manager) save() error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.saveState()
+}
+
+// saveLocked persists current state to disk. Caller MUST hold m.mu (read or
+// write lock).
+func (m *Manager) saveLocked() error {
 	return m.saveState()
 }
 
@@ -83,7 +93,7 @@ func (m *Manager) clearStaleSync() error {
 	m.currentState.Status = StatusIdle
 
 	// Save cleaned state
-	if err := m.save(); err != nil {
+	if err := m.saveLocked(); err != nil {
 		return fmt.Errorf("failed to save cleaned state: %w", err)
 	}
 	if err := m.saveHistory(); err != nil {
@@ -134,7 +144,7 @@ func (m *Manager) GetState() CurrentState {
 func (m *Manager) mutate(fn func(*CurrentState)) error {
 	m.mu.Lock()
 	fn(&m.currentState)
-	if err := m.save(); err != nil {
+	if err := m.saveLocked(); err != nil {
 		m.mu.Unlock()
 		return err
 	}
@@ -239,7 +249,7 @@ func (m *Manager) StartSync(cardID string, totalFiles, totalBytes int64) (*SyncR
 	m.currentState.Status = StatusSyncing
 	m.currentState.Error = ""
 
-	if err := m.save(); err != nil {
+	if err := m.saveLocked(); err != nil {
 		m.mu.Unlock()
 		return nil, err
 	}
@@ -278,7 +288,7 @@ func (m *Manager) UpdateSyncProgress(filesSynced, bytesSynced int64, currentFile
 	shouldSave := time.Since(m.lastProgressSave) >= m.progressSaveDelay
 	if shouldSave {
 		m.lastProgressSave = time.Now()
-		if err := m.save(); err != nil {
+		if err := m.saveLocked(); err != nil {
 			m.mu.Unlock()
 			return err
 		}
@@ -327,7 +337,7 @@ func (m *Manager) FinishSync(success bool, err error) error {
 	m.currentState.CurrentSync = nil
 
 	// Save state and history
-	if saveErr := m.save(); saveErr != nil {
+	if saveErr := m.saveLocked(); saveErr != nil {
 		m.mu.Unlock()
 		return saveErr
 	}

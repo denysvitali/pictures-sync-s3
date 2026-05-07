@@ -30,18 +30,16 @@ func NewMockStateManager() *MockStateManager {
 
 func (m *MockStateManager) SetStatus(status state.SyncStatus) error {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.status = status
 	currentState := state.CurrentState{Status: status}
-	listeners := make([]chan state.CurrentState, len(m.listeners))
-	copy(listeners, m.listeners)
-	m.mu.Unlock()
-
-	// Notify listeners
-	for _, ch := range listeners {
+	// Send under the lock so Unsubscribe cannot close a channel mid-send.
+	// Sends are non-blocking (default case skips full channels), so
+	// holding the lock here doesn't risk deadlock.
+	for _, ch := range m.listeners {
 		select {
 		case ch <- currentState:
 		default:
-			// Skip if channel is full
 		}
 	}
 	return nil

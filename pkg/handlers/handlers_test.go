@@ -244,6 +244,11 @@ func setupTestContext(t *testing.T) (*Context, func()) {
 	tempDir := t.TempDir()
 	oldPerm := os.Getenv("PERM_DIR")
 	os.Setenv("PERM_DIR", tempDir)
+	oldRuntime := os.Getenv("PICTURES_SYNC_STATE_DIR")
+	// Isolate runtime state (state.json) per-test; otherwise the default
+	// os.TempDir()/pictures-sync directory is shared across tests and one
+	// test's SetSDCard(true, ...) leaks into the next test's NewManager().
+	os.Setenv("PICTURES_SYNC_STATE_DIR", tempDir)
 
 	stateMgr, err := state.NewManager()
 	if err != nil {
@@ -310,6 +315,11 @@ func setupTestContext(t *testing.T) (*Context, func()) {
 			os.Unsetenv("PERM_DIR")
 		} else {
 			os.Setenv("PERM_DIR", oldPerm)
+		}
+		if oldRuntime == "" {
+			os.Unsetenv("PICTURES_SYNC_STATE_DIR")
+		} else {
+			os.Setenv("PICTURES_SYNC_STATE_DIR", oldRuntime)
 		}
 	}
 

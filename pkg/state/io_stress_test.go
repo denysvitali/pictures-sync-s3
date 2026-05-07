@@ -103,7 +103,7 @@ func BenchmarkStateSaveLoad(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			m.mu.RLock()
-			err := m.save()
+			err := m.saveLocked()
 			m.mu.RUnlock()
 			if err != nil {
 				b.Fatal(err)
@@ -124,7 +124,7 @@ func BenchmarkStateSaveLoad(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			m.mu.Lock()
-			if err := m.save(); err != nil {
+			if err := m.saveLocked(); err != nil {
 				m.mu.Unlock()
 				b.Fatal(err)
 			}

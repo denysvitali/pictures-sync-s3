@@ -29,18 +29,22 @@ func TestMain(m *testing.M) {
 
 func resetWebSocketTestState(t *testing.T) {
 	t.Helper()
+	wsConfigMutex.Lock()
 	connRateLimiter = NewConnectionRateLimiter()
 	connRateLimiterOnce = sync.Once{}
 	connectionRateLimit = rate.Inf
 	connectionRateBurst = 1000
 	authReadTimeout = 5 * time.Second
+	wsConfigMutex.Unlock()
 	// LAN auto-trust is enabled at the suite level via TestMain.
 	t.Cleanup(func() {
+		wsConfigMutex.Lock()
 		connRateLimiter = nil
 		connRateLimiterOnce = sync.Once{}
 		connectionRateLimit = rate.Every(12 * time.Second)
 		connectionRateBurst = 2
 		authReadTimeout = 5 * time.Second
+		wsConfigMutex.Unlock()
 	})
 }
 
@@ -133,7 +137,9 @@ func TestWebSocketAuthentication(t *testing.T) {
 	})
 
 	t.Run("authentication timeout", func(t *testing.T) {
+		wsConfigMutex.Lock()
 		authReadTimeout = 10 * time.Millisecond
+		wsConfigMutex.Unlock()
 
 		dialer, headers := createTestDialer()
 		conn, _, err := dialer.Dial(wsURL, headers)

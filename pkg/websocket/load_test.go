@@ -624,7 +624,9 @@ func BenchmarkNotificationBroadcast(b *testing.B) {
 // TestConnectionTimeout tests connection timeout behavior
 func TestConnectionTimeout(t *testing.T) {
 	resetWebSocketTestState(t)
+	wsConfigMutex.Lock()
 	authReadTimeout = 100 * time.Millisecond
+	wsConfigMutex.Unlock()
 	tmpDir := t.TempDir()
 	stateMgr, eventMgr := setupManagers(t, tmpDir)
 
@@ -655,7 +657,7 @@ func TestConnectionTimeout(t *testing.T) {
 	}
 
 	if elapsed < 50*time.Millisecond || elapsed > time.Second {
-		t.Errorf("expected auth timeout around %v, got %v", authReadTimeout, elapsed)
+		t.Errorf("expected auth timeout around %v, got %v", getAuthReadTimeout(), elapsed)
 	}
 }
 

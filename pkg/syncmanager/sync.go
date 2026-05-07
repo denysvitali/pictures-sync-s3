@@ -35,8 +35,16 @@ func (m *Manager) Sync(sourcePath, cardID string, totalFiles int, totalBytes int
 		m.mu.Unlock()
 	}()
 
+	// Hold rcloneConfigMu for the entire sync. rclone's package-level config
+	// (config path, parsed config data) is mutated by SetConfigPath/Install
+	// and read by fs.NewFs / operations during the sync, so we must serialize
+	// against any concurrent rclone-config consumers (ListRemotes, ListFiles,
+	// TestConnection, etc.) to avoid data races on those globals.
+	rcloneConfigMu.Lock()
+	defer rcloneConfigMu.Unlock()
+
 	// Load rclone config from custom path
-	if err := m.loadRcloneConfig(); err != nil {
+	if err := m.loadRcloneConfigLocked(); err != nil {
 		return err
 	}
 
@@ -94,7 +102,7 @@ func (m *Manager) Sync(sourcePath, cardID string, totalFiles int, totalBytes int
 	// Upload JPG files to Google Photos if enabled
 	if m.googlePhotosEnabled && m.googlePhotosRemoteName != "" {
 		log.Printf("Starting Google Photos upload for JPG files...")
-		if err := m.uploadToGooglePhotos(ctx, sourcePath, cardID); err != nil {
+		if err := m.uploadToGooglePhotosLocked(ctx, sourcePath, cardID); err != nil {
 			log.Printf("Warning: Google Photos upload failed: %v", err)
 			// Don't return error - main sync succeeded
 		} else {

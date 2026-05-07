@@ -10,10 +10,19 @@ import (
 	"github.com/rclone/rclone/fs/operations"
 )
 
-// uploadToGooglePhotos uploads only JPG files to Google Photos
+// uploadToGooglePhotos uploads only JPG files to Google Photos. It acquires
+// rcloneConfigMu for the duration of the upload.
 func (m *Manager) uploadToGooglePhotos(ctx context.Context, sourcePath, cardID string) error {
+	rcloneConfigMu.Lock()
+	defer rcloneConfigMu.Unlock()
+	return m.uploadToGooglePhotosLocked(ctx, sourcePath, cardID)
+}
+
+// uploadToGooglePhotosLocked performs the upload. Caller MUST hold
+// rcloneConfigMu.
+func (m *Manager) uploadToGooglePhotosLocked(ctx context.Context, sourcePath, cardID string) error {
 	// Load rclone config from custom path
-	if err := m.loadRcloneConfig(); err != nil {
+	if err := m.loadRcloneConfigLocked(); err != nil {
 		return err
 	}
 
