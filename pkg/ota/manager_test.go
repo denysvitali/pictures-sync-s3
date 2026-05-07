@@ -3,7 +3,9 @@ package ota
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -202,6 +204,71 @@ func TestGokrazyUpdaterTargetSkipsTLSVerifyAfterLoopbackHTTPRedirect(t *testing.
 
 	if _, err := updater.NewTarget(context.Background(), baseURL.String(), client); err != nil {
 		t.Fatalf("updater.NewTarget should accept loopback HTTP to self-signed HTTPS redirect: %v", err)
+	}
+}
+
+func TestGokrazyInstallerResolvesHTTPRedirectBeforeStreamingRoot(t *testing.T) {
+	const username = "gokrazy"
+	const password = "photo-backup"
+	var rootMethod string
+
+	tlsServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, pass, ok := r.BasicAuth()
+		if !ok || user != username || pass != password {
+			http.Error(w, "invalid credentials", http.StatusUnauthorized)
+			return
+		}
+
+		switch r.URL.Path {
+		case "/update/features":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"features":""}`))
+		case "/update/root":
+			rootMethod = r.Method
+			if r.Method != http.MethodPut {
+				http.Error(w, "expected a PUT request", http.StatusBadRequest)
+				return
+			}
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			sum := sha256.Sum256(body)
+			_, _ = fmt.Fprintf(w, "%x", sum)
+		case "/update/switch", "/reboot":
+			if r.Method != http.MethodPost {
+				http.Error(w, "expected a POST request", http.StatusBadRequest)
+				return
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer tlsServer.Close()
+
+	redirectServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, tlsServer.URL+r.URL.Path, http.StatusFound)
+	}))
+	defer redirectServer.Close()
+
+	baseURL, err := url.Parse(redirectServer.URL + "/")
+	if err != nil {
+		t.Fatalf("parse redirect server URL: %v", err)
+	}
+	baseURL.User = url.UserPassword(username, password)
+
+	client := NewUpdateHTTPClient(baseURL.String(), time.Minute, false)
+	installer := GokrazyInstaller{
+		BaseURL:    baseURL.String(),
+		HTTPClient: client,
+	}
+
+	if err := installer.InstallRoot(context.Background(), bytes.NewReader([]byte("root-image"))); err != nil {
+		t.Fatalf("InstallRoot returned error: %v", err)
+	}
+	if rootMethod != http.MethodPut {
+		t.Fatalf("/update/root method = %q, want %q", rootMethod, http.MethodPut)
 	}
 }
 

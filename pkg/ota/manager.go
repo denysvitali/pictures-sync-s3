@@ -48,14 +48,14 @@ type GokrazyInstaller struct {
 }
 
 func (i GokrazyInstaller) InstallRoot(ctx context.Context, r io.Reader) error {
-	baseURL := strings.TrimSpace(i.BaseURL)
+	baseURL := normalizeUpdateBaseURL(i.BaseURL)
 	if baseURL == "" {
 		baseURL = DefaultUpdateURL
 	}
 
 	client := i.httpClient(baseURL)
 
-	target, err := updater.NewTarget(ctx, baseURL, client)
+	target, err := NewUpdateTarget(ctx, baseURL, client)
 	if err != nil {
 		return fmt.Errorf("connect to gokrazy updater: %w", err)
 	}
@@ -485,6 +485,80 @@ func valueDefault(value, fallback string) string {
 // NewUpdateHTTPClient returns an HTTP client configured for gokrazy updater uploads.
 func NewUpdateHTTPClient(rawURL string, timeout time.Duration, insecureSkipVerify bool) *http.Client {
 	return configureUpdateHTTPClient(&http.Client{Timeout: timeout}, rawURL, insecureSkipVerify)
+}
+
+// NewUpdateTarget returns a gokrazy updater target after resolving gokrazy's
+// HTTP-to-HTTPS redirect. Uploads stream request bodies, so following a 302
+// during PUT would turn the upload into a GET and fail at /update/root.
+func NewUpdateTarget(ctx context.Context, rawBaseURL string, client *http.Client) (*updater.Target, error) {
+	baseURL := normalizeUpdateBaseURL(rawBaseURL)
+	if baseURL == "" {
+		baseURL = DefaultUpdateURL
+	}
+	if client == nil {
+		client = http.DefaultClient
+	}
+
+	resolvedBaseURL, err := resolveUpdateBaseURL(ctx, baseURL, client)
+	if err != nil {
+		return nil, err
+	}
+	return updater.NewTarget(ctx, resolvedBaseURL, client)
+}
+
+func normalizeUpdateBaseURL(rawURL string) string {
+	baseURL := strings.TrimSpace(rawURL)
+	if baseURL == "" || strings.HasSuffix(baseURL, "/") {
+		return baseURL
+	}
+	return baseURL + "/"
+}
+
+func resolveUpdateBaseURL(ctx context.Context, baseURL string, client *http.Client) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"update/features", nil)
+	if err != nil {
+		return "", err
+	}
+
+	noRedirectClient := *client
+	noRedirectClient.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+
+	resp, err := noRedirectClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
+	default:
+		return baseURL, nil
+	}
+
+	location := strings.TrimSpace(resp.Header.Get("Location"))
+	if location == "" {
+		return baseURL, nil
+	}
+	redirectURL, err := req.URL.Parse(location)
+	if err != nil {
+		return "", err
+	}
+	if redirectURL.User == nil {
+		redirectURL.User = req.URL.User
+	}
+
+	redirectURL.RawQuery = ""
+	redirectURL.Fragment = ""
+	redirectURL.Path = strings.TrimSuffix(redirectURL.Path, "update/features")
+	if redirectURL.Path == "" {
+		redirectURL.Path = "/"
+	}
+	if !strings.HasSuffix(redirectURL.Path, "/") {
+		redirectURL.Path += "/"
+	}
+	return redirectURL.String(), nil
 }
 
 func configureUpdateHTTPClient(client *http.Client, rawURL string, insecureSkipVerify bool) *http.Client {

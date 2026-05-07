@@ -81,7 +81,7 @@ func run(ctx context.Context, opts options) error {
 
 	baseURL := ensureTrailingSlash(strings.TrimSpace(opts.targetURL))
 	client := ota.NewUpdateHTTPClient(baseURL, opts.timeout, opts.insecure)
-	target, err := updater.NewTarget(ctx, baseURL, client)
+	target, err := ota.NewUpdateTarget(ctx, baseURL, client)
 	if err != nil {
 		return fmt.Errorf("connect to gokrazy updater: %w", err)
 	}
