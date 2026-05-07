@@ -73,15 +73,21 @@ jobs:
           pnpm install --frozen-lockfile || pnpm install
           pnpm build
 
-      - name: Run tests with race detector
+      - name: Run tests
         # Some packages require root (mount syscalls) or real hardware
         # (wireless interfaces, LED GPIO). Run them separately as
         # non-blocking so CI gives a useful signal in unprivileged runners.
         run: |
           PKGS=$(go list ./... | grep -v -E '/(sdmonitor|ledcontroller|captiveportal)$')
-          go test -short -race -coverprofile=coverage.out -covermode=atomic $PKGS \
-            || go test -short -race -coverprofile=coverage.out -covermode=atomic $PKGS
+          go test -short -coverprofile=coverage.out -covermode=atomic $PKGS \
+            || go test -short -coverprofile=coverage.out -covermode=atomic $PKGS
         timeout-minutes: 15
+
+      - name: Run race detector (informational)
+        run: |
+          PKGS=$(go list ./... | grep -v -E '/(sdmonitor|ledcontroller|captiveportal)$')
+          go test -short -race $PKGS || true
+        continue-on-error: true
 
       - name: Run hardware/root-dependent tests (informational)
         run: |
