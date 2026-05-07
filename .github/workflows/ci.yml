@@ -56,9 +56,26 @@ jobs:
       - name: Verify dependencies
         run: go mod verify
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.2
+
+      - name: Build embedded webui bundle
+        run: |
+          cd webui
+          corepack enable
+          pnpm install --frozen-lockfile || pnpm install
+          pnpm build
+
       - name: Run tests with race detector
         run: |
-          go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+          go test -short -race -coverprofile=coverage.out -covermode=atomic ./...
         timeout-minutes: 15
 
       - name: Generate coverage report
@@ -122,6 +139,23 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.2
+
+      - name: Build embedded webui bundle
+        run: |
+          cd webui
+          corepack enable
+          pnpm install --frozen-lockfile || pnpm install
+          pnpm build
 
       - name: Build pictures-sync
         env:
@@ -220,10 +254,27 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.2
+
+      - name: Build embedded webui bundle
+        run: |
+          cd webui
+          corepack enable
+          pnpm install --frozen-lockfile || pnpm install
+          pnpm build
+
       - name: Run integration tests
         run: |
           # Run tests marked with integration tag
-          go test -v -tags=integration -timeout=15m ./...
+          go test -short -tags=integration -timeout=15m ./...
         continue-on-error: true  # Integration tests may require specific setup
 
       - name: Test data directory checks

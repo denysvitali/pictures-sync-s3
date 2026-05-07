@@ -41,6 +41,23 @@ jobs:
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.2
+
+      - name: Build embedded webui bundle
+        run: |
+          cd webui
+          corepack enable
+          pnpm install --frozen-lockfile || pnpm install
+          pnpm build
+
       - name: Run govulncheck
         run: |
           govulncheck -show verbose ./... 2>&1 | tee govulncheck-report.txt
@@ -130,6 +147,23 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.2
+
+      - name: Build embedded webui bundle
+        run: |
+          cd webui
+          corepack enable
+          pnpm install --frozen-lockfile || pnpm install
+          pnpm build
 
       - name: Run Gosec Security Scanner
         # Pinned to v2.26.1
