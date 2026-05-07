@@ -201,13 +201,19 @@ function StatusRow({ icon, label, value, ok }) {
 function DeviceInfoCard({ status, devices, onSelectDevice, onFormatDevice, isSelecting, isFormatting }) {
   const deviceList = devices || []
   const canSelect = (status?.needs_device_select || deviceList.length > 1) && deviceList.length > 0
-  const device = deviceList.find((d) => d.is_mounted) || deviceList[0]
-  const selectedDevice = deviceList.find((d) => d.device_path === status.sdcard_path) || device
+  const hasCard = status.sdcard_mounted
+  const device = hasCard
+    ? (deviceList.find((d) => d.is_mounted && d.mount_path === status.sdcard_path) ||
+      deviceList.find((d) => d.is_mounted) ||
+      deviceList[0])
+    : null
+  const selectedDevice = device
   const selectedDevicePath = canSelect
     ? (selectedDevice?.device_path || deviceList[0]?.device_path || '')
     : ''
-  const hasCard = status.sdcard_mounted
-  const photoCount = status.current_sync?.files_total || status.last_sync?.files_total || 0
+  const photoCount = hasCard
+    ? (status.current_sync?.files_total || status.last_sync?.files_total || 0)
+    : 0
 
   const deviceName = selectedDevice?.volume_label || selectedDevice?.device_name || (hasCard ? 'SD Card' : null)
   const deviceSize = selectedDevice?.size_human || (selectedDevice?.size ? formatBytes(selectedDevice.size) : null)
@@ -237,10 +243,10 @@ function DeviceInfoCard({ status, devices, onSelectDevice, onFormatDevice, isSel
             </div>
           </div>
 
-          {selectedDevice?.size > 0 && (
+          {hasCard && selectedDevice?.size > 0 && (
             <div>
               <div className="flex justify-between text-xs mb-1">
-                <span className="text-surface-400">Storage used</span>
+                <span className="text-surface-400">Card capacity</span>
                 <span className="text-surface-300">{formatBytes(selectedDevice.size)}</span>
               </div>
             </div>
