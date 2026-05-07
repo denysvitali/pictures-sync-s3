@@ -311,13 +311,13 @@ jobs:
           # touched between the two builds.
           GOCACHE=$(mktemp -d) CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
             go build -trimpath -buildvcs=false -o build1 ./cmd/pictures-sync
-          sha256sum build1 > build1.sha256
+          sha256sum build1 | awk '{print $1}' > build1.sha256
 
           sleep 2
 
           GOCACHE=$(mktemp -d) CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
             go build -trimpath -buildvcs=false -o build2 ./cmd/pictures-sync
-          sha256sum build2 > build2.sha256
+          sha256sum build2 | awk '{print $1}' > build2.sha256
 
           # Compare
           if diff build1.sha256 build2.sha256; then
