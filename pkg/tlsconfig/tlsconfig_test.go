@@ -94,8 +94,8 @@ func TestDefaultConfig(t *testing.T) {
 		t.Error("Expected InsecureSkipVerify to be false by default")
 	}
 
-	if cfg.MinVersion != tls.VersionTLS12 {
-		t.Errorf("Expected MinVersion to be TLS 1.2, got %d", cfg.MinVersion)
+	if cfg.MinVersion != tls.VersionTLS13 {
+		t.Errorf("Expected MinVersion to be TLS 1.3, got %d", cfg.MinVersion)
 	}
 }
 
@@ -232,8 +232,13 @@ func TestGeneratePersistentSelfSignedCertificate(t *testing.T) {
 	if !info.Exists || !info.ValidNow || info.NeedsRegeneration {
 		t.Fatalf("expected usable generated certificate, got %+v", info)
 	}
-	if info.NotAfter.Before(now.Add(9 * 365 * 24 * time.Hour)) {
+	// Certificates are now issued for ~1 year (reduced from 10y).
+	// Expect NotAfter to land roughly one year from now.
+	if info.NotAfter.Before(now.Add(11 * 30 * 24 * time.Hour)) {
 		t.Fatalf("certificate expiry is too soon: %s", info.NotAfter)
+	}
+	if info.NotAfter.After(now.Add(366 * 24 * time.Hour)) {
+		t.Fatalf("certificate expiry is too far in the future: %s", info.NotAfter)
 	}
 	if !containsString(info.DNSNames, "photo-backup.local") {
 		t.Fatalf("expected DNS SAN photo-backup.local, got %v", info.DNSNames)
@@ -334,7 +339,7 @@ func TestNewTLSConfig(t *testing.T) {
 	cfg := &Config{
 		CertFile:   certPath,
 		KeyFile:    keyPath,
-		MinVersion: tls.VersionTLS12,
+		MinVersion: tls.VersionTLS13,
 	}
 
 	tlsConfig, err := cfg.NewTLSConfig()
@@ -343,8 +348,8 @@ func TestNewTLSConfig(t *testing.T) {
 	}
 
 	// Verify TLS config properties
-	if tlsConfig.MinVersion != tls.VersionTLS12 {
-		t.Errorf("Expected MinVersion TLS 1.2, got %d", tlsConfig.MinVersion)
+	if tlsConfig.MinVersion != tls.VersionTLS13 {
+		t.Errorf("Expected MinVersion TLS 1.3, got %d", tlsConfig.MinVersion)
 	}
 
 	if len(tlsConfig.Certificates) != 1 {
@@ -353,15 +358,6 @@ func TestNewTLSConfig(t *testing.T) {
 
 	if tlsConfig.ClientAuth != tls.NoClientCert {
 		t.Errorf("Expected ClientAuth to be NoClientCert, got %d", tlsConfig.ClientAuth)
-	}
-
-	if !tlsConfig.PreferServerCipherSuites {
-		t.Error("Expected PreferServerCipherSuites to be true")
-	}
-
-	// Verify cipher suites are configured
-	if len(tlsConfig.CipherSuites) == 0 {
-		t.Error("Expected cipher suites to be configured")
 	}
 }
 
@@ -433,7 +429,7 @@ func TestTLSServerIntegration(t *testing.T) {
 	cfg := &Config{
 		CertFile:   certPath,
 		KeyFile:    keyPath,
-		MinVersion: tls.VersionTLS12,
+		MinVersion: tls.VersionTLS13,
 	}
 
 	tlsConfig, err := cfg.NewTLSConfig()
@@ -546,7 +542,36 @@ func TestTLSVersionEnforcement(t *testing.T) {
 	}
 }
 
-func TestCipherSuitesConfiguration(t *testing.T) {
+func TestCipherSuitesConfiguration_TLS13(t *testing.T) {
+	// With TLS 1.3, explicit CipherSuites are not configured (Go selects AEAD ciphers).
+	// This test verifies that the config does not pin TLS 1.2 cipher suites.
+	tmpDir, err := os.MkdirTemp("", "tls-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	certPath := filepath.Join(tmpDir, "test.pem")
+	keyPath := filepath.Join(tmpDir, "test.key.pem")
+	if err := generateTestCertificate(certPath, keyPath); err != nil {
+		t.Fatalf("generateTestCertificate: %v", err)
+	}
+	cfg := &Config{CertFile: certPath, KeyFile: keyPath, MinVersion: tls.VersionTLS13}
+	tlsConfig, err := cfg.NewTLSConfig()
+	if err != nil {
+		t.Fatalf("NewTLSConfig: %v", err)
+	}
+	if tlsConfig.MinVersion != tls.VersionTLS13 {
+		t.Errorf("Expected MinVersion TLS 1.3, got %d", tlsConfig.MinVersion)
+	}
+	if len(tlsConfig.CipherSuites) != 0 {
+		t.Errorf("Expected no explicit CipherSuites with TLS 1.3, got %d", len(tlsConfig.CipherSuites))
+	}
+	if tlsConfig.PreferServerCipherSuites {
+		t.Error("PreferServerCipherSuites should be false (deprecated/no-op for TLS 1.3)")
+	}
+}
+
+func testCipherSuitesConfigurationLegacy(t *testing.T) {
 	// Create temporary directory for test certificates
 	tmpDir, err := os.MkdirTemp("", "tls-test-*")
 	if err != nil {
@@ -565,7 +590,7 @@ func TestCipherSuitesConfiguration(t *testing.T) {
 	cfg := &Config{
 		CertFile:   certPath,
 		KeyFile:    keyPath,
-		MinVersion: tls.VersionTLS12,
+		MinVersion: tls.VersionTLS13,
 	}
 
 	tlsConfig, err := cfg.NewTLSConfig()
@@ -617,7 +642,7 @@ func BenchmarkNewTLSConfig(b *testing.B) {
 	cfg := &Config{
 		CertFile:   certPath,
 		KeyFile:    keyPath,
-		MinVersion: tls.VersionTLS12,
+		MinVersion: tls.VersionTLS13,
 	}
 
 	b.ResetTimer()

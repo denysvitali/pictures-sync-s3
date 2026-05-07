@@ -10,10 +10,16 @@
   "postUpdateOptions": ["gomodTidy"],
   "packageRules": [
     {
-      "groupName": "all dependencies",
+      "groupName": "all non-major dependencies",
       "matchManagers": ["gomod", "github-actions"],
-      "matchUpdateTypes": ["major", "minor", "patch"],
-      "groupSlug": "all-dependencies"
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "groupSlug": "all-non-major"
+    },
+    {
+      "matchManagers": ["gomod", "github-actions"],
+      "matchUpdateTypes": ["major"],
+      "groupName": null,
+      "groupSlug": null
     }
   ]
 }

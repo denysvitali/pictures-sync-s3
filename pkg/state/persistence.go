@@ -21,6 +21,19 @@ var (
 	StateFile       = filepath.Join(runtimeStateDir, "state.json")
 )
 
+// configurePaths is the single source of truth for derived paths. Both the
+// public test hook (SetStateDir) and the env-var-driven init path go through
+// here so we don't drift between them.
+func configurePaths(perm, runtime string) {
+	stateDir = perm
+	runtimeStateDir = runtime
+	PermDir = perm
+	MountDir = filepath.Join(PermDir, "mounts/sdcard")
+	ConfigFile = filepath.Join(PermDir, "rclone.conf")
+	HistoryFile = filepath.Join(PermDir, "sync-history.json")
+	StateFile = filepath.Join(runtimeStateDir, "state.json")
+}
+
 // GetStateDir returns the current persistent state directory (for testing)
 func GetStateDir() string {
 	return stateDir
@@ -29,21 +42,7 @@ func GetStateDir() string {
 // SetStateDir sets persistent and runtime state directories to the same path
 // for tests.
 func SetStateDir(dir string) {
-	stateDir = dir
-	runtimeStateDir = dir
-	PermDir = dir
-	MountDir = filepath.Join(PermDir, "mounts/sdcard")
-	ConfigFile = filepath.Join(PermDir, "rclone.conf")
-	HistoryFile = filepath.Join(PermDir, "sync-history.json")
-	StateFile = filepath.Join(runtimeStateDir, "state.json")
-}
-
-func setPermDir(dir string) {
-	stateDir = dir
-	PermDir = dir
-	MountDir = filepath.Join(PermDir, "mounts/sdcard")
-	ConfigFile = filepath.Join(PermDir, "rclone.conf")
-	HistoryFile = filepath.Join(PermDir, "sync-history.json")
+	configurePaths(dir, dir)
 }
 
 // getPermDir returns the appropriate permanent directory path

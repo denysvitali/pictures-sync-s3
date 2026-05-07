@@ -4,11 +4,15 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
+
+// recordIDCounter disambiguates SyncRecord IDs created within the same
+// nanosecond (e.g. tests starting many syncs concurrently).
+var recordIDCounter uint64
 
 // Manager manages persistent state for the photo sync system
 type Manager struct {
@@ -22,13 +26,7 @@ type Manager struct {
 
 // NewManager creates a new state manager
 func NewManager() (*Manager, error) {
-	if os.Getenv("PERM_DIR") != "" {
-		setPermDir(getPermDir())
-	}
-	if os.Getenv("PICTURES_SYNC_STATE_DIR") != "" {
-		runtimeStateDir = getRuntimeStateDir()
-		StateFile = filepath.Join(runtimeStateDir, "state.json")
-	}
+	configurePathsFromEnv()
 
 	m := &Manager{
 		notifier:          newNotifier(),
@@ -95,146 +93,125 @@ func (m *Manager) clearStaleSync() error {
 	return nil
 }
 
-// GetState returns the current state
+// cloneState returns a deep copy of CurrentState so callers cannot observe
+// or accidentally mutate shared SyncRecord pointers / device slices that the
+// manager continues to update under its lock.
+func cloneState(s CurrentState) CurrentState {
+	out := s
+	if s.CurrentSync != nil {
+		rec := *s.CurrentSync
+		out.CurrentSync = &rec
+	}
+	if s.LastSync != nil {
+		rec := *s.LastSync
+		out.LastSync = &rec
+	}
+	if s.AvailableDevices != nil {
+		devs := make([]DeviceInfo, len(s.AvailableDevices))
+		for i, d := range s.AvailableDevices {
+			cp := d
+			if d.Partitions != nil {
+				cp.Partitions = make([]PartitionInfo, len(d.Partitions))
+				copy(cp.Partitions, d.Partitions)
+			}
+			devs[i] = cp
+		}
+		out.AvailableDevices = devs
+	}
+	return out
+}
+
+// GetState returns a deep copy of the current state
 func (m *Manager) GetState() CurrentState {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.currentState
+	return cloneState(m.currentState)
+}
+
+// mutate runs fn under the write lock, persists, and broadcasts a deep copy
+// of the resulting state to listeners. It consolidates the lock/save/notify
+// boilerplate previously duplicated across the simple setters.
+func (m *Manager) mutate(fn func(*CurrentState)) error {
+	m.mu.Lock()
+	fn(&m.currentState)
+	if err := m.save(); err != nil {
+		m.mu.Unlock()
+		return err
+	}
+	stateCopy := cloneState(m.currentState)
+	m.mu.Unlock()
+
+	m.notifyListenersAsync(stateCopy)
+	return nil
 }
 
 // SetStatus updates the current status
 func (m *Manager) SetStatus(status SyncStatus) error {
-	m.mu.Lock()
-
-	m.currentState.Status = status
-	if status != StatusError {
-		m.currentState.Error = ""
-	}
-
-	if err := m.save(); err != nil {
-		m.mu.Unlock()
-		return err
-	}
-
-	stateCopy := m.currentState
-	m.mu.Unlock()
-
-	m.notifyListenersAsync(stateCopy)
-	return nil
+	return m.mutate(func(s *CurrentState) {
+		s.Status = status
+		if status != StatusError {
+			s.Error = ""
+		}
+	})
 }
 
 // SetError sets the error status with a message
 func (m *Manager) SetError(errorMsg string) error {
-	m.mu.Lock()
-	m.currentState.Status = StatusError
-	m.currentState.Error = errorMsg
-	if m.currentState.CurrentSync != nil {
-		m.currentState.CurrentSync.Error = errorMsg
-		m.currentState.CurrentSync.Status = "error"
-	}
-
-	if err := m.save(); err != nil {
-		m.mu.Unlock()
-		return err
-	}
-
-	stateCopy := m.currentState
-	m.mu.Unlock()
-
-	m.notifyListenersAsync(stateCopy)
-	return nil
+	return m.mutate(func(s *CurrentState) {
+		s.Status = StatusError
+		s.Error = errorMsg
+		if s.CurrentSync != nil {
+			s.CurrentSync.Error = errorMsg
+			s.CurrentSync.Status = "error"
+		}
+	})
 }
 
 // SetSDCard updates SD card mount status
 func (m *Manager) SetSDCard(mounted bool, path string) error {
-	m.mu.Lock()
-	m.currentState.SDCardMounted = mounted
-	m.currentState.SDCardPath = path
-	if !mounted {
-		m.currentState.SDCardDevicePath = ""
-		m.currentState.SDCardPhotoCount = 0
-		m.currentState.SDCardPhotoBytes = 0
-	}
-
-	if err := m.save(); err != nil {
-		m.mu.Unlock()
-		return err
-	}
-
-	stateCopy := m.currentState
-	m.mu.Unlock()
-
-	m.notifyListenersAsync(stateCopy)
-	return nil
+	return m.mutate(func(s *CurrentState) {
+		s.SDCardMounted = mounted
+		s.SDCardPath = path
+		if !mounted {
+			s.SDCardDevicePath = ""
+			s.SDCardPhotoCount = 0
+			s.SDCardPhotoBytes = 0
+		}
+	})
 }
 
 // SetSDCardDevice records the currently mounted SD-card device path.
 func (m *Manager) SetSDCardDevice(devicePath string) error {
-	m.mu.Lock()
-	m.currentState.SDCardDevicePath = devicePath
-
-	if err := m.save(); err != nil {
-		m.mu.Unlock()
-		return err
-	}
-
-	stateCopy := m.currentState
-	m.mu.Unlock()
-
-	m.notifyListenersAsync(stateCopy)
-	return nil
+	return m.mutate(func(s *CurrentState) {
+		s.SDCardDevicePath = devicePath
+	})
 }
 
 // SetSDCardPhotoSummary records the photo count found on the currently mounted card.
 func (m *Manager) SetSDCardPhotoSummary(count, bytes int64) error {
-	m.mu.Lock()
-	m.currentState.SDCardPhotoCount = count
-	m.currentState.SDCardPhotoBytes = bytes
-
-	if err := m.save(); err != nil {
-		m.mu.Unlock()
-		return err
-	}
-
-	stateCopy := m.currentState
-	m.mu.Unlock()
-
-	m.notifyListenersAsync(stateCopy)
-	return nil
+	return m.mutate(func(s *CurrentState) {
+		s.SDCardPhotoCount = count
+		s.SDCardPhotoBytes = bytes
+	})
 }
 
 // SetAvailableDevices updates the list of available storage devices
 func (m *Manager) SetAvailableDevices(devices []DeviceInfo) error {
-	m.mu.Lock()
-	m.currentState.AvailableDevices = devices
-
-	if err := m.save(); err != nil {
-		m.mu.Unlock()
-		return err
-	}
-
-	stateCopy := m.currentState
-	m.mu.Unlock()
-
-	m.notifyListenersAsync(stateCopy)
-	return nil
+	return m.mutate(func(s *CurrentState) {
+		s.AvailableDevices = devices
+	})
 }
 
 // SetNeedsDeviceSelect sets whether manual device selection is needed
 func (m *Manager) SetNeedsDeviceSelect(needs bool) error {
-	m.mu.Lock()
-	m.currentState.NeedsDeviceSelect = needs
+	return m.mutate(func(s *CurrentState) {
+		s.NeedsDeviceSelect = needs
+	})
+}
 
-	if err := m.save(); err != nil {
-		m.mu.Unlock()
-		return err
-	}
-
-	stateCopy := m.currentState
-	m.mu.Unlock()
-
-	m.notifyListenersAsync(stateCopy)
-	return nil
+// newRecordID returns a collision-resistant identifier for a SyncRecord.
+func newRecordID() string {
+	return fmt.Sprintf("%d-%d", time.Now().UnixNano(), atomic.AddUint64(&recordIDCounter, 1))
 }
 
 // StartSync begins a new sync operation
@@ -249,7 +226,7 @@ func (m *Manager) StartSync(cardID string, totalFiles, totalBytes int64) (*SyncR
 	}
 
 	record := &SyncRecord{
-		ID:            fmt.Sprintf("%d", time.Now().Unix()),
+		ID:            newRecordID(),
 		StartTime:     time.Now(),
 		Status:        "syncing",
 		ProgressPhase: "preparing",
@@ -267,11 +244,14 @@ func (m *Manager) StartSync(cardID string, totalFiles, totalBytes int64) (*SyncR
 		return nil, err
 	}
 
-	stateCopy := m.currentState
+	stateCopy := cloneState(m.currentState)
 	m.mu.Unlock()
 
 	m.notifyListenersAsync(stateCopy)
-	return record, nil
+	// Return a copy of the record so callers cannot mutate the record the
+	// manager continues to update under its lock.
+	recCopy := *record
+	return &recCopy, nil
 }
 
 // UpdateSyncProgress updates the progress of current sync
@@ -304,7 +284,7 @@ func (m *Manager) UpdateSyncProgress(filesSynced, bytesSynced int64, currentFile
 		}
 	}
 
-	stateCopy := m.currentState
+	stateCopy := cloneState(m.currentState)
 	m.mu.Unlock()
 
 	m.notifyListenersAsync(stateCopy)
@@ -356,7 +336,7 @@ func (m *Manager) FinishSync(success bool, err error) error {
 		return saveErr
 	}
 
-	stateCopy := m.currentState
+	stateCopy := cloneState(m.currentState)
 	m.mu.Unlock()
 
 	m.notifyListenersAsync(stateCopy)
@@ -426,4 +406,23 @@ func (m *Manager) Reload() error {
 	m.notifyListeners()
 
 	return nil
+}
+
+// configurePathsFromEnv applies any PERM_DIR / PICTURES_SYNC_STATE_DIR
+// overrides at manager construction time.
+func configurePathsFromEnv() {
+	perm := PermDir
+	runtime := runtimeStateDir
+	changed := false
+	if os.Getenv("PERM_DIR") != "" {
+		perm = getPermDir()
+		changed = true
+	}
+	if os.Getenv("PICTURES_SYNC_STATE_DIR") != "" {
+		runtime = getRuntimeStateDir()
+		changed = true
+	}
+	if changed {
+		configurePaths(perm, runtime)
+	}
 }

@@ -1,0 +1,14 @@
+# Shared Gokrazy package list for setup-gokrazy.sh and scripts/build-ota-image.sh.
+# One package per line. Lines starting with '#' and blank lines are ignored.
+# Keep this list in sync between local SD card setups and OTA image builds.
+github.com/gokrazy/fbstatus
+github.com/gokrazy/wifi
+github.com/gokrazy/serial-busybox
+github.com/gokrazy/breakglass
+tailscale.com/cmd/tailscaled
+tailscale.com/cmd/tailscale
+./cmd/wifi-init
+./cmd/tailscale-init
+./cmd/pictures-sync
+./cmd/webui
+./cmd/provision-ap

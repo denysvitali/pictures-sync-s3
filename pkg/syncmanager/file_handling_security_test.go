@@ -143,16 +143,7 @@ func TestPathConstructionVulnerabilities(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mgr := NewManager(configPath, "testremote", tt.remotePath, stateMgr, 1, 1)
-
-			// Test path construction in various methods
-			// These should either validate the card ID or clean the paths safely
-
-			// Test GetRemoteSize
-			_, err := mgr.GetRemoteSize(tt.cardID)
-			if err != nil {
-				t.Logf("%s: GetRemoteSize rejected (good): %v", tt.description, err)
-			}
+			_ = NewManager(configPath, "testremote", tt.remotePath, stateMgr, 1, 1)
 
 			// The key is that validateCardID should catch malicious card IDs
 			if err := validateCardID(tt.cardID); err == nil {
@@ -271,7 +262,6 @@ func TestFileDescriptorLeaks(t *testing.T) {
 		// Rapid operations that might leak FDs
 		for i := 0; i < 50; i++ {
 			mgr.ListRemotes()
-			mgr.GetRemoteSize("card-test1234")
 			time.Sleep(1 * time.Millisecond)
 		}
 

@@ -127,15 +127,12 @@ func (m *Manager) calculateProgress(stats *accounting.StatsInfo, totalFiles int,
 // broadcastProgress sends progress updates to all subscribers
 func (m *Manager) broadcastProgress(progress Progress) {
 	m.mu.Lock()
-	chans := m.progressChans
+	subs := make([]*progressSubscriber, len(m.progressChans))
+	copy(subs, m.progressChans)
 	m.mu.Unlock()
 
-	for _, ch := range chans {
-		select {
-		case ch <- progress:
-		default:
-			// Skip if channel is full
-		}
+	for _, s := range subs {
+		s.send(progress)
 	}
 }
 

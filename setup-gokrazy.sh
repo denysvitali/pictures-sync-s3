@@ -7,6 +7,10 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Source shared package list / helpers (defines gok_packages, gok_config_packages, emit_packages_json).
+# shellcheck source=scripts/gok-common.sh
+source "$SCRIPT_DIR/scripts/gok-common.sh"
+
 echo "=== Photo Backup Station - Gokrazy Setup ==="
 echo ""
 
@@ -92,16 +96,11 @@ else
 fi
 echo ""
 
-# Add public packages only (private packages will be added via config.json)
-echo "Adding public packages..."
-gok -i "$INSTANCE_NAME" add github.com/gokrazy/fbstatus
-gok -i "$INSTANCE_NAME" add github.com/gokrazy/wifi
-gok -i "$INSTANCE_NAME" add github.com/gokrazy/serial-busybox
-gok -i "$INSTANCE_NAME" add github.com/gokrazy/breakglass
-gok -i "$INSTANCE_NAME" add tailscale.com/cmd/tailscaled
-gok -i "$INSTANCE_NAME" add tailscale.com/cmd/tailscale
-gok -i "$INSTANCE_NAME" add ./cmd/wifi-init
-gok -i "$INSTANCE_NAME" add ./cmd/tailscale-init
+# Add packages from the shared list (scripts/gok-packages.txt).
+echo "Adding packages..."
+for pkg in "${gok_packages[@]}"; do
+    gok -i "$INSTANCE_NAME" add "$pkg"
+done
 
 echo "Public packages added successfully!"
 echo "Note: Private packages will be added via config.json"
@@ -121,17 +120,7 @@ cat > "$CONFIG_FILE" <<EOF
     "TLSCertificateStorage": "perm-self-signed"
   },
   "Packages": [
-    "github.com/gokrazy/fbstatus",
-    "github.com/gokrazy/wifi",
-    "github.com/gokrazy/serial-busybox",
-    "github.com/gokrazy/breakglass",
-    "tailscale.com/cmd/tailscaled",
-    "tailscale.com/cmd/tailscale",
-    "github.com/denysvitali/pictures-sync-s3/cmd/wifi-init",
-    "github.com/denysvitali/pictures-sync-s3/cmd/pictures-sync",
-    "github.com/denysvitali/pictures-sync-s3/cmd/webui",
-    "github.com/denysvitali/pictures-sync-s3/cmd/provision-ap",
-    "github.com/denysvitali/pictures-sync-s3/cmd/tailscale-init"
+$(emit_packages_json '    ')
   ],
   "PackageConfig": {
     "github.com/gokrazy/breakglass": {

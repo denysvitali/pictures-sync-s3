@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +17,16 @@ import (
 	"golang.org/x/time/rate"
 )
 
+// TestMain enables LAN/private-IP origin auto-trust for the websocket test
+// suite. Production default is false; many tests rely on origins like
+// http://localhost:8080 being honored without an explicit allowlist.
+func TestMain(m *testing.M) {
+	SetTrustLANOrigins(true)
+	code := m.Run()
+	SetTrustLANOrigins(false)
+	os.Exit(code)
+}
+
 func resetWebSocketTestState(t *testing.T) {
 	t.Helper()
 	connRateLimiter = NewConnectionRateLimiter()
@@ -23,6 +34,7 @@ func resetWebSocketTestState(t *testing.T) {
 	connectionRateLimit = rate.Inf
 	connectionRateBurst = 1000
 	authReadTimeout = 5 * time.Second
+	// LAN auto-trust is enabled at the suite level via TestMain.
 	t.Cleanup(func() {
 		connRateLimiter = nil
 		connRateLimiterOnce = sync.Once{}

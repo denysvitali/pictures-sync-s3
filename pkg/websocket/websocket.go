@@ -19,41 +19,51 @@ import (
 	"golang.org/x/time/rate"
 )
 
+// rateLimiterEntry pairs a rate limiter with its last-seen timestamp,
+// enabling per-IP idle-time eviction without dropping active limiters.
+type rateLimiterEntry struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
+}
+
+// rateLimiterIdleTimeout is how long an IP entry can be idle before eviction.
+const rateLimiterIdleTimeout = 15 * time.Minute
+
 // ConnectionRateLimiter tracks rate limits per IP address
 type ConnectionRateLimiter struct {
-	limiters map[string]*rate.Limiter
+	limiters map[string]*rateLimiterEntry
 	mu       sync.RWMutex
 }
 
 // NewConnectionRateLimiter creates a new rate limiter for WebSocket connections
 func NewConnectionRateLimiter() *ConnectionRateLimiter {
 	return &ConnectionRateLimiter{
-		limiters: make(map[string]*rate.Limiter),
+		limiters: make(map[string]*rateLimiterEntry),
 	}
 }
 
 // GetLimiter returns or creates a rate limiter for the given IP
 // Allows 5 connections per minute with burst of 2
 func (c *ConnectionRateLimiter) GetLimiter(ip string) *rate.Limiter {
-	c.mu.RLock()
-	limiter, exists := c.limiters[ip]
-	c.mu.RUnlock()
-
+	now := time.Now()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, exists := c.limiters[ip]
 	if !exists {
-		c.mu.Lock()
-		// Double-check after acquiring write lock
-		limiter, exists = c.limiters[ip]
-		if !exists {
-			limiter = rate.NewLimiter(connectionRateLimit, connectionRateBurst) // 5 per minute, burst 2
-			c.limiters[ip] = limiter
+		entry = &rateLimiterEntry{
+			limiter:  rate.NewLimiter(connectionRateLimit, connectionRateBurst),
+			lastSeen: now,
 		}
-		c.mu.Unlock()
+		c.limiters[ip] = entry
+	} else {
+		entry.lastSeen = now
 	}
-
-	return limiter
+	return entry.limiter
 }
 
-// CleanupOldLimiters removes rate limiters for IPs that haven't connected recently
+// CleanupOldLimiters evicts per-IP limiter entries that have been idle past
+// rateLimiterIdleTimeout. Active IPs keep their limiter state, so attackers
+// can't reset their rate window simply by waiting for the periodic clear.
 func (c *ConnectionRateLimiter) CleanupOldLimiters(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
@@ -62,11 +72,13 @@ func (c *ConnectionRateLimiter) CleanupOldLimiters(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case now := <-ticker.C:
 			c.mu.Lock()
-			// Remove all limiters (they'll be recreated on next connection)
-			// This prevents memory leaks from storing limiters for IPs that no longer connect
-			clear(c.limiters)
+			for ip, entry := range c.limiters {
+				if now.Sub(entry.lastSeen) > rateLimiterIdleTimeout {
+					delete(c.limiters, ip)
+				}
+			}
 			c.mu.Unlock()
 		}
 	}
@@ -77,6 +89,11 @@ func StartRateLimiterCleanup(ctx context.Context) {
 	getConnectionRateLimiter().CleanupOldLimiters(ctx)
 }
 
+// maxWSTokens caps the number of outstanding WebSocket auth tokens to bound
+// memory consumption against issuance abuse. When at capacity, oldest tokens
+// are evicted before new tokens are accepted.
+const maxWSTokens = 1000
+
 var (
 	wsTokens            = make(map[string]time.Time) // WebSocket auth tokens with expiry
 	wsTokenMutex        sync.RWMutex
@@ -84,13 +101,66 @@ var (
 	connRateLimiterOnce sync.Once
 	connectionRateLimit = rate.Every(12 * time.Second)
 	connectionRateBurst = 2
-	allowedOrigins      = []string{} // Configurable whitelist (empty = use private IP validation)
+	allowedOrigins      = []string{} // Configurable whitelist (empty = same-host only by default)
 	allowedOriginsMutex sync.RWMutex
-	authReadTimeout     = 5 * time.Second
-	upgrader            = websocket.Upgrader{
+	// trustLANOrigins controls whether origins on private/RFC1918 networks (and
+	// localhost / *.local) are auto-trusted for WebSocket upgrades. SECURITY:
+	// defaults to false. Operators must opt-in explicitly via SetTrustLANOrigins.
+	trustLANOrigins      bool
+	trustLANOriginsMutex sync.RWMutex
+	authReadTimeout      = 5 * time.Second
+
+	// wsTokenIssuanceLimiters rate-limits WS-token issuance per client IP to
+	// prevent token-map flooding. Entries are evicted alongside other idle state.
+	wsTokenIssuanceLimiters = make(map[string]*rateLimiterEntry)
+	wsTokenIssuanceMutex    sync.Mutex
+
+	upgrader = websocket.Upgrader{
 		CheckOrigin: checkOriginStrict,
 	}
 )
+
+// SetTrustLANOrigins enables or disables LAN/private-IP origin auto-trust for
+// WebSocket connections. Default is disabled; explicit allowlists via
+// SetAllowedOrigins are preferred.
+func SetTrustLANOrigins(trust bool) {
+	trustLANOriginsMutex.Lock()
+	defer trustLANOriginsMutex.Unlock()
+	trustLANOrigins = trust
+}
+
+func lanOriginsTrusted() bool {
+	trustLANOriginsMutex.RLock()
+	defer trustLANOriginsMutex.RUnlock()
+	return trustLANOrigins
+}
+
+// AllowWSTokenIssuance returns true if an additional WS-token may be issued
+// for the given client IP. Allows up to ~10 tokens/minute with a burst of 5.
+func AllowWSTokenIssuance(ip string) bool {
+	now := time.Now()
+	wsTokenIssuanceMutex.Lock()
+	defer wsTokenIssuanceMutex.Unlock()
+
+	// Opportunistically evict idle entries.
+	for k, entry := range wsTokenIssuanceLimiters {
+		if now.Sub(entry.lastSeen) > rateLimiterIdleTimeout {
+			delete(wsTokenIssuanceLimiters, k)
+		}
+	}
+
+	entry, ok := wsTokenIssuanceLimiters[ip]
+	if !ok {
+		entry = &rateLimiterEntry{
+			limiter:  rate.NewLimiter(rate.Every(6*time.Second), 5),
+			lastSeen: now,
+		}
+		wsTokenIssuanceLimiters[ip] = entry
+	} else {
+		entry.lastSeen = now
+	}
+	return entry.limiter.Allow()
+}
 
 // getConnectionRateLimiter returns the singleton rate limiter instance
 func getConnectionRateLimiter() *ConnectionRateLimiter {
@@ -172,9 +242,17 @@ func checkOriginStrict(r *http.Request) bool {
 	}
 	allowedOriginsMutex.RUnlock()
 
-	// Allow same host (exact match)
+	// Allow same host (exact match) — this is always permitted because the
+	// browser is talking to the same origin that's serving the API.
 	if u.Host == r.Host {
 		return true
+	}
+
+	// Beyond same-host, LAN/private-IP origins are only honored when the
+	// operator has explicitly opted in. Default is closed.
+	if !lanOriginsTrusted() {
+		log.Printf("WebSocket: Rejected cross-origin '%s' from %s (LAN auto-trust disabled; use allowlist)", origin, r.RemoteAddr)
+		return false
 	}
 
 	// Extract hostname and port from origin
@@ -250,12 +328,41 @@ func GenerateWSToken() string {
 	return base64.URLEncoding.EncodeToString(b)
 }
 
-// CreateWSToken generates and stores a new WebSocket token
+// CreateWSToken generates and stores a new WebSocket token. The map is bounded
+// to maxWSTokens entries; if at capacity, expired tokens are pruned first and,
+// failing that, the oldest entry is evicted to make room.
 func CreateWSToken() string {
 	token := GenerateWSToken()
+	now := time.Now()
 	wsTokenMutex.Lock()
 	defer wsTokenMutex.Unlock()
-	wsTokens[token] = time.Now().Add(5 * time.Minute) // Token valid for 5 minutes
+
+	// Prune expired tokens before checking capacity.
+	if len(wsTokens) >= maxWSTokens {
+		for t, exp := range wsTokens {
+			if now.After(exp) {
+				delete(wsTokens, t)
+			}
+		}
+	}
+	// Still at/over capacity: evict the entry with the soonest expiry.
+	if len(wsTokens) >= maxWSTokens {
+		var oldestToken string
+		var oldestExpiry time.Time
+		first := true
+		for t, exp := range wsTokens {
+			if first || exp.Before(oldestExpiry) {
+				oldestToken = t
+				oldestExpiry = exp
+				first = false
+			}
+		}
+		if oldestToken != "" {
+			delete(wsTokens, oldestToken)
+		}
+	}
+
+	wsTokens[token] = now.Add(5 * time.Minute) // Token valid for 5 minutes
 	return token
 }
 

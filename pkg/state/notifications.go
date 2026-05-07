@@ -1,20 +1,51 @@
 package state
 
 import (
-	"log"
 	"sync"
 )
+
+// subscriber wraps a listener channel with coordination to safely close it
+// without racing with concurrent senders. The channel is only ever closed by
+// the unsubscribe path, while senders coordinate through s.mu and s.closed.
+type subscriber struct {
+	mu     sync.Mutex
+	ch     chan CurrentState
+	closed bool
+}
+
+func (s *subscriber) send(state CurrentState) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	select {
+	case s.ch <- state:
+	default:
+		// Skip if channel is full
+	}
+}
+
+func (s *subscriber) close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	s.closed = true
+	close(s.ch)
+}
 
 // notifier manages the subscriber/listener pattern for state updates
 type notifier struct {
 	mu        sync.RWMutex
-	listeners []chan CurrentState
+	listeners []*subscriber
 }
 
 // newNotifier creates a new notifier
 func newNotifier() *notifier {
 	return &notifier{
-		listeners: make([]chan CurrentState, 0),
+		listeners: make([]*subscriber, 0),
 	}
 }
 
@@ -23,9 +54,9 @@ func (n *notifier) subscribe() chan CurrentState {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	ch := make(chan CurrentState, 10)
-	n.listeners = append(n.listeners, ch)
-	return ch
+	sub := &subscriber{ch: make(chan CurrentState, 10)}
+	n.listeners = append(n.listeners, sub)
+	return sub.ch
 }
 
 // unsubscribe removes a listener channel and closes it
@@ -33,13 +64,10 @@ func (n *notifier) unsubscribe(ch chan CurrentState) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	// Find and remove the channel
-	for i, listener := range n.listeners {
-		if listener == ch {
-			// Remove from slice
+	for i, sub := range n.listeners {
+		if sub.ch == ch {
 			n.listeners = append(n.listeners[:i], n.listeners[i+1:]...)
-			// Close the channel to signal the subscriber
-			close(ch)
+			sub.close()
 			break
 		}
 	}
@@ -48,27 +76,14 @@ func (n *notifier) unsubscribe(ch chan CurrentState) {
 // notify sends a state update to all subscribers
 func (n *notifier) notify(state CurrentState) {
 	n.mu.RLock()
-	// Deep copy the listeners slice to avoid race conditions
-	listenersCopy := make([]chan CurrentState, len(n.listeners))
-	copy(listenersCopy, n.listeners)
+	subs := make([]*subscriber, len(n.listeners))
+	copy(subs, n.listeners)
 	n.mu.RUnlock()
 
-	// Send to listeners without holding the lock
-	for _, ch := range listenersCopy {
-		// Use panic recovery to handle closed channels gracefully
-		func(c chan CurrentState) {
-			defer func() {
-				if r := recover(); r != nil {
-					// Channel was closed, log and continue
-					log.Printf("Warning: Failed to notify listener (channel closed): %v", r)
-				}
-			}()
-			select {
-			case c <- state:
-			default:
-				// Skip if channel is full
-			}
-		}(ch)
+	for _, s := range subs {
+		// Each subscriber clones the state independently so receivers cannot
+		// observe pointer aliasing across listeners.
+		s.send(cloneState(state))
 	}
 }
 
@@ -85,7 +100,7 @@ func (m *Manager) Unsubscribe(ch chan CurrentState) {
 // notifyListeners sends current state to all subscribers
 func (m *Manager) notifyListeners() {
 	m.mu.RLock()
-	state := m.currentState
+	state := cloneState(m.currentState)
 	m.mu.RUnlock()
 
 	m.notifyListenersAsync(state)
@@ -103,12 +118,14 @@ func (n *notifier) getListenerCount() int {
 	return len(n.listeners)
 }
 
-// getListeners returns a copy of the listeners slice (for testing)
+// getListeners returns a copy of the listener channels (for testing)
 func (n *notifier) getListeners() []chan CurrentState {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	listeners := make([]chan CurrentState, len(n.listeners))
-	copy(listeners, n.listeners)
+	for i, s := range n.listeners {
+		listeners[i] = s.ch
+	}
 	return listeners
 }
 
@@ -116,5 +133,5 @@ func (n *notifier) getListeners() []chan CurrentState {
 func (n *notifier) addListener(ch chan CurrentState) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	n.listeners = append(n.listeners, ch)
+	n.listeners = append(n.listeners, &subscriber{ch: ch})
 }

@@ -502,56 +502,6 @@ endpoint = %s
 	}
 }
 
-// TestGetRemoteSizeAfterNetworkError tests data integrity checks after network recovery
-func TestGetRemoteSizeAfterNetworkError(t *testing.T) {
-	// BUG CRITICAL: GetRemoteSize returns 0 on error, can't distinguish "empty" from "failed"
-	tmpDir, err := os.MkdirTemp("", "network-test-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	configPath := filepath.Join(tmpDir, "rclone.conf")
-	config := `[test-s3]
-type = s3
-provider = Other
-access_key_id = test
-secret_access_key = test
-endpoint = https://network-error.invalid
-`
-	if err := os.WriteFile(configPath, []byte(config), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	stateMgr, _ := state.NewManager()
-	syncMgr := NewManager(configPath, "test-s3", "/test", stateMgr, 4, 8)
-
-	// GetRemoteSize should fail, but currently returns 0, nil (lines 92-93)
-	size, err := syncMgr.GetRemoteSize("card-123")
-
-	t.Logf("GetRemoteSize result: size=%d, err=%v", size, err)
-
-	// BUG: Cannot distinguish between:
-	// 1. Remote is truly empty (0 bytes, no error)
-	// 2. Network error prevented checking (0 bytes returned, but should error)
-	// 3. Authentication failure (0 bytes returned, but should error)
-
-	if err == nil && size == 0 {
-		t.Error("BUG CRITICAL: GetRemoteSize returns 0 with no error on network failure")
-		t.Log("RISK: Application cannot distinguish 'empty remote' from 'failed to check'")
-		t.Log("CONSEQUENCE: May skip sync thinking nothing is uploaded, or double-upload thinking nothing exists")
-		t.Log("LOCATION: syncmanager.go lines 92-93")
-		t.Log("RECOMMENDATION: Return error on network/auth failures, not 0")
-	}
-
-	// This affects resume logic in Sync() at lines 136-140
-	t.Log("IMPACT: Sync resume feature will fail after network recovery")
-	t.Log("- Lines 136-140 get already-synced size")
-	t.Log("- Network error returns 0 instead of error")
-	t.Log("- Sync thinks nothing is uploaded, may re-upload everything")
-	t.Log("- Or worse: partial state causes file corruption")
-}
-
 // TestConnectionPoolExhaustion tests for connection/file descriptor leaks
 func TestConnectionPoolExhaustion(t *testing.T) {
 	skipRcloneNetworkTest(t)
@@ -913,13 +863,6 @@ type = local
 			}
 		}()
 
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if _, err := syncMgr.GetRemoteSize("card-123"); err != nil {
-				errorCount.Add(1)
-			}
-		}()
 	}
 
 	wg.Wait()

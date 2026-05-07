@@ -14,9 +14,29 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
+  test:
+    name: Run Go tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run tests
+        run: go test ./...
+
   build-and-publish-flash-image:
+    needs: test
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     env:
@@ -200,6 +220,11 @@ jobs:
           compressed_path="${{ steps.build-root.outputs.image_path }}.gz"
           gzip -9 -c "${{ steps.build-root.outputs.image_path }}" > "$compressed_path"
           echo "compressed_path=$compressed_path" >> "$GITHUB_OUTPUT"
+
+      - name: Attest build provenance for squashfs OTA image
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: ${{ steps.build-root.outputs.image_path }}
 
       - name: Keep build artifact
         uses: actions/upload-artifact@v7

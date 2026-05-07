@@ -18,6 +18,7 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/handlers"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ntpsync"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ota"
+	"github.com/denysvitali/pictures-sync-s3/pkg/ratelimit"
 	"github.com/denysvitali/pictures-sync-s3/pkg/settings"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ssrf"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
@@ -236,29 +237,43 @@ func main() {
 		websocket.SetAllowedOrigins(allowedOrigins)
 	}
 
+	// Initialize CSRF protection.
+	auth.InitCSRFToken()
+
+	// csrf wraps a HandlerFunc with CSRF token validation for mutating verbs.
+	csrf := auth.CSRFProtection
+
 	// Setup HTTP handlers
+	http.HandleFunc("/api/csrf-token", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"csrf_token": auth.GetCSRFToken()})
+	})
 	http.HandleFunc("/api/ws-token", handlers.HandleWSToken) // GET endpoint for WebSocket token
 	http.HandleFunc("/api/version", ctx.HandleVersion)
 	http.HandleFunc("/api/status", ctx.HandleStatus)
 	http.HandleFunc("/api/history", ctx.HandleHistory)
-	http.HandleFunc("/api/config", ctx.HandleConfig)
-	http.HandleFunc("/api/config/b2", ctx.HandleConfigB2)
+	http.HandleFunc("/api/config", csrf(ctx.HandleConfig))
+	http.HandleFunc("/api/config/b2", csrf(ctx.HandleConfigB2))
 	http.HandleFunc("/api/config/b2/regions", ctx.HandleConfigB2Regions)
-	http.HandleFunc("/api/config/test", ctx.HandleConfigTest)
-	http.HandleFunc("/api/auth/password", ctx.HandlePasswordChange)
-	http.HandleFunc("/api/breakglass/authorized-keys", ctx.HandleBreakglassAuthorizedKeys)
-	http.HandleFunc("/api/settings", ctx.HandleSettings)
+	http.HandleFunc("/api/config/test", csrf(ctx.HandleConfigTest))
+	http.HandleFunc("/api/auth/password", csrf(ctx.HandlePasswordChange))
+	http.HandleFunc("/api/breakglass/authorized-keys", csrf(ctx.HandleBreakglassAuthorizedKeys))
+	http.HandleFunc("/api/settings", csrf(ctx.HandleSettings))
 	http.HandleFunc("/api/devices", ctx.HandleDevices)
-	http.HandleFunc("/api/devices/select", ctx.HandleDeviceSelect)
-	http.HandleFunc("/api/devices/format", ctx.HandleDeviceFormat)
-	http.HandleFunc("/api/devices/redetect", ctx.HandleDeviceRedetect)
-	http.HandleFunc("/api/sync/start", ctx.HandleSyncStart)
-	http.HandleFunc("/api/sync/cancel", ctx.HandleSyncCancel)
+	http.HandleFunc("/api/devices/select", csrf(ctx.HandleDeviceSelect))
+	http.HandleFunc("/api/devices/format", csrf(ctx.HandleDeviceFormat))
+	http.HandleFunc("/api/devices/redetect", csrf(ctx.HandleDeviceRedetect))
+	http.HandleFunc("/api/sync/start", csrf(ctx.HandleSyncStart))
+	http.HandleFunc("/api/sync/cancel", csrf(ctx.HandleSyncCancel))
 	http.HandleFunc("/api/wifi/scan", ctx.HandleWiFiScan)
 	http.HandleFunc("/api/wifi/networks", ctx.HandleWiFiNetworks)
-	http.HandleFunc("/api/wifi/connect", ctx.HandleWiFiConnect)
-	http.HandleFunc("/api/wifi/disconnect", ctx.HandleWiFiDisconnect)
-	http.HandleFunc("/api/wifi/reorder", ctx.HandleWiFiReorder)
+	http.HandleFunc("/api/wifi/connect", csrf(ctx.HandleWiFiConnect))
+	http.HandleFunc("/api/wifi/disconnect", csrf(ctx.HandleWiFiDisconnect))
+	http.HandleFunc("/api/wifi/reorder", csrf(ctx.HandleWiFiReorder))
 	http.HandleFunc("/api/wifi/status", ctx.HandleWiFiStatus)
 	http.HandleFunc("/api/files/cards", ctx.HandleFileCards)
 	http.HandleFunc("/api/files", ctx.HandleFiles)
@@ -275,7 +290,7 @@ func main() {
 	http.HandleFunc("/api/network/ping", ctx.HandlePing)
 	http.HandleFunc("/api/network/diagnostics", ctx.HandleNetworkDiagnostics)
 	http.HandleFunc("/api/ota/status", ctx.HandleOTAStatus)
-	http.HandleFunc("/api/ota/install", ctx.HandleOTAInstall)
+	http.HandleFunc("/api/ota/install", csrf(ctx.HandleOTAInstall))
 	http.HandleFunc("/api/system/time", ctx.HandleSystemTime)
 	http.HandleFunc("/api/system/tls-certificate", ctx.HandleSystemTLSCertificate)
 	http.HandleFunc("/ws", websocket.HandleWebSocket(stateMgr, eventMgr, otaMgr))
@@ -291,11 +306,15 @@ func main() {
 	http.HandleFunc("/legacy/gallery", webui.HandleGallery)
 	http.HandleFunc("/legacy/config", webui.HandleConfig)
 
-	// Wrap default mux with middleware chain: security headers -> basic auth
-	// Security headers are applied first so they're present on all responses (including auth failures)
+	// Build a per-IP rate limiter for authentication so brute-force attempts
+	// against Basic Auth get throttled and locked out (5 attempts / 15 min).
+	authLimiter := ratelimit.NewLimiter(ratelimit.AuthConfig())
+
+	// Wrap default mux with middleware chain: security headers -> CORS -> basic auth.
+	// Security headers are applied first so they're present on all responses (including auth failures).
 	handler := auth.SecurityHeadersMiddleware(
 		auth.CORSMiddleware(allowedOrigins, true)(
-			auth.BasicAuthMiddlewareWithProvider(passwordMgr, nil)(http.DefaultServeMux),
+			auth.BasicAuthMiddlewareWithProvider(passwordMgr, authLimiter)(http.DefaultServeMux),
 		),
 	)
 

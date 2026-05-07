@@ -313,6 +313,14 @@ func CORSMiddleware(allowedOrigins []string, allowCredentials bool) func(http.Ha
 		}
 
 		if normalized == "*" {
+			// SECURITY: never reflect a wildcard when credentials are allowed.
+			// CORS spec forbids `Access-Control-Allow-Origin: *` together with
+			// `Access-Control-Allow-Credentials: true`. Treat wildcard with
+			// credentials as a configuration error and fall back to deny-all.
+			if allowCredentials {
+				log.Printf("auth: ignoring CORS wildcard '*' because allowCredentials=true; configure explicit origins instead")
+				continue
+			}
 			origins = make(map[string]struct{}, 1)
 			origins["*"] = struct{}{}
 			break
@@ -336,11 +344,8 @@ func CORSMiddleware(allowedOrigins []string, allowCredentials bool) func(http.Ha
 
 			u, err := url.Parse(origin)
 			if err != nil {
-				if r.Method == http.MethodOptions {
-					w.WriteHeader(http.StatusForbidden)
-					return
-				}
-				next.ServeHTTP(w, r)
+				// Malformed Origin header: reject regardless of method.
+				http.Error(w, "CORS origin not allowed", http.StatusForbidden)
 				return
 			}
 
@@ -355,11 +360,7 @@ func CORSMiddleware(allowedOrigins []string, allowCredentials bool) func(http.Ha
 			_, allowAll := origins["*"]
 			_, allowed := origins[normalizedOriginHost]
 			if !allowAll && !allowed {
-				if r.Method == http.MethodOptions {
-					w.WriteHeader(http.StatusForbidden)
-					return
-				}
-
+				// Disallowed origin: always return 403 (do not fall through).
 				http.Error(w, "CORS origin not allowed", http.StatusForbidden)
 				return
 			}

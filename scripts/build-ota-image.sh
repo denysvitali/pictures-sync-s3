@@ -16,6 +16,10 @@ BUILD_DATE="${BUILD_DATE:-$(date -u '+%Y-%m-%dT%H:%M:%SZ')}"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 INSTANCE_DIR="$GOKRAZY_PARENT_DIR/$GOKRAZY_INSTANCE"
 
+# Source shared package list / helpers.
+# shellcheck source=gok-common.sh
+source "$REPO_DIR/scripts/gok-common.sh"
+
 export GOKRAZY_PARENT_DIR
 
 if [ -z "$GOKRAZY_MODULE_REPLACE" ] && [ -f "$REPO_DIR/../gokrazy/go.mod" ]; then
@@ -83,16 +87,9 @@ replace github.com/gokrazy/gokrazy => $GOKRAZY_MODULE_REPLACE
 EOF
 fi
 
-gok -i "$GOKRAZY_INSTANCE" add github.com/gokrazy/fbstatus
-gok -i "$GOKRAZY_INSTANCE" add github.com/gokrazy/wifi
-gok -i "$GOKRAZY_INSTANCE" add github.com/gokrazy/serial-busybox
-gok -i "$GOKRAZY_INSTANCE" add github.com/gokrazy/breakglass
-gok -i "$GOKRAZY_INSTANCE" add tailscale.com/cmd/tailscaled
-gok -i "$GOKRAZY_INSTANCE" add tailscale.com/cmd/tailscale
-gok -i "$GOKRAZY_INSTANCE" add ./cmd/wifi-init
-gok -i "$GOKRAZY_INSTANCE" add ./cmd/pictures-sync
-gok -i "$GOKRAZY_INSTANCE" add ./cmd/webui
-gok -i "$GOKRAZY_INSTANCE" add ./cmd/provision-ap
+for pkg in "${gok_packages[@]}"; do
+  gok -i "$GOKRAZY_INSTANCE" add "$pkg"
+done
 
 cat > "$INSTANCE_DIR/config.json" <<EOF
 {
@@ -101,20 +98,10 @@ cat > "$INSTANCE_DIR/config.json" <<EOF
     "HTTPPort": "80",
     "HTTPSPort": "443",
     "UseTLS": "self-signed",
-    "TLSCertificateStorage": "perm-self-signed",
-    "HTTPPassword": "photo-backup"
+    "TLSCertificateStorage": "perm-self-signed"
   },
   "Packages": [
-    "github.com/gokrazy/fbstatus",
-    "github.com/gokrazy/wifi",
-    "github.com/gokrazy/serial-busybox",
-    "github.com/gokrazy/breakglass",
-    "tailscale.com/cmd/tailscaled",
-    "tailscale.com/cmd/tailscale",
-    "github.com/denysvitali/pictures-sync-s3/cmd/wifi-init",
-    "github.com/denysvitali/pictures-sync-s3/cmd/pictures-sync",
-    "github.com/denysvitali/pictures-sync-s3/cmd/webui",
-    "github.com/denysvitali/pictures-sync-s3/cmd/provision-ap"
+$(emit_packages_json '    ')
   ],
   "PackageConfig": {
     "github.com/denysvitali/pictures-sync-s3/cmd/pictures-sync": {
@@ -141,6 +128,18 @@ cat > "$INSTANCE_DIR/config.json" <<EOF
         "-ldflags=${VERSION_LDFLAGS}"
       ]
     },
+    "github.com/denysvitali/pictures-sync-s3/cmd/tailscale-init": {
+      "GoBuildFlags": [
+        "-trimpath",
+        "-ldflags=${VERSION_LDFLAGS}"
+      ],
+      "Environment": [
+        "TS_AUTH_KEY_PATH=/perm/tailscale/authkey",
+        "TS_HOSTNAME=${GOKRAZY_INSTANCE}",
+        "TS_TAILSCALE_UP_ARGS=--ssh"
+      ]
+    },
+    "tailscale.com/cmd/tailscale": {},
     "github.com/gokrazy/breakglass": {
       "CommandLineFlags": [
         "-authorized_keys=/perm/breakglass/authorized_keys"

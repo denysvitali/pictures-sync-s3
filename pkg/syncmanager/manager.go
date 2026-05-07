@@ -29,7 +29,7 @@ type Manager struct {
 	googlePhotosEnabled    bool   // Enable Google Photos upload
 	googlePhotosRemoteName string // Google Photos remote name
 	mu                     sync.Mutex
-	progressChans          []chan Progress
+	progressChans          []*progressSubscriber
 	cancelFunc             context.CancelFunc
 	isRunning              bool
 	startTime              time.Time
@@ -56,7 +56,7 @@ func NewManager(configPath, remoteName, remotePath string, stateMgr *state.Manag
 		stateMgr:      stateMgr,
 		transfers:     transfers,
 		checkers:      checkers,
-		progressChans: make([]chan Progress, 0),
+		progressChans: make([]*progressSubscriber, 0),
 	}
 }
 
@@ -104,14 +104,46 @@ func (m *Manager) IsRunning() bool {
 	return m.isRunning
 }
 
+// progressSubscriber wraps a progress channel with coordination so that
+// UnsubscribeProgress can close the channel without racing concurrent
+// broadcastProgress senders.
+type progressSubscriber struct {
+	mu     sync.Mutex
+	ch     chan Progress
+	closed bool
+}
+
+func (s *progressSubscriber) send(p Progress) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	select {
+	case s.ch <- p:
+	default:
+		// Skip if channel is full
+	}
+}
+
+func (s *progressSubscriber) close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	s.closed = true
+	close(s.ch)
+}
+
 // SubscribeProgress returns a channel that receives progress updates
 func (m *Manager) SubscribeProgress() chan Progress {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	ch := make(chan Progress, 10)
-	m.progressChans = append(m.progressChans, ch)
-	return ch
+	sub := &progressSubscriber{ch: make(chan Progress, 10)}
+	m.progressChans = append(m.progressChans, sub)
+	return sub.ch
 }
 
 // UnsubscribeProgress removes a channel from progress updates and closes it
@@ -119,13 +151,10 @@ func (m *Manager) UnsubscribeProgress(ch chan Progress) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Find and remove the channel
-	for i, progressChan := range m.progressChans {
-		if progressChan == ch {
-			// Remove from slice
+	for i, sub := range m.progressChans {
+		if sub.ch == ch {
 			m.progressChans = append(m.progressChans[:i], m.progressChans[i+1:]...)
-			// Close the channel to signal the subscriber
-			close(ch)
+			sub.close()
 			break
 		}
 	}

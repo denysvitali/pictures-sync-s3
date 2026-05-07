@@ -302,7 +302,10 @@ func TestExpensiveOperationMiddleware(t *testing.T) {
 }
 
 func TestCORSMiddlewareAllowAll(t *testing.T) {
-	handler := CORSMiddleware([]string{"*"}, true)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// SECURITY: wildcard '*' is incompatible with credentialed CORS requests,
+	// so allowCredentials must be false when using '*'. Verify wildcard
+	// reflection works in that mode.
+	handler := CORSMiddleware([]string{"*"}, false)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -319,8 +322,32 @@ func TestCORSMiddlewareAllowAll(t *testing.T) {
 	if got := rr.Header().Get("Access-Control-Allow-Origin"); got != "https://example.com" {
 		t.Fatalf("Access-Control-Allow-Origin = %q, want %q", got, "https://example.com")
 	}
-	if got := rr.Header().Get("Access-Control-Allow-Credentials"); got != "true" {
-		t.Fatalf("Access-Control-Allow-Credentials = %q, want true", got)
+	if got := rr.Header().Get("Access-Control-Allow-Credentials"); got != "" {
+		t.Fatalf("Access-Control-Allow-Credentials = %q, want empty (credentials must not be combined with '*')", got)
+	}
+}
+
+// TestCORSMiddleware_WildcardWithCredentialsDropsWildcard verifies that callers
+// who misconfigure '*' with allowCredentials=true never see a permissive
+// CORS response. The wildcard is silently dropped, so no CORS headers are
+// emitted (no Access-Control-Allow-Origin / Access-Control-Allow-Credentials).
+func TestCORSMiddleware_WildcardWithCredentialsDropsWildcard(t *testing.T) {
+	handler := CORSMiddleware([]string{"*"}, true)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "https://server.local/api/settings", nil)
+	req.Host = "server.local"
+	req.Header.Set("Origin", "https://example.com")
+
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if got := rr.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want empty (wildcard must be dropped)", got)
+	}
+	if got := rr.Header().Get("Access-Control-Allow-Credentials"); got != "" {
+		t.Fatalf("Access-Control-Allow-Credentials = %q, want empty (must not combine '*' with credentials)", got)
 	}
 }
 

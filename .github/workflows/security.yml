@@ -5,7 +5,14 @@ concurrency:
   cancel-in-progress: true
 
 on:
+  push:
+    branches:
+      - master
+  pull_request:
   workflow_dispatch:
+  schedule:
+    # Weekly security scan (Mondays 05:00 UTC)
+    - cron: '0 5 * * 1'
 
 permissions:
   contents: read
@@ -125,7 +132,8 @@ jobs:
           cache: true
 
       - name: Run Gosec Security Scanner
-        uses: securego/gosec@master
+        # Pinned to v2.26.1
+        uses: securego/gosec@9c4bb74a6258fe3818db8354b376ecca985704aa
         with:
           args: '-fmt sarif -out gosec-results.sarif -exclude-dir=test-data -severity medium ./...'
 
@@ -184,7 +192,8 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Trivy vulnerability scanner in fs mode
-        uses: aquasecurity/trivy-action@master
+        # Pinned to v0.36.0
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -200,7 +209,8 @@ jobs:
         if: always()
 
       - name: Run Trivy with JSON output
-        uses: aquasecurity/trivy-action@master
+        # Pinned to v0.36.0
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8
         with:
           scan-type: 'fs'
           scan-ref: '.'

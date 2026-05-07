@@ -40,7 +40,11 @@ func TestCheckOriginStrict_SameHost(t *testing.T) {
 }
 
 // TestCheckOriginStrict_PrivateIPRanges verifies RFC 1918 private IPs are accepted
+// when LAN auto-trust has been explicitly enabled.
 func TestCheckOriginStrict_PrivateIPRanges(t *testing.T) {
+	prev := lanOriginsTrusted()
+	SetTrustLANOrigins(true)
+	defer SetTrustLANOrigins(prev)
 	tests := []struct {
 		name   string
 		origin string

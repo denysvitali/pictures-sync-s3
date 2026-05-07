@@ -1,8 +1,9 @@
 package tlsconfig
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
@@ -22,7 +23,7 @@ import (
 )
 
 const (
-	certificateValidity    = 10 * 365 * 24 * time.Hour
+	certificateValidity    = 365 * 24 * time.Hour
 	certificateBackdate    = 5 * time.Minute
 	certificateRenewWithin = 30 * 24 * time.Hour
 )
@@ -70,7 +71,7 @@ func DefaultConfig() *Config {
 		CertFile:           rootCertFile,
 		KeyFile:            rootKeyFile,
 		InsecureSkipVerify: false,
-		MinVersion:         tls.VersionTLS12,
+		MinVersion:         tls.VersionTLS13,
 	}
 }
 
@@ -128,24 +129,19 @@ func (c *Config) NewTLSConfig() (*tls.Config, error) {
 		return nil, err
 	}
 
-	// Create TLS config with secure defaults
+	// Create TLS config with secure defaults.
+	// MinVersion is TLS 1.3, so explicit CipherSuites and PreferServerCipherSuites
+	// are intentionally omitted (TLS 1.3 negotiates its own AEAD ciphers and
+	// PreferServerCipherSuites is deprecated/no-op).
+	minVersion := c.MinVersion
+	if minVersion == 0 {
+		minVersion = tls.VersionTLS13
+	}
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{cert},
-		MinVersion:   c.MinVersion,
-		// Use modern cipher suites (Go 1.17+ handles this automatically)
-		CipherSuites: []uint16{
-			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
-			tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
-		},
-		PreferServerCipherSuites: true,
+		MinVersion:   minVersion,
 		// For self-signed certificates in internal deployments,
-		// we need to configure the server to not require client cert verification
-		// The server itself doesn't verify client certs, but we ensure it presents
-		// its own certificate properly
+		// we need to configure the server to not require client cert verification.
 		ClientAuth: tls.NoClientCert,
 	}
 
@@ -219,7 +215,7 @@ func generateSelfSignedCertificate(cfg *Config, hosts []string, now time.Time) (
 		commonName = dnsNames[0]
 	}
 
-	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("generate private key: %w", err)
 	}
@@ -238,7 +234,7 @@ func generateSelfSignedCertificate(cfg *Config, hosts []string, now time.Time) (
 		},
 		NotBefore:             now.Add(-certificateBackdate).UTC(),
 		NotAfter:              now.Add(certificateValidity).UTC(),
-		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		KeyUsage:              x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
 		DNSNames:              dnsNames,
@@ -250,12 +246,15 @@ func generateSelfSignedCertificate(cfg *Config, hosts []string, now time.Time) (
 		return nil, fmt.Errorf("create certificate: %w", err)
 	}
 
-	privateKeyBytes := x509.MarshalPKCS1PrivateKey(privateKey)
+	privateKeyBytes, err := x509.MarshalPKCS8PrivateKey(privateKey)
+	if err != nil {
+		return nil, fmt.Errorf("marshal private key: %w", err)
+	}
 
 	if err := os.MkdirAll(filepath.Dir(cfg.CertFile), 0700); err != nil {
 		return nil, fmt.Errorf("create certificate directory: %w", err)
 	}
-	if err := writePEMFileAtomic(cfg.KeyFile, 0600, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: privateKeyBytes}); err != nil {
+	if err := writePEMFileAtomic(cfg.KeyFile, 0600, &pem.Block{Type: "PRIVATE KEY", Bytes: privateKeyBytes}); err != nil {
 		return nil, fmt.Errorf("write private key: %w", err)
 	}
 	if err := writePEMFileAtomic(cfg.CertFile, 0644, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes}); err != nil {

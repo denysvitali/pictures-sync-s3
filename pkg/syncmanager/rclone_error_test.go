@@ -93,14 +93,6 @@ func TestCancelWithoutSync(t *testing.T) {
 	// The operations fail gracefully but error logging is excessive
 
 	// Test various operations with invalid config
-	t.Run("GetRemoteSize", func(t *testing.T) {
-		_, err := syncMgr.GetRemoteSize("card-0123456789abcdef")
-		if err == nil {
-			t.Log("GetRemoteSize succeeded unexpectedly - config might have been created")
-		} else {
-			t.Logf("GetRemoteSize properly failed: %v", err)
-		}
-	})
 
 	t.Run("ListRemotes", func(t *testing.T) {
 		_, err := syncMgr.ListRemotes()
@@ -322,40 +314,6 @@ func TestProgressChannelOverflow(t *testing.T) {
 	// Verify state manager wasn't blocked
 	currentState := stateMgr.GetState()
 	t.Logf("State manager still responsive: %v", currentState.Status)
-}
-
-// TestGetRemoteSizeWithNonexistentCard tests GetRemoteSize for a card that doesn't exist remotely
-func TestGetRemoteSizeWithNonexistentCard(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "syncmanager-error-test-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	// Create config with local backend
-	configPath := filepath.Join(tmpDir, "rclone.conf")
-	validConfig := `[local-test]
-type = local
-`
-	if err := os.WriteFile(configPath, []byte(validConfig), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	stateMgr, _ := state.NewManager()
-	syncMgr := NewManager(configPath, "local-test", tmpDir, stateMgr, 4, 8)
-
-	// BUG FOUND: GetRemoteSize returns error for nonexistent card path
-	// According to code lines 92-93, it should return 0 with nil error
-	// But operations.ListFn fails when directory doesn't exist
-	size, err := syncMgr.GetRemoteSize("nonexistent-card-123")
-	t.Logf("GetRemoteSize for nonexistent card: size=%d, err=%v", size, err)
-
-	// Current behavior: returns error
-	// Expected behavior (per code comment): return 0, nil
-	if err != nil {
-		t.Logf("BUG CONFIRMED: GetRemoteSize errors on nonexistent path instead of returning 0")
-		t.Logf("This causes GetRemoteSize warning in logs at line 137-139")
-	}
 }
 
 // TestStateManagerNilHandling tests handling when state manager is nil
@@ -663,7 +621,7 @@ type = local
 
 	// Concurrently perform operations that load config
 	for i := 0; i < numOps; i++ {
-		wg.Add(3)
+		wg.Add(2)
 
 		go func() {
 			defer wg.Done()
@@ -675,10 +633,6 @@ type = local
 			syncMgr.TestConnection()
 		}()
 
-		go func() {
-			defer wg.Done()
-			syncMgr.GetRemoteSize("card-0123456789abcdef")
-		}()
 	}
 
 	wg.Wait()
@@ -863,42 +817,6 @@ func TestZeroDivisionInETACalculation(t *testing.T) {
 
 			t.Logf("ETA: %d seconds", etaSeconds)
 		})
-	}
-}
-
-// BUG FOUND: TestGetRemoteSizeErrorPropagation verifies errors are properly returned
-func TestGetRemoteSizeErrorPropagation(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "syncmanager-error-test-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	configPath := filepath.Join(tmpDir, "rclone.conf")
-	brokenConfig := `[broken-remote]
-type = s3
-access_key_id = intentionally-invalid-key-12345
-secret_access_key = intentionally-invalid-secret-67890
-endpoint = https://definitely.does.not.exist.example.com
-region = us-east-1
-`
-	if err := os.WriteFile(configPath, []byte(brokenConfig), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	stateMgr, _ := state.NewManager()
-	syncMgr := NewManager(configPath, "broken-remote", "/test", stateMgr, 4, 8)
-
-	// GetRemoteSize should return 0 for non-existent destination (per line 92-93)
-	// But what if there's a network error or auth failure?
-	size, err := syncMgr.GetRemoteSize("card-0123456789abcdef")
-
-	// BUG: Current implementation returns 0 with nil error even on failure
-	// This could hide real errors like network issues or auth failures
-	t.Logf("GetRemoteSize result: size=%d, err=%v", size, err)
-
-	if err == nil && size == 0 {
-		t.Log("BUG: GetRemoteSize returns 0 with no error - cannot distinguish between 'empty' and 'error accessing remote'")
 	}
 }
 

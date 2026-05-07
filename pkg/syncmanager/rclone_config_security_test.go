@@ -264,11 +264,9 @@ type = local
 				t.Logf("Correctly rejected: %q - %v", cardID, err)
 			}
 
-			// Test if it bypasses validation in actual operations
-			_, err = syncMgr.GetRemoteSize(cardID)
-			if err == nil {
-				t.Errorf("VULNERABILITY: GetRemoteSize succeeded with invalid cardID: %q", cardID)
-			}
+			// validateCardID is the chokepoint relied on by Sync; the
+			// previous test also called the now-removed GetRemoteSize stub.
+			_ = syncMgr
 		})
 	}
 
@@ -785,9 +783,8 @@ func TestVuln11_ErrorMessageInformationDisclosure(t *testing.T) {
 		{
 			name: "Invalid card ID",
 			testFunc: func() error {
-				mgr := NewManager(configPath, "test", "/path", stateMgr, 4, 8)
-				_, err := mgr.GetRemoteSize("../../etc/passwd")
-				return err
+				_ = NewManager(configPath, "test", "/path", stateMgr, 4, 8)
+				return validateCardID("../../etc/passwd")
 			},
 		},
 	}
