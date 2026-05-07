@@ -22,6 +22,7 @@ const (
 	CommandHistory         = "history"
 	CommandDevices         = "devices"
 	CommandFormatSDCard    = "format_sdcard"
+	CommandRedetectSDCard  = "redetect_sdcard"
 	CommandSDCardFiles     = "sdcard_files"
 	CommandSDCardPreview   = "sdcard_preview"
 	CommandSDCardThumbnail = "sdcard_thumbnail"
@@ -69,6 +70,7 @@ type StatusHandler func(context.Context) Response
 type HistoryHandler func(context.Context) Response
 type DevicesHandler func(context.Context) Response
 type FormatSDCardHandler func(context.Context, string, string) Response
+type RedetectSDCardHandler func(context.Context) Response
 type SDCardFilesHandler func(context.Context, string) Response
 type SDCardPreviewHandler func(context.Context, string) Response
 type SDCardThumbnailHandler func(context.Context, string) Response
@@ -80,6 +82,7 @@ type Handlers struct {
 	History         HistoryHandler
 	Devices         DevicesHandler
 	FormatSDCard    FormatSDCardHandler
+	RedetectSDCard  RedetectSDCardHandler
 	SDCardFiles     SDCardFilesHandler
 	SDCardPreview   SDCardPreviewHandler
 	SDCardThumbnail SDCardThumbnailHandler
@@ -188,6 +191,8 @@ func handleConn(ctx context.Context, conn net.Conn, handlers Handlers) {
 		_ = json.NewEncoder(conn).Encode(call0(ctx, handlers.Devices))
 	case CommandFormatSDCard:
 		_ = json.NewEncoder(conn).Encode(callFormatSDCard(ctx, handlers.FormatSDCard, req.DevicePath, req.Label))
+	case CommandRedetectSDCard:
+		_ = json.NewEncoder(conn).Encode(call0(ctx, handlers.RedetectSDCard))
 	case CommandSDCardFiles:
 		_ = json.NewEncoder(conn).Encode(callPath(ctx, handlers.SDCardFiles, req.Path))
 	case CommandSDCardPreview:
@@ -257,6 +262,10 @@ func RequestFormatSDCard(ctx context.Context, devicePath, label string) error {
 		Label:      label,
 	}, formatRequestTimeout)
 	return err
+}
+
+func RequestRedetectSDCard(ctx context.Context) error {
+	return sendCommand(ctx, CommandRedetectSDCard, "")
 }
 
 func RequestSDCardFiles(ctx context.Context, path string) (*sdcardbrowser.FileList, error) {

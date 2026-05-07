@@ -160,6 +160,8 @@ export const formatSDCard = (d, devicePath, confirmation, label = '') =>
     method: 'POST',
     body: { device_path: devicePath, confirmation, label }
   })
+export const redetectSDCard = (d) =>
+  apiRequest('/api/devices/redetect', { deviceUrl: d, method: 'POST' })
 export const getFilePublicLink = (d, filePath) =>
   apiRequest('/api/files/link', { deviceUrl: d, query: { path: filePath } })
 export const getFileViewUrl = (d, filePath) =>

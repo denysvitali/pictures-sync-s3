@@ -153,6 +153,38 @@ func (ctx *Context) HandleDeviceFormat(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// HandleDeviceRedetect asks the daemon to immediately re-scan the SD card reader.
+func (ctx *Context) HandleDeviceRedetect(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	requestCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	log.Println("SD card redetect requested via WebUI")
+	if err := ctx.manualSyncClient().RequestRedetectSDCard(requestCtx); err != nil {
+		statusCode := http.StatusServiceUnavailable
+		var commandErr *daemoncontrol.CommandError
+		if errors.As(err, &commandErr) {
+			switch commandErr.Code {
+			case daemoncontrol.CodeNoSDCardMounted, daemoncontrol.CodeInvalidDevice:
+				statusCode = http.StatusBadRequest
+			case daemoncontrol.CodeSyncAlreadyActive:
+				statusCode = http.StatusConflict
+			}
+		}
+		http.Error(w, err.Error(), statusCode)
+		return
+	}
+
+	JSONResponse(w, map[string]string{
+		"status":  "ok",
+		"message": "SD card re-detected",
+	})
+}
+
 // HandleSyncStart starts a manual sync operation
 func (ctx *Context) HandleSyncStart(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

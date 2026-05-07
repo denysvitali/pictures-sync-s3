@@ -77,6 +77,7 @@ type mockDaemonClient struct {
 	manualSyncErr error
 	cancelSyncErr error
 	formatErr     error
+	redetectErr   error
 }
 
 func (m *mockDaemonClient) RequestManualSync(context.Context, string) error {
@@ -89,6 +90,10 @@ func (m *mockDaemonClient) RequestCancelSync(context.Context) error {
 
 func (m *mockDaemonClient) RequestFormatSDCard(context.Context, string, string) error {
 	return m.formatErr
+}
+
+func (m *mockDaemonClient) RequestRedetectSDCard(context.Context) error {
+	return m.redetectErr
 }
 
 func (m *mockDaemonClient) RequestStatus(context.Context) (state.CurrentState, error) {
@@ -201,6 +206,34 @@ func TestHandleDeviceFormat_RequiresConfirmation(t *testing.T) {
 	}
 	if called {
 		t.Fatal("Format should not be requested without exact confirmation")
+	}
+}
+
+func TestHandleDeviceRedetect_POST(t *testing.T) {
+	ctx, cleanup := setupTestContext(t)
+	defer cleanup()
+
+	called := false
+	ctx.ManualSync = DaemonControlFunc{
+		ManualSync:   func(context.Context, string) error { return nil },
+		CancelSync:   func(context.Context) error { return nil },
+		FormatSDCard: func(context.Context, string, string) error { return nil },
+		RedetectSDCard: func(context.Context) error {
+			called = true
+			return nil
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/devices/redetect", nil)
+	w := httptest.NewRecorder()
+
+	ctx.HandleDeviceRedetect(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected status %d, got %d: %s", http.StatusOK, w.Code, w.Body.String())
+	}
+	if !called {
+		t.Fatal("Expected re-detect to be requested")
 	}
 }
 

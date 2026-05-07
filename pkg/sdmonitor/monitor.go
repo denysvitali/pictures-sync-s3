@@ -1,6 +1,7 @@
 package sdmonitor
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -132,6 +133,21 @@ func (m *Monitor) GetCurrentDevice() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.lastDevice
+}
+
+// RedetectCurrentDevice clears any post-format ignore marker and checks for a card immediately.
+func (m *Monitor) RedetectCurrentDevice() error {
+	m.mu.Lock()
+	m.ignoredDevice = ""
+	m.mountsCacheTime = time.Time{}
+	m.mu.Unlock()
+
+	m.checkDevices()
+
+	if !m.IsCardMounted() {
+		return fmt.Errorf("no SD card detected")
+	}
+	return nil
 }
 
 // pollDevices polls for USB storage devices

@@ -221,6 +221,7 @@ func (s *Service) Run() error {
 			History:         s.handleHistoryCommand,
 			Devices:         s.handleDevicesCommand,
 			FormatSDCard:    s.handleFormatSDCardCommand,
+			RedetectSDCard:  s.handleRedetectSDCardCommand,
 			SDCardFiles:     s.handleSDCardFilesCommand,
 			SDCardPreview:   s.handleSDCardPreviewCommand,
 			SDCardThumbnail: s.handleSDCardThumbnailCommand,
@@ -429,6 +430,38 @@ func (s *Service) handleFormatSDCardCommand(ctx context.Context, devicePath, lab
 	s.stateMgr.SetStatus(state.StatusIdle)
 
 	return daemoncontrol.OK("SD card formatted")
+}
+
+func (s *Service) handleRedetectSDCardCommand(ctx context.Context) daemoncontrol.Response {
+	if ctx.Err() != nil {
+		return daemoncontrol.Error(daemoncontrol.CodeUnavailable, "pictures-sync daemon is shutting down")
+	}
+	if s.syncMgr.IsRunning() {
+		return daemoncontrol.Error(daemoncontrol.CodeSyncAlreadyActive, "cannot re-detect SD card while sync is in progress")
+	}
+
+	log.Println("Manual SD card re-detect requested")
+	if err := s.monitor.RedetectCurrentDevice(); err != nil {
+		log.Printf("SD card re-detect failed: %v", err)
+		if stateErr := s.stateMgr.SetSDCard(false, ""); stateErr != nil {
+			log.Printf("Warning: Failed to clear SD card state after re-detect failure: %v", stateErr)
+		}
+		switch err.Error() {
+		case "no SD card detected":
+			return daemoncontrol.Error(daemoncontrol.CodeNoSDCardMounted, err.Error())
+		default:
+			return daemoncontrol.Error(daemoncontrol.CodeInternalError, err.Error())
+		}
+	}
+
+	if err := s.stateMgr.SetSDCard(true, s.monitor.GetMountPath()); err != nil {
+		log.Printf("Warning: Failed to update SD card state after re-detect: %v", err)
+	}
+	if err := s.stateMgr.SetStatus(state.StatusDetected); err != nil {
+		log.Printf("Warning: Failed to update status after re-detect: %v", err)
+	}
+
+	return daemoncontrol.OK("SD card re-detected")
 }
 
 func (s *Service) handleSDCardFilesCommand(ctx context.Context, requestedPath string) daemoncontrol.Response {

@@ -88,6 +88,19 @@ func TestFormatCurrentDeviceIgnoresDeviceUntilRemovalAfterAttempt(t *testing.T) 
 	}
 }
 
+func TestRedetectCurrentDeviceClearsIgnoredDevice(t *testing.T) {
+	monitor := NewMonitor(t.TempDir())
+	monitor.ignoreDeviceUntilRemoval("/dev/sda1")
+
+	err := monitor.RedetectCurrentDevice()
+	if err == nil || err.Error() != "no SD card detected" {
+		t.Fatalf("Expected no SD card detected error, got %v", err)
+	}
+	if monitor.ignoredDevice != "" {
+		t.Fatalf("ignoredDevice = %q, want cleared device", monitor.ignoredDevice)
+	}
+}
+
 func TestFormatFAT32DeviceCreatesFilesystem(t *testing.T) {
 	imagePath := createFormatTestImage(t, 64*1024*1024)
 

@@ -9,6 +9,7 @@ import {
   cancelSync,
   selectDevice,
   formatSDCard,
+  redetectSDCard,
 } from '../api.js'
 import { Card, CardHeader, CardTitle } from '../components/Card.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
@@ -198,7 +199,16 @@ function StatusRow({ icon, label, value, ok }) {
   )
 }
 
-function DeviceInfoCard({ status, devices, onSelectDevice, onFormatDevice, isSelecting, isFormatting }) {
+function DeviceInfoCard({
+  status,
+  devices,
+  onSelectDevice,
+  onFormatDevice,
+  onRedetectCard,
+  isSelecting,
+  isFormatting,
+  isRedetecting,
+}) {
   const deviceList = devices || []
   const canSelect = (status?.needs_device_select || deviceList.length > 1) && deviceList.length > 0
   const hasCard = status.sdcard_mounted
@@ -305,8 +315,23 @@ function DeviceInfoCard({ status, devices, onSelectDevice, onFormatDevice, isSel
       ) : (
         <div className="text-center py-6">
           <Icon name="image" className="w-8 h-8 text-surface-600 mx-auto mb-2" />
-          <p className="text-sm text-surface-400">No storage device detected</p>
-          <p className="text-xs text-surface-500 mt-1">Insert an SD card to begin</p>
+          <p className="text-sm text-surface-400">No active SD card detected</p>
+          <p className="text-xs text-surface-500 mt-1">
+            {deviceList.length > 0 ? 'Re-detect the inserted card or reinsert it' : 'Insert an SD card to begin'}
+          </p>
+          {deviceList.length > 0 && (
+            <Button
+              variant="secondary"
+              size="md"
+              onClick={() => onRedetectCard?.()}
+              loading={isRedetecting}
+              disabled={status.status === 'syncing'}
+              className="mt-4 w-full"
+            >
+              <Icon name="arrow-path" className="w-4 h-4" />
+              Re-detect SD Card
+            </Button>
+          )}
         </div>
       )}
     </Card>
@@ -424,6 +449,7 @@ export default function StatusPage() {
   const [actionLoading, setActionLoading] = useState(false)
   const [selectionLoading, setSelectionLoading] = useState(false)
   const [formatLoading, setFormatLoading] = useState(false)
+  const [redetectLoading, setRedetectLoading] = useState(false)
   const [error, setError] = useState(null)
   const consecutiveErrorsRef = useRef(0)
   const timerRef = useRef(null)
@@ -551,6 +577,20 @@ export default function StatusPage() {
     }
   }, [deviceUrl, toast, fetchData])
 
+  const handleRedetectCard = useCallback(async () => {
+    if (!deviceUrl) return
+    setRedetectLoading(true)
+    try {
+      await redetectSDCard(deviceUrl)
+      toast.success('SD card re-detected')
+      await fetchData()
+    } catch (err) {
+      toast.error(`Failed to re-detect SD card: ${describeError(err)}`)
+    } finally {
+      setRedetectLoading(false)
+    }
+  }, [deviceUrl, toast, fetchData])
+
   if (loading && !status) {
     return <PageLoader />
   }
@@ -618,8 +658,10 @@ export default function StatusPage() {
             devices={devices}
             onSelectDevice={handleSelectDevice}
             onFormatDevice={handleFormatDevice}
+            onRedetectCard={handleRedetectCard}
             isSelecting={selectionLoading}
             isFormatting={formatLoading}
+            isRedetecting={redetectLoading}
           />
         </div>
       )}

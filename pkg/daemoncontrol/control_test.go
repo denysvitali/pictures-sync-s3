@@ -234,3 +234,51 @@ func TestRequestFormatSDCard_WithDevicePath(t *testing.T) {
 		t.Fatal("Serve did not stop")
 	}
 }
+
+func TestRequestRedetectSDCard(t *testing.T) {
+	withTempSocket(t)
+
+	called := false
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- ServeWithHandlers(ctx, Handlers{
+			ManualSync: func(context.Context, string) Response { return OK("accepted") },
+			CancelSync: func(context.Context) Response { return OK("cancelled") },
+			RedetectSDCard: func(context.Context) Response {
+				called = true
+				return OK("re-detected")
+			},
+		})
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		if _, err := os.Stat(SocketPath()); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatal("daemon control socket was not created")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if err := RequestRedetectSDCard(context.Background()); err != nil {
+		t.Fatalf("RequestRedetectSDCard failed: %v", err)
+	}
+	if !called {
+		t.Fatal("Expected re-detect handler to be called")
+	}
+
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("Serve returned error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Serve did not stop")
+	}
+}
