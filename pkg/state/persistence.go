@@ -8,29 +8,42 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/utils"
 )
 
-// File paths for persistent storage
+// File paths for persistent and runtime storage.
+// StateFile is volatile runtime state shared by the daemon and web UI; keep it
+// off persistent flash because sync progress is updated frequently.
 var (
-	stateDir    = getPermDir()
-	PermDir     = stateDir
-	MountDir    = filepath.Join(PermDir, "mounts/sdcard")
-	ConfigFile  = filepath.Join(PermDir, "rclone.conf")
-	HistoryFile = filepath.Join(PermDir, "sync-history.json")
-	StateFile   = filepath.Join(PermDir, "state.json")
+	stateDir        = getPermDir()
+	runtimeStateDir = getRuntimeStateDir()
+	PermDir         = stateDir
+	MountDir        = filepath.Join(PermDir, "mounts/sdcard")
+	ConfigFile      = filepath.Join(PermDir, "rclone.conf")
+	HistoryFile     = filepath.Join(PermDir, "sync-history.json")
+	StateFile       = filepath.Join(runtimeStateDir, "state.json")
 )
 
-// GetStateDir returns the current state directory (for testing)
+// GetStateDir returns the current persistent state directory (for testing)
 func GetStateDir() string {
 	return stateDir
 }
 
-// SetStateDir sets the state directory and updates all file paths (for testing)
+// SetStateDir sets persistent and runtime state directories to the same path
+// for tests.
 func SetStateDir(dir string) {
+	stateDir = dir
+	runtimeStateDir = dir
+	PermDir = dir
+	MountDir = filepath.Join(PermDir, "mounts/sdcard")
+	ConfigFile = filepath.Join(PermDir, "rclone.conf")
+	HistoryFile = filepath.Join(PermDir, "sync-history.json")
+	StateFile = filepath.Join(runtimeStateDir, "state.json")
+}
+
+func setPermDir(dir string) {
 	stateDir = dir
 	PermDir = dir
 	MountDir = filepath.Join(PermDir, "mounts/sdcard")
 	ConfigFile = filepath.Join(PermDir, "rclone.conf")
 	HistoryFile = filepath.Join(PermDir, "sync-history.json")
-	StateFile = filepath.Join(PermDir, "state.json")
 }
 
 // getPermDir returns the appropriate permanent directory path
@@ -45,10 +58,20 @@ func getPermDir() string {
 	return "/perm/pictures-sync"
 }
 
+func getRuntimeStateDir() string {
+	if baseDir := os.Getenv("PICTURES_SYNC_STATE_DIR"); baseDir != "" {
+		return filepath.Join(baseDir, "pictures-sync")
+	}
+	return filepath.Join(os.TempDir(), "pictures-sync")
+}
+
 // ensureDirectories creates necessary directories if they don't exist
 func ensureDirectories() error {
 	if err := os.MkdirAll(PermDir, 0750); err != nil {
 		return fmt.Errorf("failed to create perm directory: %w", err)
+	}
+	if err := os.MkdirAll(runtimeStateDir, 0750); err != nil {
+		return fmt.Errorf("failed to create runtime state directory: %w", err)
 	}
 	// #nosec G301 -- SD card mount point must be accessible by web UI process
 	if err := os.MkdirAll(MountDir, 0755); err != nil {
@@ -119,7 +142,7 @@ func GetRcloneConfigPath() string {
 
 // loadStateFile reads the state file and returns the raw data
 func loadStateFile() ([]byte, error) {
-	// #nosec G304 -- StateFile is a controlled application path (/perm/pictures-sync/state.json)
+	// #nosec G304 -- StateFile is a controlled application path under runtime state.
 	data, err := os.ReadFile(StateFile)
 	if err != nil {
 		if os.IsNotExist(err) {

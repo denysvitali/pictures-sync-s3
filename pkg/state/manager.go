@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -22,7 +23,11 @@ type Manager struct {
 // NewManager creates a new state manager
 func NewManager() (*Manager, error) {
 	if os.Getenv("PERM_DIR") != "" {
-		SetStateDir(getPermDir())
+		setPermDir(getPermDir())
+	}
+	if os.Getenv("PICTURES_SYNC_STATE_DIR") != "" {
+		runtimeStateDir = getRuntimeStateDir()
+		StateFile = filepath.Join(runtimeStateDir, "state.json")
 	}
 
 	m := &Manager{
