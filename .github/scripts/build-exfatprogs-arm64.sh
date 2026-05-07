@@ -29,7 +29,7 @@ tar -C "$BUILD_DIR" -xzf "$archive"
 cd "$BUILD_DIR/exfatprogs-${EXFATPROGS_VERSION}"
 
 ./configure --prefix=/usr --disable-shared --enable-static
-make -j"$(nproc)" CC=gcc LDFLAGS=-static
+make -j"$(nproc)" CC=gcc LDFLAGS=-all-static
 
 install -m 0755 mkfs/mkfs.exfat "$OUTPUT_DIR/mkfs.exfat"
 file "$OUTPUT_DIR/mkfs.exfat"
