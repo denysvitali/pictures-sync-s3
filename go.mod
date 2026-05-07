@@ -5,7 +5,7 @@ go 1.26
 require (
 	github.com/beevik/ntp v1.5.0
 	github.com/disintegration/imaging v1.6.2
-	github.com/diskfs/go-diskfs v1.9.1
+	github.com/diskfs/go-diskfs v1.9.2
 	github.com/dsoprea/go-exif/v3 v3.0.1
 	github.com/gokrazy/updater v0.0.0-20250705135802-db129c40879c
 	github.com/gorilla/websocket v1.5.3
@@ -65,7 +65,7 @@ require (
 	github.com/dsoprea/go-logging v0.0.0-20200710184922-b02d349568dd // indirect
 	github.com/dsoprea/go-utility/v2 v2.0.0-20221003172846-a3e1774ef349 // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
-	github.com/elliotwutingfeng/asciiset v0.0.0-20230602022725-51bbb787efab // indirect
+	github.com/elliotwutingfeng/asciiset v0.0.0-20260129054604-cfde2086bc57 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.13 // indirect
 	github.com/go-chi/chi/v5 v5.2.5 // indirect
@@ -109,7 +109,7 @@ require (
 	github.com/ncw/swift/v2 v2.0.5 // indirect
 	github.com/oklog/ulid/v2 v2.1.1 // indirect
 	github.com/peterh/liner v1.2.2 // indirect
-	github.com/pierrec/lz4/v4 v4.1.25 // indirect
+	github.com/pierrec/lz4/v4 v4.1.26 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/pkg/xattr v0.4.12 // indirect
 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
