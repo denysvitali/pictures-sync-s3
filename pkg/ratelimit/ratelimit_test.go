@@ -393,8 +393,8 @@ func TestExtractIP(t *testing.T) {
 func TestConfigPresets(t *testing.T) {
 	// Test default config
 	defaultCfg := DefaultConfig()
-	if defaultCfg.RequestsPerSecond != 1.0 {
-		t.Errorf("Default config should have 1.0 req/sec, got %f", defaultCfg.RequestsPerSecond)
+	if defaultCfg.RequestsPerSecond != 50.0 {
+		t.Errorf("Default config should have 50.0 req/sec, got %f", defaultCfg.RequestsPerSecond)
 	}
 
 	// Test auth config
@@ -408,8 +408,8 @@ func TestConfigPresets(t *testing.T) {
 
 	// Test expensive op config
 	expensiveCfg := ExpensiveOpConfig()
-	if expensiveCfg.RequestsPerSecond != 1.0 {
-		t.Errorf("Expensive op config should have 1.0 req/sec, got %f", expensiveCfg.RequestsPerSecond)
+	if expensiveCfg.RequestsPerSecond != 50.0 {
+		t.Errorf("Expensive op config should have 50.0 req/sec, got %f", expensiveCfg.RequestsPerSecond)
 	}
 	if expensiveCfg.MaxAuthAttempts != 0 {
 		t.Errorf("Expensive op config should have 0 auth attempts, got %d", expensiveCfg.MaxAuthAttempts)

@@ -48,24 +48,24 @@ type Config struct {
 // DefaultConfig returns a safe default configuration
 func DefaultConfig() Config {
 	return Config{
-		RequestsPerSecond: 1.0,           // 1 request per second
-		Burst:             5,              // Allow burst of 5
-		MaxAuthAttempts:   5,              // 5 failed attempts
-		AuthWindow:        15 * time.Minute, // Per 15 minutes
-		LockoutDuration:   15 * time.Minute, // Lock for 15 minutes
-		CleanupInterval:   5 * time.Minute,  // Cleanup every 5 minutes
-		ClientExpiry:      30 * time.Minute, // Keep entries for 30 minutes
+		RequestsPerSecond: 50.0,
+		Burst:             100,
+		MaxAuthAttempts:   5,
+		AuthWindow:        15 * time.Minute,
+		LockoutDuration:   15 * time.Minute,
+		CleanupInterval:   5 * time.Minute,
+		ClientExpiry:      30 * time.Minute,
 	}
 }
 
 // AuthConfig returns configuration for authentication endpoints
 func AuthConfig() Config {
 	return Config{
-		RequestsPerSecond: 2.0,           // 2 requests per second for auth
-		Burst:             3,              // Small burst for auth
-		MaxAuthAttempts:   5,              // 5 failed attempts
-		AuthWindow:        15 * time.Minute, // Per 15 minutes
-		LockoutDuration:   15 * time.Minute, // Lock for 15 minutes
+		RequestsPerSecond: 50.0,
+		Burst:             100,
+		MaxAuthAttempts:   5,
+		AuthWindow:        15 * time.Minute,
+		LockoutDuration:   15 * time.Minute,
 		CleanupInterval:   5 * time.Minute,
 		ClientExpiry:      30 * time.Minute,
 	}
@@ -74,9 +74,9 @@ func AuthConfig() Config {
 // ExpensiveOpConfig returns configuration for expensive operations (thumbnails, file listing)
 func ExpensiveOpConfig() Config {
 	return Config{
-		RequestsPerSecond: 1.0,            // 1 request per second
-		Burst:             2,               // Very small burst
-		MaxAuthAttempts:   0,               // No auth tracking for these endpoints
+		RequestsPerSecond: 50.0,
+		Burst:             100,
+		MaxAuthAttempts:   0,
 		AuthWindow:        0,
 		LockoutDuration:   0,
 		CleanupInterval:   5 * time.Minute,

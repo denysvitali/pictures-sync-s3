@@ -63,15 +63,10 @@ func TestBasicAuthFailure(t *testing.T) {
 	}
 }
 
-// TestBasicAuthLockout tests account lockout after multiple failures
+// TestBasicAuthLockout tests account lockout after MaxAuthAttempts failures
 func TestBasicAuthLockout(t *testing.T) {
-	// AuthConfig has:
-	// - RequestsPerSecond: 2.0
-	// - Burst: 3
-	// - MaxAuthAttempts: 5
-	// The rate limit (burst=3) will kick in before we hit MaxAuthAttempts.
-	// This test verifies that failed auth attempts are tracked.
-
+	// AuthConfig has MaxAuthAttempts: 5; burst is high enough that the
+	// per-IP request limiter does not kick in before lockout.
 	limiter := ratelimit.NewLimiter(ratelimit.AuthConfig())
 	defer limiter.Stop()
 
@@ -82,8 +77,8 @@ func TestBasicAuthLockout(t *testing.T) {
 
 	wrongAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte("gokrazy:wrongpass"))
 
-	// Make 3 failed attempts (within burst limit)
-	for i := 0; i < 3; i++ {
+	// First MaxAuthAttempts-1 (=4) failed attempts return 401.
+	for i := 0; i < 4; i++ {
 		req := httptest.NewRequest("GET", "/test", nil)
 		req.RemoteAddr = "192.168.1.102:12345"
 		req.Header.Set("Authorization", wrongAuth)
@@ -96,7 +91,7 @@ func TestBasicAuthLockout(t *testing.T) {
 		}
 	}
 
-	// Fourth attempt hits rate limit (burst exhausted)
+	// 5th failed attempt trips MaxAuthAttempts and locks out the IP.
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.RemoteAddr = "192.168.1.102:12345"
 	req.Header.Set("Authorization", wrongAuth)
@@ -105,12 +100,11 @@ func TestBasicAuthLockout(t *testing.T) {
 	handler.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusTooManyRequests {
-		t.Errorf("Fourth attempt should be rate limited, got status %d", rr.Code)
+		t.Errorf("5th failed attempt should trigger lockout (429), got status %d", rr.Code)
 	}
 
-	// Verify 3 auth failures were recorded
-	if count := limiter.GetAuthFailureCount("192.168.1.102"); count != 3 {
-		t.Errorf("Expected 3 auth failures, got %d", count)
+	if count := limiter.GetAuthFailureCount("192.168.1.102"); count != 5 {
+		t.Errorf("Expected 5 auth failures, got %d", count)
 	}
 }
 
@@ -164,7 +158,6 @@ func TestBasicAuthResetAfterSuccess(t *testing.T) {
 
 // TestBasicAuthRateLimit tests general rate limiting
 func TestBasicAuthRateLimit(t *testing.T) {
-	// Use the actual AuthConfig that the middleware will use
 	limiter := ratelimit.NewLimiter(ratelimit.AuthConfig())
 	defer limiter.Stop()
 
@@ -175,8 +168,9 @@ func TestBasicAuthRateLimit(t *testing.T) {
 
 	correctAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte("gokrazy:testpass"))
 
-	// Make requests up to the burst limit (3)
-	for i := 0; i < 3; i++ {
+	burst := ratelimit.AuthConfig().Burst
+
+	for i := 0; i < burst; i++ {
 		req := httptest.NewRequest("GET", "/test", nil)
 		req.RemoteAddr = "192.168.1.104:12345"
 		req.Header.Set("Authorization", correctAuth)
@@ -216,14 +210,9 @@ func TestBasicAuthPerIPIsolation(t *testing.T) {
 	wrongAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte("gokrazy:wrongpass"))
 	correctAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte("gokrazy:testpass"))
 
-	// AuthConfig has:
-	// - RequestsPerSecond: 2.0
-	// - Burst: 3
-	// - MaxAuthAttempts: 5
-	// So we can make 3 requests immediately (burst), then need to wait.
-	// For this test, just verify that failed auth attempts are tracked separately per IP.
+	// Verify failed auth attempts are tracked separately per IP.
 
-	// Make 3 failed attempts for IP1 (within burst limit)
+	// Make 3 failed attempts for IP1.
 	for i := 0; i < 3; i++ {
 		req := httptest.NewRequest("GET", "/test", nil)
 		req.RemoteAddr = "192.168.1.105:12345"
@@ -257,7 +246,6 @@ func TestBasicAuthPerIPIsolation(t *testing.T) {
 
 // TestExpensiveOperationMiddleware tests the expensive operation rate limiter
 func TestExpensiveOperationMiddleware(t *testing.T) {
-	// Use the actual ExpensiveOpConfig that the middleware will use
 	limiter := ratelimit.NewLimiter(ratelimit.ExpensiveOpConfig())
 	defer limiter.Stop()
 
@@ -267,37 +255,30 @@ func TestExpensiveOperationMiddleware(t *testing.T) {
 		w.Write([]byte("OK"))
 	})
 
-	// First request should succeed (uses burst token)
-	req1 := httptest.NewRequest("GET", "/api/thumbnail", nil)
-	req1.RemoteAddr = "192.168.1.107:12345"
+	burst := ratelimit.ExpensiveOpConfig().Burst
 
-	rr1 := httptest.NewRecorder()
-	handler(rr1, req1)
+	// All requests within the burst should succeed.
+	for i := 0; i < burst; i++ {
+		req := httptest.NewRequest("GET", "/api/thumbnail", nil)
+		req.RemoteAddr = "192.168.1.107:12345"
 
-	if rr1.Code != http.StatusOK {
-		t.Errorf("First request should succeed, got status %d", rr1.Code)
+		rr := httptest.NewRecorder()
+		handler(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Errorf("Request %d should succeed (within burst), got status %d", i+1, rr.Code)
+		}
 	}
 
-	// Second request should succeed (uses second burst token from config burst=2)
-	req2 := httptest.NewRequest("GET", "/api/thumbnail", nil)
-	req2.RemoteAddr = "192.168.1.107:12345"
+	// Next request should be rate limited (burst exhausted)
+	req := httptest.NewRequest("GET", "/api/thumbnail", nil)
+	req.RemoteAddr = "192.168.1.107:12345"
 
-	rr2 := httptest.NewRecorder()
-	handler(rr2, req2)
+	rr := httptest.NewRecorder()
+	handler(rr, req)
 
-	if rr2.Code != http.StatusOK {
-		t.Errorf("Second request should succeed with burst, got status %d", rr2.Code)
-	}
-
-	// Third request should be rate limited (burst exhausted)
-	req3 := httptest.NewRequest("GET", "/api/thumbnail", nil)
-	req3.RemoteAddr = "192.168.1.107:12345"
-
-	rr3 := httptest.NewRecorder()
-	handler(rr3, req3)
-
-	if rr3.Code != http.StatusTooManyRequests {
-		t.Errorf("Third request should be rate limited, got status %d", rr3.Code)
+	if rr.Code != http.StatusTooManyRequests {
+		t.Errorf("Request after burst should be rate limited, got status %d", rr.Code)
 	}
 }
 
