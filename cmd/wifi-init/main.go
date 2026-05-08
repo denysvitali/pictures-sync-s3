@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mdlayher/genetlink"
+	"github.com/mdlayher/netlink"
 	"golang.org/x/sys/unix"
 )
 
@@ -49,6 +51,55 @@ func main() {
 		log.Fatalf("wait for %s: %v", iface, err)
 	}
 	log.Printf("wifi-init: %s is available", iface)
+
+	if err := disablePowerSave(iface); err != nil {
+		log.Printf("wifi-init: failed to disable power save on %s: %v", iface, err)
+	} else {
+		log.Printf("wifi-init: disabled power save on %s", iface)
+	}
+}
+
+// disablePowerSave turns off WiFi power management on the given interface via
+// nl80211. brcmfmac (Pi WiFi) defaults to power save on, which causes the
+// radio to silently stop acking after idle periods — the kernel keeps the IP
+// lease so everything looks healthy locally, but the device becomes
+// unreachable from the LAN until reassociation.
+func disablePowerSave(iface string) error {
+	ifi, err := net.InterfaceByName(iface)
+	if err != nil {
+		return fmt.Errorf("lookup %s: %w", iface, err)
+	}
+
+	conn, err := genetlink.Dial(nil)
+	if err != nil {
+		return fmt.Errorf("genetlink dial: %w", err)
+	}
+	defer conn.Close()
+
+	family, err := conn.GetFamily(unix.NL80211_GENL_NAME)
+	if err != nil {
+		return fmt.Errorf("get nl80211 family: %w", err)
+	}
+
+	ae := netlink.NewAttributeEncoder()
+	ae.Uint32(unix.NL80211_ATTR_IFINDEX, uint32(ifi.Index))
+	ae.Uint32(unix.NL80211_ATTR_PS_STATE, unix.NL80211_PS_DISABLED)
+	data, err := ae.Encode()
+	if err != nil {
+		return fmt.Errorf("encode attrs: %w", err)
+	}
+
+	_, err = conn.Execute(genetlink.Message{
+		Header: genetlink.Header{
+			Command: unix.NL80211_CMD_SET_POWER_SAVE,
+			Version: family.Version,
+		},
+		Data: data,
+	}, family.ID, netlink.Request|netlink.Acknowledge)
+	if err != nil {
+		return fmt.Errorf("set power save: %w", err)
+	}
+	return nil
 }
 
 func loadModule(name string) error {
