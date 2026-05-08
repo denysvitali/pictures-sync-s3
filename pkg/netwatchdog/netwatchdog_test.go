@@ -1,0 +1,161 @@
+package netwatchdog
+
+import (
+	"context"
+	"errors"
+	"net"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+func TestParseGateway(t *testing.T) {
+	const sample = `Iface	Destination	Gateway 	Flags	RefCnt	Use	Metric	Mask		MTU	Window	IRTT
+wlan0	00000000	0101A8C0	0003	0	0	600	00000000	0	0	0
+wlan0	0000A8C0	00000000	0001	0	0	600	00FFFFFF	0	0	0
+`
+	ip, err := parseGateway(strings.NewReader(sample), "wlan0")
+	if err != nil {
+		t.Fatalf("parseGateway: %v", err)
+	}
+	if got, want := ip.String(), "192.168.1.1"; got != want {
+		t.Fatalf("gateway = %s, want %s", got, want)
+	}
+}
+
+func TestParseGatewayFiltersByInterface(t *testing.T) {
+	const sample = `Iface	Destination	Gateway 	Flags	RefCnt	Use	Metric	Mask		MTU	Window	IRTT
+eth0	00000000	0102A8C0	0003	0	0	100	00000000	0	0	0
+wlan0	00000000	0101A8C0	0003	0	0	600	00000000	0	0	0
+`
+	ip, err := parseGateway(strings.NewReader(sample), "wlan0")
+	if err != nil {
+		t.Fatalf("parseGateway: %v", err)
+	}
+	if got, want := ip.String(), "192.168.1.1"; got != want {
+		t.Fatalf("gateway = %s, want %s", got, want)
+	}
+}
+
+func TestParseGatewayMissing(t *testing.T) {
+	const sample = `Iface	Destination	Gateway 	Flags	RefCnt	Use	Metric	Mask		MTU	Window	IRTT
+wlan0	0000A8C0	00000000	0001	0	0	600	00FFFFFF	0	0	0
+`
+	if _, err := parseGateway(strings.NewReader(sample), "wlan0"); err == nil {
+		t.Fatalf("expected error for missing default route")
+	}
+}
+
+func TestWatchdogReboots(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "netwatchdog.log")
+
+	var pings, reboots atomic.Int32
+	cfg := Config{
+		Interface:        "test0",
+		Interval:         5 * time.Millisecond,
+		PingTimeout:      time.Second,
+		FailureThreshold: 3,
+		LogPath:          logPath,
+		MaxLogBytes:      1 << 20,
+		RebootOnFailure:  true,
+		Gateway: func(string) (net.IP, error) {
+			return net.IPv4(192, 168, 1, 1), nil
+		},
+		Ping: func(context.Context, string) error {
+			pings.Add(1)
+			return errors.New("unreachable")
+		},
+		Reboot: func() error {
+			reboots.Add(1)
+			return nil
+		},
+	}
+
+	w := New(cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { w.Run(ctx); close(done) }()
+
+	deadline := time.After(2 * time.Second)
+	for reboots.Load() == 0 {
+		select {
+		case <-deadline:
+			cancel()
+			t.Fatalf("reboot was not triggered (pings=%d)", pings.Load())
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	cancel()
+	<-done
+
+	if got := pings.Load(); got < 3 {
+		t.Fatalf("expected at least 3 pings before reboot, got %d", got)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if !strings.Contains(string(data), "threshold reached") {
+		t.Fatalf("log missing threshold message: %s", data)
+	}
+}
+
+func TestWatchdogRecoveryResetsCounter(t *testing.T) {
+	dir := t.TempDir()
+	var attempt atomic.Int32
+	var reboots atomic.Int32
+
+	cfg := Config{
+		Interface:        "test0",
+		Interval:         5 * time.Millisecond,
+		PingTimeout:      time.Second,
+		FailureThreshold: 3,
+		LogPath:          filepath.Join(dir, "netwatchdog.log"),
+		MaxLogBytes:      1 << 20,
+		RebootOnFailure:  true,
+		Gateway: func(string) (net.IP, error) {
+			return net.IPv4(192, 168, 1, 1), nil
+		},
+		Ping: func(context.Context, string) error {
+			n := attempt.Add(1)
+			// Pattern: fail, fail, succeed, repeat — never reach threshold of 3.
+			if n%3 == 0 {
+				return nil
+			}
+			return errors.New("unreachable")
+		},
+		Reboot: func() error {
+			reboots.Add(1)
+			return nil
+		},
+	}
+
+	w := New(cfg)
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	w.Run(ctx)
+
+	if reboots.Load() != 0 {
+		t.Fatalf("expected no reboot when failures don't reach threshold consecutively, got %d", reboots.Load())
+	}
+	if attempt.Load() < 5 {
+		t.Fatalf("expected several ping attempts, got %d", attempt.Load())
+	}
+}
+
+func TestPersistLogRotates(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "log")
+	pl := newPersistLog(path, 64)
+	for i := 0; i < 20; i++ {
+		pl.Writef("line-%d-with-padding-to-make-this-long", i)
+	}
+	if _, err := os.Stat(path + ".1"); err != nil {
+		t.Fatalf("expected rotated file: %v", err)
+	}
+}

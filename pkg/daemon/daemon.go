@@ -13,6 +13,7 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/daemoncontrol"
 	"github.com/denysvitali/pictures-sync-s3/pkg/events"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ledcontroller"
+	"github.com/denysvitali/pictures-sync-s3/pkg/netwatchdog"
 	"github.com/denysvitali/pictures-sync-s3/pkg/sdcardbrowser"
 	"github.com/denysvitali/pictures-sync-s3/pkg/sdmonitor"
 	"github.com/denysvitali/pictures-sync-s3/pkg/settings"
@@ -212,6 +213,10 @@ func New(cfg Config) (*Service, error) {
 func (s *Service) Run() error {
 	controlCtx, controlCancel := context.WithCancel(context.Background())
 	defer controlCancel()
+
+	go func() {
+		netwatchdog.New(netwatchdog.DefaultConfig()).Run(controlCtx)
+	}()
 
 	go func() {
 		if err := daemoncontrol.ServeWithHandlers(controlCtx, daemoncontrol.Handlers{
