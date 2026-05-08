@@ -1,15 +1,12 @@
 package auth
 
 import (
-	"crypto/rand"
 	"crypto/subtle"
-	"encoding/base64"
 	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/ratelimit"
 )
@@ -22,60 +19,6 @@ type staticPasswordProvider string
 
 func (p staticPasswordProvider) CurrentPassword() string {
 	return string(p)
-}
-
-var (
-	csrfToken string
-	csrfMutex sync.RWMutex
-)
-
-// GenerateCSRFToken creates a new CSRF token
-func GenerateCSRFToken() string {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		log.Fatal("Failed to generate CSRF token:", err)
-	}
-	return base64.StdEncoding.EncodeToString(b)
-}
-
-// InitCSRFToken initializes the CSRF token
-func InitCSRFToken() {
-	csrfMutex.Lock()
-	defer csrfMutex.Unlock()
-	csrfToken = GenerateCSRFToken()
-}
-
-// GetCSRFToken returns the current CSRF token
-func GetCSRFToken() string {
-	csrfMutex.RLock()
-	defer csrfMutex.RUnlock()
-	return csrfToken
-}
-
-// ValidateCSRFToken checks if the provided token matches the current token
-func ValidateCSRFToken(token string) bool {
-	if token == "" {
-		return false
-	}
-	csrfMutex.RLock()
-	defer csrfMutex.RUnlock()
-	return subtle.ConstantTimeCompare([]byte(token), []byte(csrfToken)) == 1
-}
-
-// CSRFProtection is middleware that validates CSRF tokens for state-changing requests
-func CSRFProtection(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Only check CSRF for state-changing methods
-		if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodDelete {
-			token := r.Header.Get("X-CSRF-Token")
-			if !ValidateCSRFToken(token) {
-				http.Error(w, "Invalid CSRF token", http.StatusForbidden)
-				log.Printf("CSRF validation failed for %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
-				return
-			}
-		}
-		next(w, r)
-	}
 }
 
 // SecurityHeadersMiddleware adds comprehensive HTTP security headers
@@ -371,7 +314,7 @@ func CORSMiddleware(allowedOrigins []string, allowCredentials bool) func(http.Ha
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
 			}
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-CSRF-Token")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)

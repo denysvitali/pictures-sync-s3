@@ -272,16 +272,24 @@ func TestAllowedOriginsConfiguration(t *testing.T) {
 	}
 }
 
-func TestCheckOriginStrict_AllowAllOrigins(t *testing.T) {
+// TestCheckOriginStrict_WildcardIsFiltered verifies that a wildcard "*" entry
+// in the allowlist is dropped rather than honored. WebSocket upgrades carry
+// credentials (Basic Auth + ws-token) so a permissive wildcard would defeat
+// origin validation; operators must enumerate hosts explicitly.
+func TestCheckOriginStrict_WildcardIsFiltered(t *testing.T) {
 	SetAllowedOrigins([]string{"*"})
 	defer SetAllowedOrigins([]string{})
+
+	if got := GetAllowedOrigins(); len(got) != 0 {
+		t.Fatalf("wildcard should be filtered, got %v", got)
+	}
 
 	req := httptest.NewRequest("GET", "/ws", nil)
 	req.Host = "192.168.10.124:8080"
 	req.RemoteAddr = "192.168.10.10:12345"
 	req.Header.Set("Origin", "https://example.com")
 
-	if !checkOriginStrict(req) {
-		t.Error("Expected wildcard origin configuration to allow any non-empty origin")
+	if checkOriginStrict(req) {
+		t.Error("wildcard should not allow arbitrary cross-origin connections")
 	}
 }

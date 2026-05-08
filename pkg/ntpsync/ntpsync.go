@@ -4,8 +4,10 @@
 package ntpsync
 
 import (
+	"context"
 	"fmt"
 	"log"
+	"net"
 	"time"
 
 	"github.com/beevik/ntp"
@@ -15,7 +17,14 @@ import (
 const (
 	defaultNTPTimeout       = 2 * time.Second
 	systemClockSetThreshold = time.Second
+	dnsFallbackTimeout      = 2 * time.Second
 )
+
+// earliestReasonableTime is the cutoff below which the system clock is
+// considered uninitialised. Gokrazy boots at the Unix epoch until something
+// (RTC, NTP, ...) sets the clock; anything before this date is treated as
+// "needs sync".
+var earliestReasonableTime = time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC)
 
 var (
 	servers = []string{
@@ -23,6 +32,14 @@ var (
 		"1.pool.ntp.org",
 		"2.pool.ntp.org",
 		"time.google.com",
+	}
+	// fallbackDNS is consulted when the system resolver fails (typical on
+	// gokrazy when /etc/resolv.conf points at a stub on [::1]:53 with nothing
+	// listening). These are well-known public resolvers.
+	fallbackDNS = []string{
+		"1.1.1.1:53",
+		"8.8.8.8:53",
+		"9.9.9.9:53",
 	}
 	now            = time.Now
 	setSystemClock = setSystemClockLinux
@@ -34,6 +51,13 @@ type SyncResult struct {
 	SyncedTime    time.Time
 	Offset        time.Duration
 	SystemTimeSet bool
+}
+
+// IsClockSane reports whether the system clock is past a sensible epoch and
+// therefore likely already synced (e.g. by a system-level NTP daemon or RTC).
+// Callers can use this to skip redundant NTP queries.
+func IsClockSane() bool {
+	return now().After(earliestReasonableTime)
 }
 
 // SyncTime synchronizes system time with NTP servers.
@@ -49,9 +73,16 @@ func SyncTimeWithTimeout(timeout time.Duration) (*SyncResult, error) {
 	for _, server := range servers {
 		log.Printf("Attempting NTP sync with %s...", server)
 
-		response, err := ntp.QueryWithOptions(server, ntp.QueryOptions{Timeout: timeout})
+		host, err := resolveHost(server, timeout)
 		if err != nil {
-			log.Printf("Failed to sync with %s: %v", server, err)
+			log.Printf("Failed to resolve %s: %v", server, err)
+			lastErr = err
+			continue
+		}
+
+		response, err := ntp.QueryWithOptions(host, ntp.QueryOptions{Timeout: timeout})
+		if err != nil {
+			log.Printf("Failed to sync with %s (%s): %v", server, host, err)
 			lastErr = err
 			continue
 		}
@@ -84,6 +115,59 @@ func SyncTimeWithTimeout(timeout time.Duration) (*SyncResult, error) {
 	}
 
 	return nil, fmt.Errorf("failed to sync with any NTP server: %w", lastErr)
+}
+
+// resolveHost returns either the original host (if it is already an IP literal
+// or the system resolver succeeds) or a public-DNS-resolved address. The result
+// is in host:port form when a resolved IP is returned, or bare host otherwise
+// (which lets the NTP library append its own default port).
+func resolveHost(host string, timeout time.Duration) (string, error) {
+	// If it already parses as an IP, no DNS needed.
+	if net.ParseIP(host) != nil {
+		return host, nil
+	}
+
+	// Try system resolver first.
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if addrs, err := net.DefaultResolver.LookupHost(ctx, host); err == nil && len(addrs) > 0 {
+		return host, nil
+	}
+
+	// Fall back to public DNS. We return host:port so the NTP library connects
+	// directly to the resolved address rather than re-running the failing
+	// system resolver.
+	for _, dns := range fallbackDNS {
+		ip, err := lookupViaResolver(host, dns, timeout)
+		if err != nil {
+			log.Printf("DNS fallback %s failed for %s: %v", dns, host, err)
+			continue
+		}
+		log.Printf("Resolved %s via fallback DNS %s -> %s", host, dns, ip)
+		return net.JoinHostPort(ip, "123"), nil
+	}
+
+	return "", fmt.Errorf("hostname resolution failed for %s (system resolver and public DNS fallbacks)", host)
+}
+
+func lookupViaResolver(host, server string, timeout time.Duration) (string, error) {
+	r := &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			d := net.Dialer{Timeout: dnsFallbackTimeout}
+			return d.DialContext(ctx, "udp", server)
+		},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	addrs, err := r.LookupHost(ctx, host)
+	if err != nil {
+		return "", err
+	}
+	if len(addrs) == 0 {
+		return "", fmt.Errorf("no addresses returned")
+	}
+	return addrs[0], nil
 }
 
 // SetSystemTime sets the system realtime clock to the supplied timestamp.

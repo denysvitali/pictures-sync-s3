@@ -260,7 +260,7 @@ func checkOriginStrict(r *http.Request) bool {
 	if len(allowedOrigins) > 0 {
 		allowed := false
 		for _, allowedOrigin := range allowedOrigins {
-			if allowedOrigin == "*" || strings.EqualFold(u.Host, allowedOrigin) {
+			if strings.EqualFold(u.Host, allowedOrigin) {
 				allowed = true
 				break
 			}
@@ -332,13 +332,28 @@ func checkOriginStrict(r *http.Request) bool {
 	return false
 }
 
-// SetAllowedOrigins configures the whitelist of allowed origin hosts
-// If empty, falls back to private IP validation
+// SetAllowedOrigins configures the whitelist of allowed origin hosts.
+// If empty, falls back to same-host validation (and LAN auto-trust if enabled).
+// SECURITY: wildcard "*" entries are dropped — WebSocket connections carry
+// credentials (Basic Auth + ws-token) so a wildcard origin is unsafe and
+// inconsistent with the CORS middleware which also rejects wildcards under
+// allowCredentials=true.
 func SetAllowedOrigins(origins []string) {
 	allowedOriginsMutex.Lock()
 	defer allowedOriginsMutex.Unlock()
-	allowedOrigins = make([]string, len(origins))
-	copy(allowedOrigins, origins)
+	filtered := make([]string, 0, len(origins))
+	wildcardSeen := false
+	for _, origin := range origins {
+		if origin == "*" {
+			wildcardSeen = true
+			continue
+		}
+		filtered = append(filtered, origin)
+	}
+	if wildcardSeen {
+		log.Printf("WebSocket: ignoring wildcard '*' origin entry; configure explicit hosts instead")
+	}
+	allowedOrigins = filtered
 	log.Printf("WebSocket: Updated allowed origins whitelist: %v", allowedOrigins)
 }
 

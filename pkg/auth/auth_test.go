@@ -392,55 +392,6 @@ func TestExtractIPFromHeaders(t *testing.T) {
 	}
 }
 
-// TestCSRFProtection tests CSRF token validation
-func TestCSRFProtection(t *testing.T) {
-	InitCSRFToken()
-	token := GetCSRFToken()
-
-	handler := CSRFProtection(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
-	})
-
-	// GET request should not require CSRF token
-	req := httptest.NewRequest("GET", "/test", nil)
-	rr := httptest.NewRecorder()
-	handler(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Errorf("GET request should succeed without CSRF token, got status %d", rr.Code)
-	}
-
-	// POST without token should fail
-	req = httptest.NewRequest("POST", "/test", nil)
-	rr = httptest.NewRecorder()
-	handler(rr, req)
-
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("POST without CSRF token should fail, got status %d", rr.Code)
-	}
-
-	// POST with valid token should succeed
-	req = httptest.NewRequest("POST", "/test", nil)
-	req.Header.Set("X-CSRF-Token", token)
-	rr = httptest.NewRecorder()
-	handler(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Errorf("POST with valid CSRF token should succeed, got status %d", rr.Code)
-	}
-
-	// POST with invalid token should fail
-	req = httptest.NewRequest("POST", "/test", nil)
-	req.Header.Set("X-CSRF-Token", "invalid-token")
-	rr = httptest.NewRecorder()
-	handler(rr, req)
-
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("POST with invalid CSRF token should fail, got status %d", rr.Code)
-	}
-}
-
 // TestSecurityHeaders tests that security headers are applied
 func TestSecurityHeaders(t *testing.T) {
 	handler := SecurityHeadersMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

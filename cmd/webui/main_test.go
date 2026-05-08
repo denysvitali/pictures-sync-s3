@@ -10,7 +10,6 @@ func TestParseAllowedOrigins(t *testing.T) {
 
 	got := configuredAllowedOrigins()
 	want := []string{
-		"*",
 		"192.168.10.124:8080",
 		"denysvitali.github.io",
 		"example.com",
