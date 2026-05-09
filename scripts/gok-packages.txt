@@ -7,6 +7,7 @@ github.com/gokrazy/serial-busybox
 github.com/gokrazy/breakglass
 tailscale.com/cmd/tailscaled
 tailscale.com/cmd/tailscale
+./cmd/perm-init
 ./cmd/wifi-init
 ./cmd/tailscale-init
 ./cmd/pictures-sync

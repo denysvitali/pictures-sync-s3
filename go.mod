@@ -7,6 +7,7 @@ require (
 	github.com/disintegration/imaging v1.6.2
 	github.com/diskfs/go-diskfs v1.9.1
 	github.com/dsoprea/go-exif/v3 v3.0.1
+	github.com/gokrazy/gokapi v0.0.0-20251205165548-0927bab199d4
 	github.com/gokrazy/updater v0.0.0-20250705135802-db129c40879c
 	github.com/gorilla/websocket v1.5.3
 	github.com/mdlayher/genetlink v1.4.0
@@ -35,6 +36,7 @@ require (
 	github.com/abbot/go-http-auth v0.4.0 // indirect
 	github.com/adrg/xdg v0.5.3 // indirect
 	github.com/anchore/go-lzo v0.1.0 // indirect
+	github.com/antihax/optional v1.0.0 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.41.7 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.10 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.32.17 // indirect
@@ -80,6 +82,7 @@ require (
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.30.2 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
+	github.com/gokrazy/internal v0.0.0-20260109072635-00a332bd5e47 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/golang/geo v0.0.0-20260427214057-41a1a8c7eb2a // indirect
 	github.com/google/go-cmp v0.7.0 // indirect

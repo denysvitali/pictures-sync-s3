@@ -193,6 +193,38 @@ jobs:
           fi
           echo "exfat_mkfs_binary=$exfat_mkfs_binary" >> "$GITHUB_OUTPUT"
 
+      - name: Cache static arm64 e2fsprogs
+        id: cache-e2fsprogs
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/dist/e2fsprogs-arm64/mke2fs
+          key: ${{ runner.os }}-${{ runner.arch }}-e2fsprogs-arm64-${{ hashFiles('.github/scripts/build-mke2fs-arm64.sh') }}
+
+      - name: Build static arm64 e2fsprogs
+        if: steps.cache-e2fsprogs.outputs.cache-hit != 'true'
+        run: |
+          bash .github/scripts/build-mke2fs-arm64.sh
+
+      - name: Resolve static arm64 mke2fs
+        id: e2fsprogs
+        shell: bash
+        run: |
+          mke2fs_binary="${{ github.workspace }}/dist/e2fsprogs-arm64/mke2fs"
+          if [ ! -x "$mke2fs_binary" ]; then
+            echo "::error::static arm64 mke2fs binary is missing or not executable: $mke2fs_binary"
+            exit 1
+          fi
+          file "$mke2fs_binary"
+          if ! file "$mke2fs_binary" | grep -q 'ARM aarch64'; then
+            echo "::error::cached mke2fs is not an arm64 binary"
+            exit 1
+          fi
+          if ! file "$mke2fs_binary" | grep -q 'statically linked'; then
+            echo "::error::cached mke2fs is not statically linked"
+            exit 1
+          fi
+          echo "mke2fs_binary=$mke2fs_binary" >> "$GITHUB_OUTPUT"
+
       - name: Build flashable Gokrazy image
         id: build
         env:
@@ -204,6 +236,7 @@ jobs:
           TARGET_STORAGE_BYTES: ${{ env.TARGET_STORAGE_BYTES }}
           HOSTAPD_BINARY: ${{ steps.hostapd.outputs.hostapd_binary }}
           EXFAT_MKFS_BINARY: ${{ steps.exfatprogs.outputs.exfat_mkfs_binary }}
+          MKE2FS_BINARY: ${{ steps.e2fsprogs.outputs.mke2fs_binary }}
           GOKRAZY_MODULE_REPLACE: /tmp/gokrazy
         run: |
           make ota
@@ -218,6 +251,7 @@ jobs:
           GOKRAZY_IMAGE_MODE: ota
           HOSTAPD_BINARY: ${{ steps.hostapd.outputs.hostapd_binary }}
           EXFAT_MKFS_BINARY: ${{ steps.exfatprogs.outputs.exfat_mkfs_binary }}
+          MKE2FS_BINARY: ${{ steps.e2fsprogs.outputs.mke2fs_binary }}
           GOKRAZY_MODULE_REPLACE: /tmp/gokrazy
         run: |
           make ota

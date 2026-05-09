@@ -46,6 +46,12 @@ if [ -z "$EXFAT_MKFS_BINARY" ] || [ ! -x "$EXFAT_MKFS_BINARY" ]; then
     exit 1
 fi
 
+MKE2FS_BINARY=${MKE2FS_BINARY:-$(command -v mke2fs || true)}
+if [ -z "$MKE2FS_BINARY" ] || [ ! -x "$MKE2FS_BINARY" ]; then
+    echo "Error: MKE2FS_BINARY must point to an executable mke2fs binary for the target architecture"
+    exit 1
+fi
+
 GOKRAZY_MODULE_REPLACE=${GOKRAZY_MODULE_REPLACE:-}
 if [ -z "$GOKRAZY_MODULE_REPLACE" ] && [ -f "$SCRIPT_DIR/../gokrazy/go.mod" ]; then
     GOKRAZY_MODULE_REPLACE="$SCRIPT_DIR/../gokrazy"
@@ -116,6 +122,7 @@ cat > "$CONFIG_FILE" <<EOF
   "Update": {
     "HTTPPort": "80",
     "HTTPSPort": "443",
+    "HTTPPassword": "photo-backup",
     "UseTLS": "self-signed",
     "TLSCertificateStorage": "perm-self-signed"
   },
@@ -134,6 +141,11 @@ cat >> "$CONFIG_FILE" <<EOF
     "github.com/denysvitali/pictures-sync-s3/cmd/pictures-sync": {
       "ExtraFilePaths": {
         "/usr/bin/mkfs.exfat": "$EXFAT_MKFS_BINARY"
+      }
+    },
+    "github.com/denysvitali/pictures-sync-s3/cmd/perm-init": {
+      "ExtraFilePaths": {
+        "/usr/local/bin/mke2fs": "$MKE2FS_BINARY"
       }
     },
     "tailscale.com/cmd/tailscale": {},
@@ -197,6 +209,7 @@ echo "  - Config: $CONFIG_FILE"
 echo "  - Go module: $INSTANCE_DIR/go.mod (with replace directive for local code)"
 echo "  - hostapd: $HOSTAPD_BINARY"
 echo "  - mkfs.exfat: $EXFAT_MKFS_BINARY"
+echo "  - mke2fs: $MKE2FS_BINARY"
 if [ -n "$WIFI_SSID" ]; then
     echo "  - WiFi: $WIFI_FILE (copy to device /perm/wifi.json)"
 fi

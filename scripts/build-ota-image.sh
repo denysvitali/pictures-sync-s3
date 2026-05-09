@@ -12,6 +12,7 @@ TARGET_STORAGE_BYTES="${TARGET_STORAGE_BYTES:-}"
 IMAGE_PATH="${IMAGE_DIR}/${IMAGE_NAME}"
 HOSTAPD_BINARY="${HOSTAPD_BINARY:-}"
 EXFAT_MKFS_BINARY="${EXFAT_MKFS_BINARY:-}"
+MKE2FS_BINARY="${MKE2FS_BINARY:-}"
 BUILD_DATE="${BUILD_DATE:-$(date -u '+%Y-%m-%dT%H:%M:%SZ')}"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 INSTANCE_DIR="$GOKRAZY_PARENT_DIR/$GOKRAZY_INSTANCE"
@@ -56,6 +57,14 @@ if [ -z "$EXFAT_MKFS_BINARY" ] || [ ! -x "$EXFAT_MKFS_BINARY" ]; then
   exit 1
 fi
 
+if [ -z "$MKE2FS_BINARY" ]; then
+  MKE2FS_BINARY="$(command -v mke2fs || true)"
+fi
+if [ -z "$MKE2FS_BINARY" ] || [ ! -x "$MKE2FS_BINARY" ]; then
+  echo "Error: MKE2FS_BINARY must point to an executable mke2fs binary for the target architecture"
+  exit 1
+fi
+
 if [ -n "$GOKRAZY_MODULE_REPLACE" ]; then
   if [ ! -f "$GOKRAZY_MODULE_REPLACE/go.mod" ]; then
     echo "Error: GOKRAZY_MODULE_REPLACE must point to a github.com/gokrazy/gokrazy checkout"
@@ -97,6 +106,7 @@ cat > "$INSTANCE_DIR/config.json" <<EOF
   "Update": {
     "HTTPPort": "80",
     "HTTPSPort": "443",
+    "HTTPPassword": "photo-backup",
     "UseTLS": "self-signed",
     "TLSCertificateStorage": "perm-self-signed"
   },
@@ -111,6 +121,15 @@ $(emit_packages_json '    ')
       ],
       "ExtraFilePaths": {
         "/usr/bin/mkfs.exfat": "$EXFAT_MKFS_BINARY"
+      }
+    },
+    "github.com/denysvitali/pictures-sync-s3/cmd/perm-init": {
+      "GoBuildFlags": [
+        "-trimpath",
+        "-ldflags=${VERSION_LDFLAGS}"
+      ],
+      "ExtraFilePaths": {
+        "/usr/local/bin/mke2fs": "$MKE2FS_BINARY"
       }
     },
     "github.com/denysvitali/pictures-sync-s3/cmd/webui": {
