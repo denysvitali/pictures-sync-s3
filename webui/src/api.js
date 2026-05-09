@@ -63,6 +63,28 @@ async function parseResponse(response) {
   }
 }
 
+async function parseTextResponse(response) {
+  const raw = await response.text()
+  const contentType = response.headers.get('content-type') || ''
+  if (!response.ok) {
+    if (contentType.includes('application/json')) {
+      let error = null
+      try {
+        error = JSON.parse(raw)
+      } catch {
+        // Fall back to the raw response body below.
+      }
+      throw new Error(error?.error || error?.message || raw || `Request failed (${response.status})`)
+    }
+    throw new Error(raw || `Request failed (${response.status})`)
+  }
+
+  return {
+    content: raw,
+    contentType,
+  }
+}
+
 function bodyPayload(payload) {
   if (payload === null || payload === undefined) return undefined
   if (typeof payload === 'string') return payload
@@ -117,6 +139,12 @@ export const getSDCardPreviewUrl = (d, filePath) =>
   `${normalizeBaseUrl(d)}/api/sdcard/preview?path=${encodeURIComponent(filePath || '')}`
 export const getSDCardFileUrl = (d, filePath, { download = false } = {}) =>
   `${normalizeBaseUrl(d)}/api/sdcard/file?path=${encodeURIComponent(filePath || '')}${download ? '&download=1' : ''}`
+export async function getSDCardFileContent(d, filePath) {
+  const response = await fetch(buildUrl(d, '/api/sdcard/file', { path: filePath }), {
+    credentials: 'include',
+  })
+  return parseTextResponse(response)
+}
 export const getConfig = (d) => apiRequest('/api/config', { deviceUrl: d })
 export const saveConfig = (d, configText) =>
   apiRequest('/api/config', {
@@ -167,6 +195,12 @@ export const getFilePublicLink = (d, filePath) =>
   apiRequest('/api/files/link', { deviceUrl: d, query: { path: filePath } })
 export const getFileViewUrl = (d, filePath) =>
   `${normalizeBaseUrl(d)}/api/files/view?path=${encodeURIComponent(filePath || '')}`
+export async function getFileViewContent(d, filePath) {
+  const response = await fetch(buildUrl(d, '/api/files/view', { path: filePath }), {
+    credentials: 'include',
+  })
+  return parseTextResponse(response)
+}
 export const getThumbnailUrl = (d, filePath) =>
   `${normalizeBaseUrl(d)}/api/thumbnail?path=${encodeURIComponent(filePath || '')}`
 

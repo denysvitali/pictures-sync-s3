@@ -91,6 +91,73 @@ func (ctx *Context) HandleFilesPaginated(w http.ResponseWriter, r *http.Request)
 	JSONResponse(w, result)
 }
 
+var fileViewImageContentTypes = map[string]string{
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	".png":  "image/png",
+	".gif":  "image/gif",
+	".webp": "image/webp",
+}
+
+var fileViewTextContentTypes = map[string]string{
+	".conf":      "text/plain; charset=utf-8",
+	".config":    "text/plain; charset=utf-8",
+	".css":       "text/css; charset=utf-8",
+	".csv":       "text/csv; charset=utf-8",
+	".go":        "text/x-go; charset=utf-8",
+	".hcl":       "text/x-hcl; charset=utf-8",
+	".html":      "text/html; charset=utf-8",
+	".ini":       "text/plain; charset=utf-8",
+	".java":      "text/x-java-source; charset=utf-8",
+	".js":        "text/javascript; charset=utf-8",
+	".json":      "application/json; charset=utf-8",
+	".log":       "text/plain; charset=utf-8",
+	".lua":       "text/x-lua; charset=utf-8",
+	".md":        "text/markdown; charset=utf-8",
+	".mod":       "text/plain; charset=utf-8",
+	".php":       "text/x-php; charset=utf-8",
+	".pl":        "text/x-perl; charset=utf-8",
+	".py":        "text/x-python; charset=utf-8",
+	".rb":        "text/x-ruby; charset=utf-8",
+	".rs":        "text/rust; charset=utf-8",
+	".sh":        "text/x-sh; charset=utf-8",
+	".sql":       "text/x-sql; charset=utf-8",
+	".toml":      "text/plain; charset=utf-8",
+	".ts":        "text/typescript; charset=utf-8",
+	".tsx":       "text/typescript; charset=utf-8",
+	".txt":       "text/plain; charset=utf-8",
+	".xml":       "application/xml; charset=utf-8",
+	".yml":       "text/yaml; charset=utf-8",
+	".yaml":      "text/yaml; charset=utf-8",
+	".yaml.tpl":  "text/yaml; charset=utf-8",
+}
+
+var fileViewTextFilenames = map[string]string{
+	"dockfile":   "text/x-dockerfile; charset=utf-8",
+	"dockerfile": "text/x-dockerfile; charset=utf-8",
+	"makefile":   "text/x-makefile; charset=utf-8",
+	"license":    "text/plain; charset=utf-8",
+	"changelog":  "text/markdown; charset=utf-8",
+	"readme":     "text/markdown; charset=utf-8",
+}
+
+func fileViewContentType(filePath string) (string, bool) {
+	ext := strings.ToLower(filepath.Ext(filePath))
+	if contentType, ok := fileViewImageContentTypes[ext]; ok {
+		return contentType, true
+	}
+	if contentType, ok := fileViewTextContentTypes[ext]; ok {
+		return contentType, true
+	}
+
+	fileName := strings.ToLower(filepath.Base(filePath))
+	if contentType, ok := fileViewTextFilenames[fileName]; ok {
+		return contentType, true
+	}
+
+	return "", false
+}
+
 // HandleFiles lists files on remote
 func (ctx *Context) HandleFiles(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -119,7 +186,7 @@ func (ctx *Context) HandleFiles(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// HandleFileView serves image files from remote storage
+// HandleFileView serves image and text files from remote storage.
 func (ctx *Context) HandleFileView(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -133,19 +200,8 @@ func (ctx *Context) HandleFileView(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if file is an image
-	ext := strings.ToLower(filepath.Ext(filePath))
-	var contentType string
-	switch ext {
-	case ".jpg", ".jpeg":
-		contentType = "image/jpeg"
-	case ".png":
-		contentType = "image/png"
-	case ".gif":
-		contentType = "image/gif"
-	case ".webp":
-		contentType = "image/webp"
-	default:
+	contentType, ok := fileViewContentType(filePath)
+	if !ok {
 		http.Error(w, "unsupported file type", http.StatusBadRequest)
 		return
 	}

@@ -162,8 +162,27 @@ function mergeStatusProgress(prevStatus, nextStatus) {
   return nextStatus
 }
 
+function getOverviewCardID(status) {
+  if (status?.current_sync?.card_id) {
+    return {
+      label: 'Current card ID',
+      value: status.current_sync.card_id,
+    }
+  }
+
+  if (status?.last_sync?.card_id) {
+    return {
+      label: 'Last synced card ID',
+      value: status.last_sync.card_id,
+    }
+  }
+
+  return null
+}
+
 function SystemStatusCard({ status }) {
   const statusConf = SYNC_STATUS_CONFIG[status.status] || SYNC_STATUS_CONFIG.idle
+  const cardInfo = getOverviewCardID(status)
 
   return (
     <Card>
@@ -232,6 +251,17 @@ function SystemStatusCard({ status }) {
             ok
           />
         </div>
+
+        {cardInfo && (
+          <div className="pt-2 border-t border-surface-700/50 mt-2">
+            <StatusRow
+              icon="sd-card"
+              label={cardInfo.label}
+              value={cardInfo.value}
+              ok
+            />
+          </div>
+        )}
 
         {status.last_sync && !status.sdcard_mounted && (
           <p className="text-xs text-surface-500">
