@@ -698,8 +698,9 @@ func TestWalkDirErrors(t *testing.T) {
 	t.Logf("Counted %d photos with size %d despite errors", count, size)
 }
 
-// TestCaseInsensitiveExtensions tests extension matching
-func TestCaseInsensitiveExtensions(t *testing.T) {
+// TestCountPhotosCountsAllFiles ensures CountPhotos matches what rclone
+// uploads — every regular file under DCIM, regardless of extension.
+func TestCountPhotosCountsAllFiles(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "sdmonitor-case-*")
 	if err != nil {
 		t.Fatal(err)
@@ -711,48 +712,29 @@ func TestCaseInsensitiveExtensions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create files with various case extensions
-	testFiles := []struct {
-		name        string
-		shouldCount bool
-	}{
-		{"photo.jpg", true},
-		{"photo.JPG", true},
-		{"photo.Jpg", true},
-		{"photo.jPg", true},
-		{"photo.JPEG", true},
-		{"photo.jpeg", true},
-		{"video.mp4", true},
-		{"video.MP4", true},
-		{"raw.CR2", true},
-		{"raw.cr2", true},
-		{"text.txt", false},
-		{"doc.pdf", false},
+	testFiles := []string{
+		"photo.jpg", "photo.JPG", "photo.Jpg", "photo.jPg",
+		"photo.JPEG", "photo.jpeg",
+		"video.mp4", "video.MP4",
+		"raw.CR2", "raw.cr2",
+		"sidecar.thm", "sidecar.xmp", "modern.heic", "modern.dng",
+		"text.txt", "doc.pdf",
 	}
 
-	for _, tf := range testFiles {
-		path := filepath.Join(dcimDir, tf.name)
+	for _, name := range testFiles {
+		path := filepath.Join(dcimDir, name)
 		if err := os.WriteFile(path, []byte("data"), 0644); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	// Count photos
 	count, _, err := CountPhotos(tmpDir)
 	if err != nil {
 		t.Fatalf("CountPhotos failed: %v", err)
 	}
 
-	// Should count all photo/video files regardless of case
-	expectedCount := 0
-	for _, tf := range testFiles {
-		if tf.shouldCount {
-			expectedCount++
-		}
-	}
-
-	if count != expectedCount {
-		t.Errorf("Expected %d files, got %d", expectedCount, count)
+	if count != len(testFiles) {
+		t.Errorf("Expected %d files, got %d", len(testFiles), count)
 	}
 }
 

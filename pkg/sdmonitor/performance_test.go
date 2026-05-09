@@ -150,14 +150,13 @@ func BenchmarkCountPhotosMixedFiles(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	// Create mix of photo and non-photo files
-	photoCount := 0
-	for i := 0; i < 200; i++ {
-		// 70% photos, 30% other files
+	// Create mix of files — CountPhotos counts every regular file, matching
+	// what rclone uploads.
+	const totalCount = 200
+	for i := 0; i < totalCount; i++ {
 		var filename string
 		if i%10 < 7 {
 			filename = filepath.Join(dcimPath, fmt.Sprintf("IMG_%04d.JPG", i))
-			photoCount++
 		} else {
 			filename = filepath.Join(dcimPath, fmt.Sprintf("file_%04d.txt", i))
 		}
@@ -172,8 +171,8 @@ func BenchmarkCountPhotosMixedFiles(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		if count != photoCount {
-			b.Fatalf("expected %d photos, got %d", photoCount, count)
+		if count != totalCount {
+			b.Fatalf("expected %d files, got %d", totalCount, count)
 		}
 	}
 }

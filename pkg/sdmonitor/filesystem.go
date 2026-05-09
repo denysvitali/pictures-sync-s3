@@ -5,24 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 )
-
-// Photo file extensions
-var photoExtensions = map[string]bool{
-	".jpg":  true,
-	".jpeg": true,
-	".png":  true,
-	".gif":  true,
-	".raw":  true,
-	".cr2":  true,
-	".nef":  true,
-	".arw":  true,
-	".mp4":  true,
-	".mov":  true,
-	".avi":  true,
-	".mkv":  true,
-}
 
 // HasDCIM checks if the mounted SD card has a DCIM directory
 func HasDCIM(mountPath string) bool {
@@ -34,7 +17,12 @@ func HasDCIM(mountPath string) bool {
 	return info.IsDir()
 }
 
-// CountPhotos counts photo files in DCIM directory
+// CountPhotos counts every regular file under the DCIM directory. The count
+// must match what rclone will actually upload — rclone syncs the whole DCIM
+// tree without an extension filter, so filtering here would let the progress
+// counter overshoot the precomputed total (e.g. "Uploading 69 of 64 files"
+// when the card has sidecar files like .thm/.xmp/.modd or formats not on a
+// hardcoded whitelist such as .heic/.dng/.mts).
 func CountPhotos(mountPath string) (int, int64, error) {
 	dcimPath := filepath.Join(mountPath, "DCIM")
 	info, err := os.Stat(dcimPath)
@@ -59,14 +47,10 @@ func CountPhotos(mountPath string) (int, int64, error) {
 			return nil
 		}
 
-		// Check if it's an image or video file
-		ext := strings.ToLower(filepath.Ext(path))
-		if photoExtensions[ext] {
-			count++
-			info, err := d.Info()
-			if err == nil {
-				totalSize += info.Size()
-			}
+		count++
+		fi, err := d.Info()
+		if err == nil {
+			totalSize += fi.Size()
 		}
 		return nil
 	})

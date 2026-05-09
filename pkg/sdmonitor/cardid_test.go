@@ -475,17 +475,15 @@ func TestFileCountCalculationErrors(t *testing.T) {
 				if err := os.MkdirAll(dcimPath, 0755); err != nil {
 					return err
 				}
-				// Valid photo files
-				validTypes := []string{".jpg", ".jpeg", ".png", ".gif", ".raw", ".cr2", ".nef", ".arw", ".mp4", ".mov"}
-				for i, ext := range validTypes {
+				photoTypes := []string{".jpg", ".jpeg", ".png", ".gif", ".raw", ".cr2", ".nef", ".arw", ".mp4", ".mov"}
+				for i, ext := range photoTypes {
 					photoPath := filepath.Join(dcimPath, fmt.Sprintf("IMG_%04d%s", i, ext))
 					if err := os.WriteFile(photoPath, []byte("fake"), 0644); err != nil {
 						return err
 					}
 				}
-				// Invalid files (should be ignored)
-				invalidTypes := []string{".txt", ".pdf", ".doc", ".exe"}
-				for i, ext := range invalidTypes {
+				otherTypes := []string{".txt", ".pdf", ".doc", ".exe"}
+				for i, ext := range otherTypes {
 					filePath := filepath.Join(dcimPath, fmt.Sprintf("file_%04d%s", i, ext))
 					if err := os.WriteFile(filePath, []byte("fake"), 0644); err != nil {
 						return err
@@ -493,7 +491,7 @@ func TestFileCountCalculationErrors(t *testing.T) {
 				}
 				return nil
 			},
-			expectedFiles: 10, // Only valid photo types
+			expectedFiles: 14, // CountPhotos counts every regular file — matches what rclone uploads
 			expectError:   false,
 		},
 		{
