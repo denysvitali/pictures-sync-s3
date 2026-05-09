@@ -770,7 +770,7 @@ func TestHandleFileView_UnsupportedType(t *testing.T) {
 	ctx, cleanup := setupTestContext(t)
 	defer cleanup()
 
-	req := httptest.NewRequest(http.MethodGet, "/api/files/view?path=/file.txt", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/files/view?path=/file.bin", nil)
 	w := httptest.NewRecorder()
 
 	ctx.HandleFileView(w, req)
