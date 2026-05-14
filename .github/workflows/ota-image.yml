@@ -293,9 +293,10 @@ jobs:
         shell: bash
         run: |
           if [[ "${GITHUB_REF}" == "refs/heads/master" ]]; then
-            echo "tag=master-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-            echo "name=Photo Sync OTA master-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            calver="v$(date -u +'%Y.%-m.%-d.%H%M')"
+            echo "tag=${calver}" >> "$GITHUB_OUTPUT"
+            echo "name=Photo Sync OTA ${calver}" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
           else
             echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
             echo "name=Photo Sync OTA ${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
