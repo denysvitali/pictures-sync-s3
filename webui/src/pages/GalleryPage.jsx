@@ -22,7 +22,26 @@ import { Button } from '../components/Button.jsx'
 import { Icon } from '../components/Icons.jsx'
 import { LoadingSpinner } from '../components/LoadingSpinner.jsx'
 
-const PAGE_SIZE = 40
+const DEFAULT_PAGE_SIZE = 40
+const PAGE_SIZE_OPTIONS = [40, 80, 160, 320]
+const VIEW_MODES = {
+  compact: {
+    label: 'Compact',
+    icon: 'grid-small',
+    grid: 'grid-cols-3 sm:grid-cols-5 md:grid-cols-7 lg:grid-cols-8',
+  },
+  comfortable: {
+    label: 'Comfortable',
+    icon: 'grid-medium',
+    grid: 'grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6',
+  },
+  large: {
+    label: 'Large',
+    icon: 'grid-large',
+    grid: 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4',
+  },
+}
+const VIEW_MODE_KEYS = Object.keys(VIEW_MODES)
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'tif', 'heic', 'heif', 'avif'])
 const VIDEO_EXTENSIONS = new Set(['mp4', 'm4v', 'mov', 'avi', 'mkv', 'mts', 'm2ts', '3gp', 'webm'])
 const RAW_EXTENSIONS = new Set(['arw', 'cr2', 'cr3', 'nef', 'nrw', 'dng', 'raf', 'rw2', 'orf', 'pef', 'srw', 'raw'])
@@ -138,13 +157,36 @@ export default function GalleryPage() {
   const [videoPreview, setVideoPreview] = useState(null)
   const [variantPicker, setVariantPicker] = useState(null)
   const [showThumbnails, setShowThumbnails] = useState(false)
+  const [viewMode, setViewMode] = useState(() => {
+    if (typeof window === 'undefined') return 'comfortable'
+    const stored = window.localStorage?.getItem('gallery:viewMode')
+    return stored && VIEW_MODES[stored] ? stored : 'comfortable'
+  })
+  const [pageSize, setPageSize] = useState(() => {
+    if (typeof window === 'undefined') return DEFAULT_PAGE_SIZE
+    const stored = parseInt(window.localStorage?.getItem('gallery:pageSize') || '', 10)
+    return PAGE_SIZE_OPTIONS.includes(stored) ? stored : DEFAULT_PAGE_SIZE
+  })
   const [loadError, setLoadError] = useState(null)
   const requestIdRef = useRef(0)
 
   const currentPath = source === 'sdcard' ? sdcardPath : cloudPath
-  const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total])
+  const totalPages = useMemo(() => Math.max(1, Math.ceil(total / pageSize)), [total, pageSize])
   const segments = useMemo(() => buildPathSegments(currentPath), [currentPath])
   const thumbnailsAllowed = showThumbnails && source === 'sdcard'
+  const gridClass = VIEW_MODES[viewMode]?.grid || VIEW_MODES.comfortable.grid
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage?.setItem('gallery:viewMode', viewMode)
+    }
+  }, [viewMode])
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage?.setItem('gallery:pageSize', String(pageSize))
+    }
+  }, [pageSize])
 
   const setSourcePath = useCallback((nextPath) => {
     if (source === 'sdcard') setSdcardPath(nextPath)
@@ -189,14 +231,14 @@ export default function GalleryPage() {
         })
         const grouped = groupFileVariants(fileArr)
         setAllSDCardFiles(grouped)
-        const start = (page - 1) * PAGE_SIZE
-        setFiles(grouped.slice(start, start + PAGE_SIZE))
+        const start = (page - 1) * pageSize
+        setFiles(grouped.slice(start, start + pageSize))
         setTotal(grouped.length)
       } else {
         const data = await getFilesPaginated(deviceUrl, {
           path: currentPath,
           page,
-          pageSize: PAGE_SIZE,
+          pageSize,
         })
         if (!isLatest()) return
         if (data?.error) throw new Error(data.error)
@@ -218,7 +260,7 @@ export default function GalleryPage() {
     } finally {
       if (isLatest()) setLoading(false)
     }
-  }, [deviceUrl, currentPath, page, source, fetchDeviceStatus, toast])
+  }, [deviceUrl, currentPath, page, pageSize, source, fetchDeviceStatus, toast])
 
   useEffect(() => {
     fetchFiles()
@@ -355,7 +397,7 @@ export default function GalleryPage() {
   }, [page, totalPages])
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen min-w-0 max-w-full overflow-x-hidden">
       {/* Source toggle */}
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="grid grid-cols-2 rounded-lg bg-surface-800 p-1 sm:flex">
@@ -382,8 +424,8 @@ export default function GalleryPage() {
             SD Card
           </button>
         </div>
-        {source === 'sdcard' && (
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {source === 'sdcard' && (
             <button
               onClick={() => setShowThumbnails((enabled) => !enabled)}
               className={`flex min-h-10 items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
@@ -396,8 +438,55 @@ export default function GalleryPage() {
               <Icon name="image" className="w-4 h-4" />
               Thumbnails
             </button>
+          )}
+          <div
+            className="flex rounded-md bg-surface-800 p-1"
+            role="group"
+            aria-label="Grid density"
+          >
+            {VIEW_MODE_KEYS.map((key) => {
+              const { label, icon } = VIEW_MODES[key]
+              const active = viewMode === key
+              return (
+                <button
+                  key={key}
+                  onClick={() => setViewMode(key)}
+                  className={`flex h-8 w-8 items-center justify-center rounded transition-colors ${
+                    active
+                      ? 'bg-brand-600 text-white shadow'
+                      : 'text-surface-400 hover:text-surface-200'
+                  }`}
+                  aria-pressed={active}
+                  aria-label={`${label} grid`}
+                  title={label}
+                >
+                  <Icon name={icon} className="w-4 h-4" />
+                </button>
+              )
+            })}
           </div>
-        )}
+          <label className="flex items-center gap-1.5 rounded-md bg-surface-800 px-2 py-1 text-xs text-surface-300">
+            <span className="hidden sm:inline">Per page</span>
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                const next = parseInt(e.target.value, 10)
+                if (PAGE_SIZE_OPTIONS.includes(next)) {
+                  setPageSize(next)
+                  setPage(1)
+                }
+              }}
+              className="bg-transparent text-sm font-medium text-surface-100 focus:outline-none"
+              aria-label="Items per page"
+            >
+              {PAGE_SIZE_OPTIONS.map((opt) => (
+                <option key={opt} value={opt} className="bg-surface-900 text-surface-100">
+                  {opt}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       </div>
 
       {/* Full-size image preview overlay */}
@@ -527,7 +616,7 @@ export default function GalleryPage() {
       ) : (
         <>
           {/* Grid layout */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+          <div className={`grid gap-3 sm:gap-4 ${gridClass}`}>
             {files.map((file) => (
               <FileCard
                 key={file.path}
@@ -546,7 +635,7 @@ export default function GalleryPage() {
 
           {/* Pagination */}
           {totalPages > 1 && (
-            <nav className="mt-8 flex items-center justify-center gap-1.5" aria-label="Pagination">
+            <nav className="mt-8 flex flex-wrap items-center justify-center gap-1.5" aria-label="Pagination">
               <Button
                 variant="ghost"
                 size="sm"
@@ -652,7 +741,7 @@ function FileCard({ file, deviceUrl, source, onFolderClick, onImageClick, onImag
 
   return (
     <Card
-      className={`group relative transition-all duration-200 hover:border-brand-400/30 hover:shadow-lg hover:shadow-brand-400/5 ${
+      className={`group relative min-w-0 overflow-hidden transition-all duration-200 hover:border-brand-400/30 hover:shadow-lg hover:shadow-brand-400/5 ${
         file.is_dir ? 'cursor-pointer hover:bg-surface-700/40' : 'cursor-pointer'
       }`}
       onClick={handleClick}
@@ -701,7 +790,7 @@ function FileCard({ file, deviceUrl, source, onFolderClick, onImageClick, onImag
         >
           {displayName}
         </p>
-        <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-surface-400">
+        <div className="flex flex-wrap items-center gap-1.5 min-w-0 text-[10px] sm:text-xs text-surface-400">
           {variantLabels && variantLabels.length > 0 && (
             <span className="rounded bg-brand-400/15 px-1.5 py-0.5 font-semibold text-brand-300">
               {variantLabels.join(' · ')}
