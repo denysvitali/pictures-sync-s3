@@ -2,11 +2,23 @@ package ledcontroller
 
 import "time"
 
-// LEDPattern defines a blinking pattern
+// LEDPattern defines a blinking pattern.
+//
+// A pattern is built from "groups" of pulses. Each group emits BurstCount
+// on/off pairs (each pulse using OnDuration and OffDuration), then waits for
+// BurstPause before the next group. Repeat controls how many groups to emit
+// (0 means run forever). When BurstCount is 0 or 1 and BurstPause is 0 the
+// pattern behaves as a single on/off cycle, preserving the original
+// single-pulse semantics.
 type LEDPattern struct {
 	OnDuration  time.Duration
 	OffDuration time.Duration
-	Repeat      int // 0 means infinite
+	Repeat      int // 0 means infinite groups
+
+	// BurstCount is the number of on/off pulses per group. 0 is treated as 1.
+	BurstCount int
+	// BurstPause is the additional pause after a group of pulses.
+	BurstPause time.Duration
 }
 
 // Predefined LED patterns for different system states
@@ -40,6 +52,18 @@ var (
 		OnDuration:  100 * time.Millisecond,
 		OffDuration: 100 * time.Millisecond,
 		Repeat:      3,
+	}
+
+	// PatternError is two quick blinks followed by a long pause, repeating.
+	// Used for: Mount failure, sync failure, and any other error state where
+	// the operator needs a visually distinct LED cue (vs the steady/slow/fast
+	// blinks used during normal operation).
+	PatternError = LEDPattern{
+		OnDuration:  120 * time.Millisecond,
+		OffDuration: 180 * time.Millisecond,
+		Repeat:      0,
+		BurstCount:  2,
+		BurstPause:  1 * time.Second,
 	}
 
 	// PatternOff turns the LED off

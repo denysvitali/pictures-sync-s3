@@ -1096,3 +1096,81 @@ func BenchmarkGoroutineCreation(b *testing.B) {
 		mock.SetStatus(state.StatusIdle)
 	}
 }
+
+// TestPatternErrorBurstShape verifies PatternError emits a two-pulse burst
+// followed by a long pause, so it is visually distinct from PatternSlowBlink.
+func TestPatternErrorBurstShape(t *testing.T) {
+	if PatternError.BurstCount != 2 {
+		t.Errorf("PatternError.BurstCount = %d, want 2", PatternError.BurstCount)
+	}
+	if PatternError.BurstPause < 500*time.Millisecond {
+		t.Errorf("PatternError.BurstPause = %v, want >= 500ms", PatternError.BurstPause)
+	}
+	if PatternError.OnDuration <= 0 || PatternError.OffDuration <= 0 {
+		t.Errorf("PatternError must define non-zero On/OffDuration, got On=%v Off=%v",
+			PatternError.OnDuration, PatternError.OffDuration)
+	}
+}
+
+// TestRunPatternBurstGrouping runs a burst pattern and counts the number of
+// on->off transitions, ensuring runPattern honors BurstCount/BurstPause.
+func TestRunPatternBurstGrouping(t *testing.T) {
+	brightnessFile, cleanup := createTempLEDPath(t)
+	defer cleanup()
+
+	led := &LED{
+		name:           "TEST",
+		brightnessPath: brightnessFile,
+		available:      true,
+	}
+
+	c := &Controller{stopChan: make(chan struct{})}
+
+	pattern := LEDPattern{
+		OnDuration:  20 * time.Millisecond,
+		OffDuration: 20 * time.Millisecond,
+		Repeat:      2, // two groups
+		BurstCount:  3, // three pulses per group
+		BurstPause:  60 * time.Millisecond,
+	}
+
+	stopChan := make(chan struct{})
+	done := make(chan struct{})
+	transitions := int32(0)
+	last := int32(-1)
+
+	go func() {
+		// Sample brightness file ~every 5ms during the run to count on->off transitions
+		ticker := time.NewTicker(5 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				data, err := os.ReadFile(brightnessFile)
+				if err != nil {
+					continue
+				}
+				var cur int32
+				if len(data) > 0 && data[0] != '0' {
+					cur = 1
+				}
+				if last == 1 && cur == 0 {
+					atomic.AddInt32(&transitions, 1)
+				}
+				last = cur
+			}
+		}
+	}()
+
+	c.runPattern(led, pattern, stopChan)
+	close(done)
+
+	got := atomic.LoadInt32(&transitions)
+	// 2 groups * 3 pulses = up to 6 on->off transitions. Sampling can miss a
+	// couple under load, so require at least 4 to confirm bursts happen.
+	if got < 4 {
+		t.Errorf("expected at least 4 on->off transitions for 2x3 burst pattern, got %d", got)
+	}
+}
