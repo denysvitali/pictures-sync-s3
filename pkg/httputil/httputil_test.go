@@ -2,8 +2,12 @@ package httputil
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -368,5 +372,135 @@ func TestCheckRequired(t *testing.T) {
 				t.Errorf("Expected no error, got %v", err)
 			}
 		})
+	}
+}
+
+func TestValidatePath(t *testing.T) {
+	rootDir := t.TempDir()
+	root, err := filepath.EvalSymlinks(rootDir)
+	if err != nil {
+		t.Fatalf("failed to evalsymlinks root: %v", err)
+	}
+
+	if err := os.MkdirAll(filepath.Join(root, "DCIM", "100CANON"), 0o755); err != nil {
+		t.Fatalf("failed to create dirs: %v", err)
+	}
+	legitFile := filepath.Join(root, "DCIM", "100CANON", "IMG_0001.JPG")
+	if err := os.WriteFile(legitFile, []byte("data"), 0o644); err != nil {
+		t.Fatalf("failed to write legit file: %v", err)
+	}
+
+	// Create an outside directory and a symlink inside root pointing to it.
+	outsideDir := t.TempDir()
+	outside, err := filepath.EvalSymlinks(outsideDir)
+	if err != nil {
+		t.Fatalf("failed to evalsymlinks outside: %v", err)
+	}
+	outsideFile := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(outsideFile, []byte("secret"), 0o644); err != nil {
+		t.Fatalf("failed to write outside file: %v", err)
+	}
+	symlinkInsideRoot := filepath.Join(root, "escape")
+	if err := os.Symlink(outside, symlinkInsideRoot); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlink unsupported: %v", err)
+		}
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+
+	// Sibling directory whose name starts with the same prefix as root, to
+	// exercise the trailing-separator prefix trick.
+	parent := filepath.Dir(root)
+	siblingName := filepath.Base(root) + "-rogue"
+	siblingPath := filepath.Join(parent, siblingName)
+	if err := os.MkdirAll(siblingPath, 0o755); err != nil {
+		t.Fatalf("failed to create sibling: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(siblingPath) })
+
+	tests := []struct {
+		name      string
+		root      string
+		path      string
+		wantErr   bool
+		errIsRoot bool
+		wantPath  string
+	}{
+		{
+			name:     "legitimate relative file",
+			root:     root,
+			path:     "DCIM/100CANON/IMG_0001.JPG",
+			wantPath: legitFile,
+		},
+		{
+			name:     "root itself via empty path",
+			root:     root,
+			path:     "",
+			wantPath: root,
+		},
+		{
+			name:     "non-existing but contained path",
+			root:     root,
+			path:     "DCIM/100CANON/IMG_9999.JPG",
+			wantPath: filepath.Join(root, "DCIM", "100CANON", "IMG_9999.JPG"),
+		},
+		{
+			name:      "parent traversal",
+			root:      root,
+			path:      "../etc/passwd",
+			wantErr:   true,
+			errIsRoot: true,
+		},
+		{
+			name:      "deep traversal back inside",
+			root:      root,
+			path:      "DCIM/../../" + siblingName + "/file",
+			wantErr:   true,
+			errIsRoot: true,
+		},
+		{
+			name:      "absolute path outside root",
+			root:      root,
+			path:      "/etc/passwd",
+			wantErr:   true,
+			errIsRoot: true,
+		},
+		{
+			name:      "symlink escape",
+			root:      root,
+			path:      "escape/secret.txt",
+			wantErr:   true,
+			errIsRoot: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ValidatePath(tt.root, tt.path)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil (resolved=%q)", got)
+				}
+				if tt.errIsRoot && !errors.Is(err, ErrPathEscapesRoot) {
+					t.Fatalf("expected ErrPathEscapesRoot, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.wantPath {
+				t.Fatalf("resolved=%q want=%q", got, tt.wantPath)
+			}
+		})
+	}
+}
+
+func TestValidatePathRejectsRelativeRoot(t *testing.T) {
+	if _, err := ValidatePath("relative/root", "foo"); err == nil {
+		t.Fatal("expected error for relative root")
+	}
+	if _, err := ValidatePath("", "foo"); err == nil {
+		t.Fatal("expected error for empty root")
 	}
 }

@@ -2,11 +2,77 @@ package httputil
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 )
+
+// ErrPathEscapesRoot is returned when a requested path resolves outside the
+// allowed root directory.
+var ErrPathEscapesRoot = errors.New("path escapes allowed root")
+
+// ValidatePath constrains a user-supplied path to a known root directory and
+// returns the resolved absolute filesystem path. The allowedRoot must be an
+// absolute path. The requestedPath is treated as relative to allowedRoot;
+// absolute paths are rejected.
+//
+// The resolution steps are:
+//  1. Reject absolute requestedPath values.
+//  2. Join with allowedRoot and clean the result.
+//  3. If the path exists, resolve symlinks via filepath.EvalSymlinks.
+//     Otherwise, fall back to filepath.Abs on the cleaned join.
+//  4. Verify the resolved path equals allowedRoot or lives below it, using a
+//     trailing path separator on both sides so that e.g. "/perm-rogue" cannot
+//     match "/perm".
+func ValidatePath(allowedRoot, requestedPath string) (string, error) {
+	if allowedRoot == "" {
+		return "", errors.New("allowed root must not be empty")
+	}
+	if !filepath.IsAbs(allowedRoot) {
+		return "", fmt.Errorf("allowed root must be absolute: %s", allowedRoot)
+	}
+
+	cleanRoot, err := filepath.EvalSymlinks(allowedRoot)
+	if err != nil {
+		// Root may not exist in tests; fall back to a cleaned absolute form.
+		abs, absErr := filepath.Abs(allowedRoot)
+		if absErr != nil {
+			return "", fmt.Errorf("failed to resolve allowed root: %w", absErr)
+		}
+		cleanRoot = filepath.Clean(abs)
+	}
+
+	if filepath.IsAbs(requestedPath) {
+		return "", ErrPathEscapesRoot
+	}
+
+	joined := filepath.Join(cleanRoot, requestedPath)
+	cleanJoined := filepath.Clean(joined)
+
+	resolved, err := filepath.EvalSymlinks(cleanJoined)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return "", fmt.Errorf("failed to resolve path: %w", err)
+		}
+		abs, absErr := filepath.Abs(cleanJoined)
+		if absErr != nil {
+			return "", fmt.Errorf("failed to resolve path: %w", absErr)
+		}
+		resolved = filepath.Clean(abs)
+	}
+
+	sep := string(os.PathSeparator)
+	if resolved != cleanRoot && !strings.HasPrefix(resolved+sep, cleanRoot+sep) {
+		return "", ErrPathEscapesRoot
+	}
+
+	return resolved, nil
+}
 
 // Response is a generic JSON response structure
 type Response struct {
