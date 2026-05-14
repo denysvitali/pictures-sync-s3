@@ -302,7 +302,7 @@ func main() {
 	http.HandleFunc("/legacy/config", webui.HandleConfig)
 
 	// Build a per-IP rate limiter for authentication so brute-force attempts
-	// against Basic Auth get throttled and locked out (5 attempts / 15 min).
+	// against Basic Auth get throttled and locked out (50 attempts / 15 min).
 	authLimiter := ratelimit.NewLimiter(ratelimit.AuthConfig())
 
 	// Wrap default mux with middleware chain: security headers -> CORS -> basic auth.

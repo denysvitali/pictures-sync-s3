@@ -399,8 +399,8 @@ func TestConfigPresets(t *testing.T) {
 
 	// Test auth config
 	authCfg := AuthConfig()
-	if authCfg.MaxAuthAttempts != 5 {
-		t.Errorf("Auth config should have 5 max attempts, got %d", authCfg.MaxAuthAttempts)
+	if authCfg.MaxAuthAttempts != 50 {
+		t.Errorf("Auth config should have 50 max attempts, got %d", authCfg.MaxAuthAttempts)
 	}
 	if authCfg.AuthWindow != 15*time.Minute {
 		t.Errorf("Auth config should have 15 minute window, got %v", authCfg.AuthWindow)

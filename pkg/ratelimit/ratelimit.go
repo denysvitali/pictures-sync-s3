@@ -63,7 +63,7 @@ func AuthConfig() Config {
 	return Config{
 		RequestsPerSecond: 50.0,
 		Burst:             100,
-		MaxAuthAttempts:   5,
+		MaxAuthAttempts:   50,
 		AuthWindow:        15 * time.Minute,
 		LockoutDuration:   15 * time.Minute,
 		CleanupInterval:   5 * time.Minute,

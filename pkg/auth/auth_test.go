@@ -65,9 +65,11 @@ func TestBasicAuthFailure(t *testing.T) {
 
 // TestBasicAuthLockout tests account lockout after MaxAuthAttempts failures
 func TestBasicAuthLockout(t *testing.T) {
-	// AuthConfig has MaxAuthAttempts: 5; burst is high enough that the
+	authConfig := ratelimit.AuthConfig()
+
+	// AuthConfig's burst is high enough that the
 	// per-IP request limiter does not kick in before lockout.
-	limiter := ratelimit.NewLimiter(ratelimit.AuthConfig())
+	limiter := ratelimit.NewLimiter(authConfig)
 	defer limiter.Stop()
 
 	middleware := BasicAuthMiddleware("testpass", limiter)
@@ -77,8 +79,8 @@ func TestBasicAuthLockout(t *testing.T) {
 
 	wrongAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte("gokrazy:wrongpass"))
 
-	// First MaxAuthAttempts-1 (=4) failed attempts return 401.
-	for i := 0; i < 4; i++ {
+	// First MaxAuthAttempts-1 failed attempts return 401.
+	for i := 0; i < authConfig.MaxAuthAttempts-1; i++ {
 		req := httptest.NewRequest("GET", "/test", nil)
 		req.RemoteAddr = "192.168.1.102:12345"
 		req.Header.Set("Authorization", wrongAuth)
@@ -91,7 +93,7 @@ func TestBasicAuthLockout(t *testing.T) {
 		}
 	}
 
-	// 5th failed attempt trips MaxAuthAttempts and locks out the IP.
+	// MaxAuthAttempts failed attempt trips lockout for the IP.
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.RemoteAddr = "192.168.1.102:12345"
 	req.Header.Set("Authorization", wrongAuth)
@@ -100,11 +102,11 @@ func TestBasicAuthLockout(t *testing.T) {
 	handler.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusTooManyRequests {
-		t.Errorf("5th failed attempt should trigger lockout (429), got status %d", rr.Code)
+		t.Errorf("attempt %d should trigger lockout (429), got status %d", authConfig.MaxAuthAttempts, rr.Code)
 	}
 
-	if count := limiter.GetAuthFailureCount("192.168.1.102"); count != 5 {
-		t.Errorf("Expected 5 auth failures, got %d", count)
+	if count := limiter.GetAuthFailureCount("192.168.1.102"); count != authConfig.MaxAuthAttempts {
+		t.Errorf("Expected %d auth failures, got %d", authConfig.MaxAuthAttempts, count)
 	}
 }
 
