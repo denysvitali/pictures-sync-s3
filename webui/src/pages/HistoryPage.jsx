@@ -92,7 +92,7 @@ function HistoryEntry({ entry }) {
   const hasError = entry.status === 'failed' || entry.status === 'error'
 
   return (
-    <Card className="transition-all duration-200 hover:bg-surface-800/80">
+    <Card className="min-w-0 overflow-hidden transition-all duration-200 hover:bg-surface-800/80">
       {/* Desktop layout */}
       <div className="hidden sm:flex items-center gap-4">
         <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -150,25 +150,25 @@ function HistoryEntry({ entry }) {
           >
             <Icon name={cfg.icon} className="w-5 h-5" />
           </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-sm font-medium text-surface-100 truncate">
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-center justify-between gap-2">
+              <span className="min-w-0 truncate text-sm font-medium text-surface-100">
                 {formatTimestamp(entryStart(entry))}
               </span>
               <StatusBadge variant={cfg.variant} pulse={cfg.pulse}>
                 {cfg.label}
               </StatusBadge>
             </div>
-            <div className="flex items-center gap-4 mt-1.5 text-xs text-surface-400">
-              <span>
+            <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-surface-400">
+              <span className="shrink-0">
                 {entryFileCount(entry) != null ? `${entryFileCount(entry).toLocaleString()} files` : '-- files'}
               </span>
               <span className="text-surface-600">|</span>
-              <span>{formatDuration(entryDuration(entry))}</span>
+              <span className="shrink-0">{formatDuration(entryDuration(entry))}</span>
               {entry.card_id && (
                 <>
                   <span className="text-surface-600">|</span>
-                  <span className="truncate">Card {entry.card_id}</span>
+                  <span className="min-w-0 max-w-full truncate">Card {entry.card_id}</span>
                 </>
               )}
             </div>
@@ -178,7 +178,7 @@ function HistoryEntry({ entry }) {
 
       {hasError && entry.error && (
         <div className="mt-3 px-3 py-2 rounded-lg bg-danger/10 border border-danger/20">
-          <p className="text-xs text-danger leading-relaxed">{entry.error}</p>
+          <p className="break-words text-xs leading-relaxed text-danger">{entry.error}</p>
         </div>
       )}
     </Card>
@@ -294,12 +294,12 @@ export default function HistoryPage() {
   }), [history])
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4">
       {/* Toolbar */}
-      <div className="sticky sticky-under-header z-20 -mx-3 px-3 pb-3 bg-surface-950/95 backdrop-blur-sm border-b border-surface-700/30 sm:-mx-5 sm:px-5 lg:-mx-8 lg:px-8">
+      <div className="sticky sticky-under-header z-20 -mx-3 min-w-0 overflow-x-clip px-3 pb-3 bg-surface-950/95 backdrop-blur-sm border-b border-surface-700/30 sm:-mx-5 sm:px-5 lg:-mx-8 lg:px-8">
         {/* Search + Refresh */}
-        <div className="flex items-center gap-2 mb-3">
-          <div className="relative flex-1">
+        <div className="mb-3 flex min-w-0 items-center gap-2">
+          <div className="relative min-w-0 flex-1">
             <Icon
               name="magnifying"
               className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-500 pointer-events-none"
@@ -335,19 +335,19 @@ export default function HistoryPage() {
         </div>
 
         {/* Filter tabs */}
-        <div className="flex gap-1 p-1 bg-surface-800/50 rounded-lg">
+        <div className="flex min-w-0 gap-1 rounded-lg bg-surface-800/50 p-1">
           {FILTER_TABS.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setFilter(tab.id)}
-              className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md
+              className={`flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium sm:px-3
                 transition-all duration-150
                 ${filter === tab.id
                   ? 'bg-brand-600/20 text-brand-400 shadow-sm'
                   : 'text-surface-400 hover:text-surface-200 hover:bg-surface-700/50'
                 }`}
             >
-              {tab.label}
+              <span className="min-w-0 truncate">{tab.label}</span>
               <span className={`text-[10px] px-1 py-0 rounded-full min-w-[18px]
                 ${filter === tab.id ? 'bg-brand-600/20' : 'bg-surface-700/50'}`}
               >
@@ -386,7 +386,7 @@ export default function HistoryPage() {
           </div>
         )
       ) : (
-        <div className="space-y-2 transition-all duration-200">
+        <div className="min-w-0 space-y-2 transition-all duration-200">
           {filtered.map((entry) => (
             <HistoryEntry key={entry.id || entry.timestamp} entry={entry} />
           ))}
