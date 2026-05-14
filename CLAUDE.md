@@ -51,8 +51,6 @@ go test -bench=. -benchmem ./...          # Performance benchmarks
 PORT=8080 ./webui                         # WebUI only (no hardware needed)
 
 # Performance and load testing
-cd tests/e2e && make test                 # End-to-end tests
-cd tests/e2e && make test-load            # Load testing
 go test -run=^$ -bench=. ./pkg/state/     # State manager benchmarks
 ```
 
@@ -97,7 +95,7 @@ gok -i photo-backup edit
   - Event-driven updates with pub/sub pattern
   - Atomic persistence with rollback capability
   - Real-time WebSocket broadcasting
-  - Comprehensive performance testing (63 benchmarks)
+  - Comprehensive performance testing
 
 - **`pkg/sdmonitor`**: Hardware abstraction layer
   - Pluggable device detection (USB/built-in SD)
@@ -122,7 +120,7 @@ gok -i photo-backup edit
   - Chainable middleware system (panic recovery, logging, auth)
   - Request validation and size limiting
   - Rate limiting and security headers
-  - 100% test coverage with benchmarks
+  - Test coverage with benchmarks
 
 - **`pkg/httputil`**: HTTP utilities and standardization
   - Consistent JSON response formatting
@@ -155,7 +153,6 @@ gok -i photo-backup edit
   - Mobile-optimized UI controls
 
 - **`pkg/handlers`**: Modernized HTTP handlers
-  - Reduced from 35 to 28 lines average (20% reduction)
   - Standardized error responses
   - Security-hardened path validation
   - Comprehensive test coverage
@@ -214,25 +211,21 @@ Sync Orchestration → Progress Tracking → History Storage
 ## 🧪 Testing Strategy (Comprehensive 2024)
 
 ### Test Categories
-1. **Unit Tests**: 100+ tests across all packages
+1. **Unit Tests**: Comprehensive coverage across all packages
 2. **Integration Tests**: Service-to-service communication
-3. **End-to-End Tests**: Complete user workflows (48 test cases)
-4. **Performance Tests**: 119 benchmarks for critical paths
-5. **Load Tests**: WebSocket and HTTP endpoint stress testing
-6. **Security Tests**: Vulnerability scanning and penetration testing
+3. **Performance Tests**: Benchmarks for critical paths
+4. **Load Tests**: WebSocket and HTTP endpoint stress testing
+5. **Security Tests**: Vulnerability scanning and penetration testing
 
 ### Test Execution
 ```bash
 # Test categories
-make test                    # All validation tests
-make test-security          # Security vulnerability demonstrations
-make test-performance       # Benchmarks and load tests
-make test-e2e              # End-to-end workflows
+make test                   # All validation tests
 
 # Coverage and quality
 make test-coverage          # Generate coverage reports
-make test-race             # Race condition detection
-make lint                  # Code quality checks
+make test-race              # Race condition detection
+make lint                   # Code quality checks
 ```
 
 ### Mock Infrastructure
@@ -260,7 +253,7 @@ make lint                  # Code quality checks
 
 ### Features
 - **Responsive Design**: Mobile-first with breakpoint optimization
-- **Accessibility**: WCAG 2.1 Level AA compliant (40+ ARIA attributes)
+- **Accessibility**: WCAG 2.1 Level AA targeted with ARIA attributes
 - **Real-time Updates**: WebSocket-powered live status
 - **Progressive Enhancement**: Graceful degradation
 - **Optimized Assets**: gzip compression, immutable caching
@@ -278,7 +271,7 @@ make lint                  # Code quality checks
 2. **Implement Handler**: Use `pkg/middleware` and `pkg/httputil`
 3. **Add State Management**: Extend `pkg/state` with new fields
 4. **Update UI**: Add Bootstrap components with accessibility
-5. **Write Tests**: Unit, integration, and E2E coverage
+5. **Write Tests**: Unit and integration coverage
 6. **Document**: Update CLAUDE.md and create user docs
 
 ### Security Best Practices
@@ -296,7 +289,7 @@ make lint                  # Code quality checks
 5. **Connection Pooling**: Reuse connections where possible
 
 ### Testing Guidelines
-1. **Test Pyramid**: Unit > Integration > E2E
+1. **Test Pyramid**: Favor unit tests, supplement with integration tests
 2. **Table-Driven Tests**: Use for multiple input scenarios
 3. **Benchmarks**: Add for performance-critical code
 4. **Mocking**: Use testify/mock for external dependencies
@@ -304,7 +297,7 @@ make lint                  # Code quality checks
 
 ### Documentation Guidelines
 1. **Repository Root**: ONLY README.md and CLAUDE.md belong in the root directory
-2. **Package Documentation**: Put specific docs in relevant `/pkg/*/` directories (e.g., `pkg/handlers/PATTERNS.md`)
+2. **Package Documentation**: Put specific docs in relevant `/pkg/*/` directories
 3. **Avoid Over-Documentation**: Don't create summary files, index files, or redundant explanations
 4. **Code Comments**: Prefer clear code with minimal comments over external documentation
 5. **Essential Only**: Only create documentation that provides unique value and will be maintained
@@ -346,8 +339,6 @@ go test -race ./...
 ### Essential Documentation
 - `README.md` - Project overview and quick start
 - `CLAUDE.md` - This file - comprehensive development guide
-- `pkg/handlers/HANDLER_PATTERNS.md` - HTTP handler patterns and examples
-- `tests/e2e/README.md` - End-to-end testing guide
 
 ### Package-Specific Documentation
 Documentation is kept close to the code in relevant package directories. Look for README.md files in specific packages for detailed implementation guidance.
@@ -387,4 +378,4 @@ Breaking changes are documented in commit messages and include migration guides.
 
 ---
 
-*Last updated: October 2024 - Reflects comprehensive modernization with 15 agent collaboration effort*
+*Last updated: May 2026 - Reflects comprehensive modernization with 15 agent collaboration effort*
