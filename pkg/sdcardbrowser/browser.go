@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/disintegration/imaging"
+	exif "github.com/dsoprea/go-exif/v3"
+	exifcommon "github.com/dsoprea/go-exif/v3/common"
 )
 
 // FileInfo contains SD card file metadata exposed to the WebUI.
@@ -102,7 +104,10 @@ func ReadPreview(mountPath, requestedPath string) (*Preview, error) {
 	return &Preview{ContentType: contentType, Data: data}, nil
 }
 
-// ReadThumbnail reads and resizes an SD card JPEG for thumbnail display.
+// ReadThumbnail returns a thumbnail for an SD card JPEG. It prefers the
+// thumbnail embedded in the EXIF metadata (IFD1) to avoid decoding the
+// full-resolution image, falling back to decoding and resizing only when no
+// embedded thumbnail is present.
 func ReadThumbnail(mountPath, requestedPath string) (*Preview, error) {
 	if requestedPath == "" {
 		return nil, fmt.Errorf("path parameter required")
@@ -118,6 +123,10 @@ func ReadThumbnail(mountPath, requestedPath string) (*Preview, error) {
 		return nil, fmt.Errorf("only JPEG images supported")
 	}
 
+	if data, err := extractEXIFThumbnail(cleanFullPath); err == nil {
+		return &Preview{ContentType: "image/jpeg", Data: data}, nil
+	}
+
 	// #nosec G304 -- path is resolved and constrained to the SD card mount path above.
 	img, err := imaging.Open(cleanFullPath)
 	if err != nil {
@@ -131,6 +140,32 @@ func ReadThumbnail(mountPath, requestedPath string) (*Preview, error) {
 	}
 
 	return &Preview{ContentType: "image/jpeg", Data: buf.Bytes()}, nil
+}
+
+// extractEXIFThumbnail returns the JPEG thumbnail stored in IFD1 of the EXIF
+// metadata, scanning only the front of the file rather than decoding it.
+func extractEXIFThumbnail(filePath string) ([]byte, error) {
+	rawExif, err := exif.SearchFileAndExtractExif(filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	im, err := exifcommon.NewIfdMappingWithStandard()
+	if err != nil {
+		return nil, err
+	}
+
+	_, index, err := exif.Collect(im, exif.NewTagIndex(), rawExif)
+	if err != nil {
+		return nil, err
+	}
+
+	ifd1 := index.RootIfd.NextIfd()
+	if ifd1 == nil {
+		return nil, exif.ErrNoThumbnail
+	}
+
+	return ifd1.Thumbnail()
 }
 
 // OpenFile opens any regular file under the SD card mount path for streaming.

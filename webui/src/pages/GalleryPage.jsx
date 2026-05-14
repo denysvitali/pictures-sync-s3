@@ -81,14 +81,13 @@ export default function GalleryPage() {
   const [imagePreview, setImagePreview] = useState(null)
   const [videoPreview, setVideoPreview] = useState(null)
   const [showThumbnails, setShowThumbnails] = useState(false)
-  const [deviceStatus, setDeviceStatus] = useState(null)
   const [loadError, setLoadError] = useState(null)
   const requestIdRef = useRef(0)
 
   const currentPath = source === 'sdcard' ? sdcardPath : cloudPath
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / PAGE_SIZE)), [total])
   const segments = useMemo(() => buildPathSegments(currentPath), [currentPath])
-  const thumbnailsAllowed = showThumbnails && source === 'sdcard' && deviceStatus?.status !== 'syncing'
+  const thumbnailsAllowed = showThumbnails && source === 'sdcard'
 
   const setSourcePath = useCallback((nextPath) => {
     if (source === 'sdcard') setSdcardPath(nextPath)
@@ -98,11 +97,8 @@ export default function GalleryPage() {
   const fetchDeviceStatus = useCallback(async () => {
     if (!deviceUrl) return null
     try {
-      const status = await getStatus(deviceUrl)
-      setDeviceStatus(status)
-      return status
+      return await getStatus(deviceUrl)
     } catch {
-      setDeviceStatus(null)
       return null
     }
   }, [deviceUrl])
@@ -334,9 +330,6 @@ export default function GalleryPage() {
               <Icon name="image" className="w-4 h-4" />
               Thumbnails
             </button>
-            {showThumbnails && deviceStatus?.status === 'syncing' && (
-              <span className="text-xs text-surface-500">Paused during sync</span>
-            )}
           </div>
         )}
       </div>

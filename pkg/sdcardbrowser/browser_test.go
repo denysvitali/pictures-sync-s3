@@ -1,10 +1,15 @@
 package sdcardbrowser
 
 import (
+	"bytes"
+	"image"
+	"image/color"
 	"io"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/disintegration/imaging"
 )
 
 func TestListFilesClassifiesLocalMedia(t *testing.T) {
@@ -84,6 +89,32 @@ func TestOpenFileRejectsTraversal(t *testing.T) {
 	mountPath := t.TempDir()
 	if _, _, _, err := OpenFile(mountPath, "../secret.MP4"); err == nil {
 		t.Fatal("expected traversal to be rejected")
+	}
+}
+
+func TestReadThumbnailFallsBackWhenNoEXIF(t *testing.T) {
+	mountPath := t.TempDir()
+	img := image.NewRGBA(image.Rect(0, 0, 400, 300))
+	for y := 0; y < 300; y++ {
+		for x := 0; x < 400; x++ {
+			img.Set(x, y, color.RGBA{R: uint8(x % 256), G: uint8(y % 256), B: 128, A: 255})
+		}
+	}
+	var buf bytes.Buffer
+	if err := imaging.Encode(&buf, img, imaging.JPEG, imaging.JPEGQuality(85)); err != nil {
+		t.Fatalf("encode JPEG: %v", err)
+	}
+	writeTestFile(t, mountPath, "DCIM/plain.jpg", buf.String())
+
+	preview, err := ReadThumbnail(mountPath, "DCIM/plain.jpg")
+	if err != nil {
+		t.Fatalf("ReadThumbnail: %v", err)
+	}
+	if preview.ContentType != "image/jpeg" {
+		t.Fatalf("content type = %q, want image/jpeg", preview.ContentType)
+	}
+	if len(preview.Data) == 0 || len(preview.Data) >= buf.Len() {
+		t.Fatalf("fallback thumbnail size %d not smaller than source %d", len(preview.Data), buf.Len())
 	}
 }
 
