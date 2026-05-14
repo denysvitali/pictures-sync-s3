@@ -112,10 +112,11 @@ function PasswordInput({ value, onChange, placeholder }) {
       <button
         type="button"
         onClick={() => setVisible((v) => !v)}
-        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-surface-400 hover:text-surface-200 transition-colors"
-        tabIndex={-1}
+        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-surface-400 hover:text-surface-200 transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/70"
+        aria-label={visible ? 'Hide password' : 'Show password'}
+        aria-pressed={visible}
       >
-        <Icon name={visible ? 'x' : 'check'} className="w-4 h-4" />
+        <Icon name={visible ? 'x' : 'check'} className="w-4 h-4" aria-hidden="true" />
       </button>
     </div>
   )
@@ -206,34 +207,75 @@ function ScannedNetworkItem({ network, currentSsid, onConnect, onDisconnect }) {
 }
 
 function SavedNetworkItem({ network, index, total, onMoveUp, onMoveDown, onDisconnect, isConnected }) {
+  const canMoveUp = index > 0
+  const canMoveDown = index < total - 1
+
+  function handleRowKeyDown(e) {
+    // Only handle Arrow keys when the row itself is focused (not when a button inside is focused).
+    if (e.target !== e.currentTarget) return
+    if (e.key === 'ArrowUp' && canMoveUp) {
+      e.preventDefault()
+      onMoveUp(index)
+    } else if (e.key === 'ArrowDown' && canMoveDown) {
+      e.preventDefault()
+      onMoveDown(index)
+    }
+  }
+
   return (
-    <div className="flex items-center gap-3 p-3 bg-surface-900/30 rounded-lg">
+    <div
+      className="flex items-center gap-3 p-3 bg-surface-900/30 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/70"
+      role="listitem"
+      tabIndex={0}
+      aria-label={`${network.ssid}, priority ${index + 1} of ${total}. Use Arrow Up and Arrow Down to reorder.`}
+      onKeyDown={handleRowKeyDown}
+    >
       <div className="flex flex-col gap-0.5">
         <button
           onClick={() => onMoveUp(index)}
-          disabled={index === 0}
-          className="p-0.5 text-surface-400 hover:text-surface-200 disabled:opacity-25 disabled:cursor-not-allowed transition-colors"
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowUp' && canMoveUp) {
+              e.preventDefault()
+              onMoveUp(index)
+            } else if (e.key === 'ArrowDown' && canMoveDown) {
+              e.preventDefault()
+              onMoveDown(index)
+            }
+          }}
+          disabled={!canMoveUp}
+          className="p-0.5 text-surface-400 hover:text-surface-200 disabled:opacity-25 disabled:cursor-not-allowed transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/70"
           title="Move up"
+          aria-label={`Move ${network.ssid} up in priority`}
         >
-          <Icon name="chevron-left" className="w-3.5 h-3.5 rotate-[-90deg]" />
+          <Icon name="chevron-left" className="w-3.5 h-3.5 rotate-[-90deg]" aria-hidden="true" />
         </button>
         <button
           onClick={() => onMoveDown(index)}
-          disabled={index === total - 1}
-          className="p-0.5 text-surface-400 hover:text-surface-200 disabled:opacity-25 disabled:cursor-not-allowed transition-colors"
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowUp' && canMoveUp) {
+              e.preventDefault()
+              onMoveUp(index)
+            } else if (e.key === 'ArrowDown' && canMoveDown) {
+              e.preventDefault()
+              onMoveDown(index)
+            }
+          }}
+          disabled={!canMoveDown}
+          className="p-0.5 text-surface-400 hover:text-surface-200 disabled:opacity-25 disabled:cursor-not-allowed transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/70"
           title="Move down"
+          aria-label={`Move ${network.ssid} down in priority`}
         >
-          <Icon name="chevron-left" className="w-3.5 h-3.5 rotate-[90deg]" />
+          <Icon name="chevron-left" className="w-3.5 h-3.5 rotate-[90deg]" aria-hidden="true" />
         </button>
       </div>
 
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-surface-100 truncate">{network.ssid}</span>
-          {network.has_password && <Icon name="lock" className="w-3.5 h-3.5 text-surface-400 shrink-0" />}
+          {network.has_password && <Icon name="lock" className="w-3.5 h-3.5 text-surface-400 shrink-0" aria-label="Password protected" />}
           {isConnected && (
             <StatusBadge variant="success">
-              <Icon name="check" className="w-3 h-3" />
+              <Icon name="check" className="w-3 h-3" aria-hidden="true" />
               Active
             </StatusBadge>
           )}
@@ -247,7 +289,7 @@ function SavedNetworkItem({ network, index, total, onMoveUp, onMoveDown, onDisco
         onClick={() => onDisconnect(network.ssid)}
         aria-label={`Remove ${network.ssid}`}
       >
-        <Icon name="x" className="w-4 h-4" />
+        <Icon name="x" className="w-4 h-4" aria-hidden="true" />
       </Button>
     </div>
   )
@@ -413,11 +455,14 @@ export default function WifiPage() {
           <CardTitle>Saved Networks</CardTitle>
           <button
             onClick={() => setShowSaved((v) => !v)}
-            className="text-surface-400 hover:text-surface-200 transition-colors p-1"
+            className="text-surface-400 hover:text-surface-200 transition-colors p-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/70"
+            aria-label={showSaved ? 'Collapse saved networks' : 'Expand saved networks'}
+            aria-expanded={showSaved}
           >
             <Icon
               name="chevron-right"
               className={`w-4 h-4 transition-transform ${showSaved ? 'rotate-90' : ''}`}
+              aria-hidden="true"
             />
           </button>
         </CardHeader>
@@ -427,7 +472,7 @@ export default function WifiPage() {
             {savedNetworks.length === 0 ? (
               <p className="text-sm text-surface-400 py-2">No saved networks. Scan to find available networks.</p>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-2" role="list" aria-label="Saved WiFi networks ordered by priority">
                 {savedNetworks.map((network, idx) => (
                   <SavedNetworkItem
                     key={network.ssid}
