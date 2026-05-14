@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/daemoncontrol"
+	"github.com/denysvitali/pictures-sync-s3/pkg/httputil"
 	"github.com/denysvitali/pictures-sync-s3/pkg/sdcardbrowser"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 	exif "github.com/dsoprea/go-exif/v3"
@@ -262,6 +263,12 @@ func (ctx *Context) HandleThumbnail(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[Gallery] thumbnail start path=%q remote=%s", requestedPath, r.RemoteAddr)
 
+	if _, err := httputil.ValidatePath(sdCardMountPath, requestedPath); err != nil {
+		log.Printf("[Gallery] thumbnail rejected path=%q error=%v", requestedPath, err)
+		http.Error(w, "access denied", http.StatusForbidden)
+		return
+	}
+
 	requestCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
@@ -449,7 +456,8 @@ func (ctx *Context) HandleSDCardPreview(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "path parameter required", http.StatusBadRequest)
 		return
 	}
-	if filepath.IsAbs(requestedPath) || strings.Contains(requestedPath, "..") {
+	if _, err := httputil.ValidatePath(sdCardMountPath, requestedPath); err != nil {
+		log.Printf("[Gallery] sdcard preview rejected path=%q error=%v", requestedPath, err)
 		http.Error(w, "access denied", http.StatusForbidden)
 		return
 	}
