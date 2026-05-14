@@ -76,6 +76,19 @@ fi
 mkdir -p "$GOKRAZY_PARENT_DIR"
 mkdir -p "$IMAGE_DIR"
 
+if ! command -v pnpm >/dev/null 2>&1; then
+  echo "Error: pnpm is required to build embedded webui assets"
+  exit 1
+fi
+
+echo "Building embedded WebUI bundle..."
+(cd "$REPO_DIR/webui" && pnpm install --frozen-lockfile) || (cd "$REPO_DIR/webui" && pnpm install)
+(cd "$REPO_DIR/webui" && pnpm build)
+if [ ! -f "$REPO_DIR/pkg/webui/dist/index.html" ]; then
+  echo "Error: pkg/webui/dist/index.html is missing after webui build"
+  exit 1
+fi
+
 if [ -d "$INSTANCE_DIR" ]; then
   rm -rf "$INSTANCE_DIR"
 fi

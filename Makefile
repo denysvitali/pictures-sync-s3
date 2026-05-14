@@ -1,7 +1,7 @@
 # Makefile for pictures-sync-s3
 # Provides convenient commands for building, testing, and CI/CD operations
 
-.PHONY: help build test lint security clean install-tools docker-build all
+.PHONY: help build webui-sync-embedded build-all run-webui test lint security clean install-tools docker-build all gokrazy-setup gokrazy-update gokrazy-edit ota ota-release
 
 # Default target
 .DEFAULT_GOAL := help
@@ -41,7 +41,7 @@ help: ## Display this help message
 
 ##@ Development
 
-build: ## Build all binaries
+build: webui-sync-embedded ## Build all binaries
 	@echo "$(GREEN)Building $(PICTURES_SYNC)...$(NC)"
 	@CGO_ENABLED=0 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(PICTURES_SYNC) ./cmd/pictures-sync
 	@echo "$(GREEN)Building $(WEBUI)...$(NC)"
@@ -51,10 +51,15 @@ build: ## Build all binaries
 	@echo "$(GREEN)Build complete!$(NC)"
 
 webui-sync-embedded: ## Build the embedded webui bundle (real React source)
-	@cd webui && pnpm install --frozen-lockfile || pnpm install
+	@if ! command -v pnpm >/dev/null 2>&1; then \
+		echo "Error: pnpm is required to build embedded webui assets"; \
+		exit 1; \
+	fi
+	@(cd webui && pnpm install --frozen-lockfile) || (cd webui && pnpm install)
 	@cd webui && pnpm build
+	@test -f pkg/webui/dist/index.html
 
-build-all: ## Build for all platforms (linux amd64, arm64, armv7)
+build-all: webui-sync-embedded ## Build for all platforms (linux amd64, arm64, armv7)
 	@echo "$(GREEN)Building for all platforms...$(NC)"
 	@mkdir -p $(DIST_DIR)
 	@echo "Building linux/amd64..."
@@ -227,7 +232,7 @@ gokrazy-setup: ## Set up Gokrazy instance
 	@echo "$(GREEN)Setting up Gokrazy instance...$(NC)"
 	@./setup-gokrazy.sh
 
-gokrazy-update: ## Deploy over-the-air update to Gokrazy
+gokrazy-update: webui-sync-embedded ## Deploy over-the-air update to Gokrazy
 	@echo "$(GREEN)Deploying OTA update...$(NC)"
 	@gok -i photo-backup update
 
