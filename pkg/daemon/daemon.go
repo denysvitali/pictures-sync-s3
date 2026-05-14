@@ -31,6 +31,12 @@ const (
 	// dnsCheckInterval is how often to check if DNS resolution is working.
 	// This is used during daemon startup to ensure network connectivity before sync operations.
 	dnsCheckInterval = 2 * time.Second
+
+	// mountFailureCheckInterval governs how often the daemon polls for the
+	// "device present but unmounted" condition. sdmonitor swallows mount errors
+	// silently, so the daemon translates the missing-mount signal into a
+	// StatusError so the LED controller surfaces it via PatternError.
+	mountFailureCheckInterval = 10 * time.Second
 )
 
 // Service represents the main photo backup daemon
@@ -262,6 +268,10 @@ func (s *Service) Run() error {
 	log.Println("Ready - waiting for SD card insertion...")
 	log.Println("Entering main event loop...")
 
+	mountWatchTicker := time.NewTicker(mountFailureCheckInterval)
+	defer mountWatchTicker.Stop()
+	mountFailureActive := false
+
 	// Main event loop
 	for {
 		select {
@@ -276,6 +286,11 @@ func (s *Service) Run() error {
 			case sdmonitor.EventInserted:
 				log.Printf("Processing card insertion event: %s at %s", event.DevName, event.MountPath)
 
+				// A successful insertion implies the mount succeeded; clear any
+				// previous silent-mount-failure flag so the next idle/syncing
+				// status transition can clear the error LED.
+				mountFailureActive = false
+
 				// Check if time is synced before allowing sync operations
 				if !s.timeSynced {
 					log.Println("ERROR: Cannot sync - system time is not synchronized!")
@@ -288,10 +303,66 @@ func (s *Service) Run() error {
 				s.cardHandler.HandleInserted(event)
 			case sdmonitor.EventRemoved:
 				log.Printf("Processing card removal event: %s", event.DevName)
+				mountFailureActive = false
 				s.cardHandler.HandleRemoved(event)
 			}
+
+		case <-mountWatchTicker.C:
+			s.checkSilentMountFailure(&mountFailureActive)
 		}
 	}
+}
+
+// checkSilentMountFailure polls for storage devices that look like SD cards
+// but never reached the monitor's mounted state. sdmonitor logs the mount
+// error and returns, so without this watcher the user sees no feedback at
+// all. When the condition is detected we promote it to StatusError so the
+// LED controller drives PatternError; the next successful sync or idle
+// transition reverts the LED.
+func (s *Service) checkSilentMountFailure(active *bool) {
+	if s.monitor.IsCardMounted() {
+		if *active {
+			*active = false
+		}
+		return
+	}
+
+	devices, err := sdmonitor.ListAllStorageDevices()
+	if err != nil {
+		log.Printf("mount-failure watcher: failed to list devices: %v", err)
+		return
+	}
+	if len(devices) == 0 {
+		if *active {
+			*active = false
+		}
+		return
+	}
+
+	// If the running sync manager is busy we already have a sync-side error
+	// signal; do not double-report.
+	if s.syncMgr.IsRunning() {
+		return
+	}
+
+	if *active {
+		return
+	}
+
+	devNames := make([]string, 0, len(devices))
+	for _, d := range devices {
+		devNames = append(devNames, d.DevicePath)
+	}
+	log.Printf("mount-failure watcher: %d storage device(s) present but none mounted (%s); surfacing as error",
+		len(devices), strings.Join(devNames, ", "))
+
+	if err := s.stateMgr.SetError("SD card detected but mount failed"); err != nil {
+		log.Printf("mount-failure watcher: failed to set error message: %v", err)
+	}
+	if err := s.stateMgr.SetStatus(state.StatusError); err != nil {
+		log.Printf("mount-failure watcher: failed to set error status: %v", err)
+	}
+	*active = true
 }
 
 func (s *Service) handleManualSyncCommand(ctx context.Context, devicePath string) daemoncontrol.Response {

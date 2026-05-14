@@ -157,12 +157,15 @@ func (c *Controller) startSuccessSequence() {
 	}()
 }
 
-// startErrorPattern blinks the PWR LED if available, otherwise ACT LED
+// startErrorPattern blinks the error LED with PatternError (two quick blinks
+// then a long pause). Uses the PWR LED when available to keep the red/power
+// indicator dedicated to error signalling; otherwise falls back to the ACT
+// LED so the operator still gets a visible cue on hardware without a PWR LED.
 func (c *Controller) startErrorPattern() {
 	if c.pwrLED != nil && c.pwrLED.available {
-		c.startPattern(c.pwrLED, PatternSlowBlink)
+		c.startPattern(c.pwrLED, PatternError)
 	} else {
-		c.startPattern(c.actLED, PatternSlowBlink)
+		c.startPattern(c.actLED, PatternError)
 	}
 }
 
@@ -215,6 +218,11 @@ func (c *Controller) runPattern(led *LED, pattern LEDPattern, stopChan chan stru
 		return
 	}
 
+	burst := pattern.BurstCount
+	if burst < 1 {
+		burst = 1
+	}
+
 	count := 0
 	for {
 		// Check if we should stop
@@ -228,23 +236,30 @@ func (c *Controller) runPattern(led *LED, pattern LEDPattern, stopChan chan stru
 		default:
 		}
 
-		// Check repeat limit
+		// Check repeat limit (Repeat counts groups, not individual pulses)
 		if pattern.Repeat > 0 && count >= pattern.Repeat {
 			c.setLEDState(led, false)
 			return
 		}
 
-		// LED on phase
-		c.setLEDState(led, true)
-		if !c.sleepInterruptible(pattern.OnDuration, stopChan) {
+		// Emit one group of pulses
+		for i := 0; i < burst; i++ {
+			c.setLEDState(led, true)
+			if !c.sleepInterruptible(pattern.OnDuration, stopChan) {
+				c.setLEDState(led, false)
+				return
+			}
 			c.setLEDState(led, false)
-			return
+			if !c.sleepInterruptible(pattern.OffDuration, stopChan) {
+				return
+			}
 		}
 
-		// LED off phase
-		c.setLEDState(led, false)
-		if !c.sleepInterruptible(pattern.OffDuration, stopChan) {
-			return
+		// Inter-group pause
+		if pattern.BurstPause > 0 {
+			if !c.sleepInterruptible(pattern.BurstPause, stopChan) {
+				return
+			}
 		}
 
 		count++
