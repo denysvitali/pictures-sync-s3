@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/auth"
+	"github.com/denysvitali/pictures-sync-s3/pkg/middleware"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ratelimit"
 	"github.com/denysvitali/pictures-sync-s3/pkg/websocket"
 	"github.com/denysvitali/pictures-sync-s3/pkg/wifimanager"
@@ -54,7 +55,7 @@ func WSTokenHandler(passwordProvider auth.PasswordProvider, limiter *ratelimit.L
 			return
 		}
 
-		ip := getClientIP(r)
+		ip := middleware.GetClientIP(r)
 
 		if limiter != nil && !limiter.Allow(ip, wsTokenRateLimitConfig) {
 			log.Printf("SECURITY: ws-token rate limit exceeded for IP %s", ip)
