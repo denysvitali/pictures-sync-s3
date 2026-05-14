@@ -1,8 +1,12 @@
 package sdcardbrowser
 
 import (
+	"bufio"
 	"bytes"
+	"encoding/binary"
+	"errors"
 	"fmt"
+	"io"
 	"mime"
 	"os"
 	"path/filepath"
@@ -143,9 +147,18 @@ func ReadThumbnail(mountPath, requestedPath string) (*Preview, error) {
 }
 
 // extractEXIFThumbnail returns the JPEG thumbnail stored in IFD1 of the EXIF
-// metadata, scanning only the front of the file rather than decoding it.
+// metadata. It only reads the JPEG's APP1 segment instead of slurping the
+// entire image, which keeps thumbnail latency in the milliseconds even on
+// multi-megabyte source files.
 func extractEXIFThumbnail(filePath string) ([]byte, error) {
-	rawExif, err := exif.SearchFileAndExtractExif(filePath)
+	// #nosec G304 -- caller resolves and validates the path within the mount.
+	f, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	rawExif, err := readJPEGExifSegment(f)
 	if err != nil {
 		return nil, err
 	}
@@ -166,6 +179,86 @@ func extractEXIFThumbnail(filePath string) ([]byte, error) {
 	}
 
 	return ifd1.Thumbnail()
+}
+
+// errNoEXIFSegment indicates the JPEG was readable but contained no APP1/EXIF.
+var errNoEXIFSegment = errors.New("no EXIF segment in JPEG")
+
+// readJPEGExifSegment parses JPEG markers and returns the TIFF-formatted EXIF
+// payload from the APP1 segment. It reads only the segment headers and the
+// APP1 payload, so the cost is bounded by the EXIF size (≤64 KiB) regardless
+// of the full image size.
+func readJPEGExifSegment(r io.Reader) ([]byte, error) {
+	br := bufio.NewReaderSize(r, 8192)
+
+	var soi [2]byte
+	if _, err := io.ReadFull(br, soi[:]); err != nil {
+		return nil, err
+	}
+	if soi[0] != 0xFF || soi[1] != 0xD8 {
+		return nil, fmt.Errorf("not a JPEG file")
+	}
+
+	for {
+		// Scan for the next marker (0xFF followed by a non-0x00, non-0xFF byte).
+		b, err := br.ReadByte()
+		if err != nil {
+			return nil, err
+		}
+		if b != 0xFF {
+			continue
+		}
+		var marker byte
+		for {
+			marker, err = br.ReadByte()
+			if err != nil {
+				return nil, err
+			}
+			if marker != 0xFF {
+				break
+			}
+		}
+		// 0xFF 0x00 is a stuffed byte inside compressed data; skip.
+		if marker == 0x00 {
+			continue
+		}
+		// Stand-alone markers without a length field.
+		if marker == 0xD8 /* SOI */ || marker == 0xD9 /* EOI */ ||
+			(marker >= 0xD0 && marker <= 0xD7) /* RST0..RST7 */ {
+			continue
+		}
+		// SOS marks the start of compressed image data — no more metadata.
+		if marker == 0xDA {
+			return nil, errNoEXIFSegment
+		}
+
+		var lenBuf [2]byte
+		if _, err := io.ReadFull(br, lenBuf[:]); err != nil {
+			return nil, err
+		}
+		length := int(binary.BigEndian.Uint16(lenBuf[:]))
+		if length < 2 {
+			return nil, fmt.Errorf("invalid JPEG segment length")
+		}
+		payloadLen := length - 2
+
+		if marker == 0xE1 /* APP1 */ {
+			payload := make([]byte, payloadLen)
+			if _, err := io.ReadFull(br, payload); err != nil {
+				return nil, err
+			}
+			const exifSig = "Exif\x00\x00"
+			if len(payload) >= len(exifSig) && bytes.HasPrefix(payload, []byte(exifSig)) {
+				return payload[len(exifSig):], nil
+			}
+			// Other APP1 payload (e.g. XMP); keep scanning.
+			continue
+		}
+
+		if _, err := io.CopyN(io.Discard, br, int64(payloadLen)); err != nil {
+			return nil, err
+		}
+	}
 }
 
 // OpenFile opens any regular file under the SD card mount path for streaming.

@@ -2,6 +2,7 @@ package sdcardbrowser
 
 import (
 	"bytes"
+	"encoding/binary"
 	"image"
 	"image/color"
 	"io"
@@ -115,6 +116,41 @@ func TestReadThumbnailFallsBackWhenNoEXIF(t *testing.T) {
 	}
 	if len(preview.Data) == 0 || len(preview.Data) >= buf.Len() {
 		t.Fatalf("fallback thumbnail size %d not smaller than source %d", len(preview.Data), buf.Len())
+	}
+}
+
+func TestReadJPEGExifSegmentReadsOnlyAPP1(t *testing.T) {
+	exifPayload := []byte("TIFFHEADERANDIFDS")
+	var jpeg bytes.Buffer
+	jpeg.Write([]byte{0xFF, 0xD8}) // SOI
+
+	// APP0 (JFIF) segment to exercise skipping.
+	app0 := []byte("JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00")
+	jpeg.Write([]byte{0xFF, 0xE0})
+	var app0Len [2]byte
+	binary.BigEndian.PutUint16(app0Len[:], uint16(len(app0)+2))
+	jpeg.Write(app0Len[:])
+	jpeg.Write(app0)
+
+	// APP1 (EXIF) segment.
+	app1 := append([]byte("Exif\x00\x00"), exifPayload...)
+	jpeg.Write([]byte{0xFF, 0xE1})
+	var app1Len [2]byte
+	binary.BigEndian.PutUint16(app1Len[:], uint16(len(app1)+2))
+	jpeg.Write(app1Len[:])
+	jpeg.Write(app1)
+
+	// Trailer that should never be read — if the parser slurps to EOF this
+	// data shows up where it shouldn't.
+	jpeg.Write([]byte{0xFF, 0xDA}) // SOS would short-circuit; we put it last.
+	jpeg.Write(bytes.Repeat([]byte{0xAA}, 1<<20))
+
+	got, err := readJPEGExifSegment(bytes.NewReader(jpeg.Bytes()))
+	if err != nil {
+		t.Fatalf("readJPEGExifSegment: %v", err)
+	}
+	if !bytes.Equal(got, exifPayload) {
+		t.Fatalf("payload = %q, want %q", got, exifPayload)
 	}
 }
 
