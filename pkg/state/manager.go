@@ -52,8 +52,14 @@ func NewManager() (*Manager, error) {
 	return m, nil
 }
 
-// load reads state and history from disk
+// load reads state and history from disk. Before reading, any orphaned .tmp
+// siblings from a power loss between AtomicWrite's write and rename steps are
+// either promoted (if newer + valid JSON) or removed, so the on-disk view is
+// consistent before the rest of startup runs.
 func (m *Manager) load() error {
+	if err := recoverOrphanedTempFiles(); err != nil {
+		log.Printf("state recovery: completed with errors: %v", err)
+	}
 	if err := m.loadState(); err != nil {
 		return err
 	}

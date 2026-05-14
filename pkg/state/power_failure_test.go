@@ -11,14 +11,25 @@ import (
 	"time"
 )
 
-// TestPowerFailureDuringStateWrite simulates power loss during state.json write
+// TestPowerFailureDuringStateWrite verifies boot-time recovery of orphaned
+// .tmp files left behind when power fails between AtomicWrite's write and
+// rename steps. The sibling cases (partial write, zero-byte file, older tmp,
+// missing main) exercise every branch of recoverOrphanedTempFiles.
 func TestPowerFailureDuringStateWrite(t *testing.T) {
-	tmpDir := t.TempDir()
-	stateFile := filepath.Join(tmpDir, "state.json")
-	tmpFile := stateFile + ".tmp"
+	saveStateFile := StateFile
+	saveHistoryFile := HistoryFile
+	t.Cleanup(func() {
+		StateFile = saveStateFile
+		HistoryFile = saveHistoryFile
+	})
 
-	t.Run("power loss after tmp write, before rename", func(t *testing.T) {
-		// Simulate writing temp file but system crashes before rename
+	t.Run("power loss after tmp write, before rename - tmp promoted", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		StateFile = filepath.Join(tmpDir, "state.json")
+		HistoryFile = filepath.Join(tmpDir, "sync-history.json")
+		stateFile := StateFile
+		tmpFile := stateFile + ".tmp"
+
 		testState := CurrentState{
 			Status:        StatusSyncing,
 			SDCardMounted: true,
@@ -36,33 +47,51 @@ func TestPowerFailureDuringStateWrite(t *testing.T) {
 		}
 
 		data, _ := json.MarshalIndent(testState, "", "  ")
-		os.WriteFile(tmpFile, data, 0644)
-
-		// Power failure here - .tmp file exists, but main file is old/missing
-		// On recovery, application needs to handle this
-
-		// Check if .tmp file exists
-		if _, err := os.Stat(tmpFile); os.IsNotExist(err) {
-			t.Fatal("Temp file should exist after power failure simulation")
+		if err := os.WriteFile(tmpFile, data, 0644); err != nil {
+			t.Fatalf("seed tmp: %v", err)
 		}
 
-		// BUG FINDING: The load() function doesn't check for orphaned .tmp files
-		// It will just read the old state file (or fail if it doesn't exist)
-		// RESULT: Sync progress lost
+		// No main state file - simulates first save interrupted before rename.
+		if err := recoverOrphanedTempFiles(); err != nil {
+			t.Fatalf("recovery returned error: %v", err)
+		}
 
-		t.Log("BUG FOUND: Orphaned .tmp file after power failure")
-		t.Log("Impact: Current sync progress is lost")
-		t.Log("Data loss: FilesSynced=50, BytesSynced=52428800 lost")
-		t.Log("Recommendation: Check for .tmp file on startup and decide whether to use it")
+		// Orphan should now be the canonical state file.
+		if _, err := os.Stat(tmpFile); !os.IsNotExist(err) {
+			t.Fatalf("tmp file should be gone after promotion, stat err: %v", err)
+		}
+		recovered, err := os.ReadFile(stateFile)
+		if err != nil {
+			t.Fatalf("state file missing after recovery: %v", err)
+		}
+		var got CurrentState
+		if err := json.Unmarshal(recovered, &got); err != nil {
+			t.Fatalf("recovered state did not parse: %v", err)
+		}
+		if got.CurrentSync == nil || got.CurrentSync.FilesSynced != 50 {
+			t.Fatalf("recovery lost in-flight progress: %+v", got.CurrentSync)
+		}
 	})
 
-	t.Run("power loss during rename operation", func(t *testing.T) {
-		// Create valid state file
-		validState := CurrentState{Status: StatusIdle}
-		data, _ := json.MarshalIndent(validState, "", "  ")
-		os.WriteFile(stateFile, data, 0644)
+	t.Run("tmp newer than main with valid JSON - tmp promoted", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		StateFile = filepath.Join(tmpDir, "state.json")
+		HistoryFile = filepath.Join(tmpDir, "sync-history.json")
+		stateFile := StateFile
+		tmpFile := stateFile + ".tmp"
 
-		// Create temp file with new state
+		// Old main: status idle.
+		oldState := CurrentState{Status: StatusIdle}
+		oldData, _ := json.MarshalIndent(oldState, "", "  ")
+		if err := os.WriteFile(stateFile, oldData, 0644); err != nil {
+			t.Fatalf("seed main: %v", err)
+		}
+		past := time.Now().Add(-1 * time.Hour)
+		if err := os.Chtimes(stateFile, past, past); err != nil {
+			t.Fatalf("chtimes main: %v", err)
+		}
+
+		// New tmp: status syncing - represents the write that didn't get renamed.
 		newState := CurrentState{
 			Status: StatusSyncing,
 			CurrentSync: &SyncRecord{
@@ -72,74 +101,132 @@ func TestPowerFailureDuringStateWrite(t *testing.T) {
 				CardID:      "card-def",
 			},
 		}
-		data, _ = json.MarshalIndent(newState, "", "  ")
-		os.WriteFile(tmpFile, data, 0644)
+		newData, _ := json.MarshalIndent(newState, "", "  ")
+		if err := os.WriteFile(tmpFile, newData, 0644); err != nil {
+			t.Fatalf("seed tmp: %v", err)
+		}
 
-		// On some filesystems, rename is not atomic across power failures
-		// We could end up with:
-		// 1. Both files (old + new) - depends on filesystem
-		// 2. Only tmp file
-		// 3. Only old file
-		// 4. No files (catastrophic)
+		if err := recoverOrphanedTempFiles(); err != nil {
+			t.Fatalf("recovery error: %v", err)
+		}
 
-		// Simulate scenario where both exist
-		t.Log("BUG FOUND: Cannot determine which file is correct if both exist after power failure")
-		t.Log("Impact: May load stale state instead of latest state")
-		t.Log("Recommendation: Add timestamp or sequence number to detect newest")
+		if _, err := os.Stat(tmpFile); !os.IsNotExist(err) {
+			t.Fatalf("tmp should be gone, stat: %v", err)
+		}
+		final, _ := os.ReadFile(stateFile)
+		var got CurrentState
+		if err := json.Unmarshal(final, &got); err != nil {
+			t.Fatalf("final state did not parse: %v", err)
+		}
+		if got.Status != StatusSyncing || got.CurrentSync == nil || got.CurrentSync.CardID != "card-def" {
+			t.Fatalf("expected newer tmp to win, got: %+v", got)
+		}
 	})
 
-	t.Run("partial write to tmp file", func(t *testing.T) {
-		// Simulate buffer flush failure - file is truncated
+	t.Run("partial write to tmp file - corrupt tmp removed, main preserved", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		StateFile = filepath.Join(tmpDir, "state.json")
+		HistoryFile = filepath.Join(tmpDir, "sync-history.json")
+		stateFile := StateFile
+		tmpFile := stateFile + ".tmp"
+
+		good := CurrentState{Status: StatusIdle}
+		goodData, _ := json.MarshalIndent(good, "", "  ")
+		if err := os.WriteFile(stateFile, goodData, 0644); err != nil {
+			t.Fatalf("seed main: %v", err)
+		}
+
 		fullState := CurrentState{
 			Status: StatusSyncing,
 			CurrentSync: &SyncRecord{
 				ID:          "sync-789",
 				FilesTotal:  1000,
 				FilesSynced: 500,
-				BytesTotal:  1024 * 1024 * 1000,
-				BytesSynced: 1024 * 1024 * 500,
 				CardID:      "card-ghi",
 			},
 		}
-
 		data, _ := json.MarshalIndent(fullState, "", "  ")
-
-		// Write only half the data (simulating partial write)
 		halfData := data[:len(data)/2]
-		os.WriteFile(tmpFile, halfData, 0644)
-
-		// Attempt to load
-		readData, _ := os.ReadFile(tmpFile)
-		var loadedState CurrentState
-		err := json.Unmarshal(readData, &loadedState)
-
-		if err == nil {
-			t.Error("BUG: Partial JSON loaded without error!")
-		} else {
-			t.Logf("Correctly detected corrupt JSON: %v", err)
+		if err := os.WriteFile(tmpFile, halfData, 0644); err != nil {
+			t.Fatalf("seed tmp: %v", err)
 		}
 
-		t.Log("BUG FOUND: Partial write leaves corrupt .tmp file")
-		t.Log("Impact: Next save will overwrite .tmp, but if power fails again during that save, we've lost data")
-		t.Log("Data loss: 500 files synced, 524288000 bytes transferred - all lost")
-		t.Log("Recommendation: Implement write-ahead log or checksums")
+		if err := recoverOrphanedTempFiles(); err != nil {
+			t.Fatalf("recovery error: %v", err)
+		}
+
+		if _, err := os.Stat(tmpFile); !os.IsNotExist(err) {
+			t.Fatalf("corrupt tmp should be removed, stat: %v", err)
+		}
+		final, _ := os.ReadFile(stateFile)
+		var got CurrentState
+		if err := json.Unmarshal(final, &got); err != nil {
+			t.Fatalf("main state corrupted by recovery: %v", err)
+		}
+		if got.Status != StatusIdle {
+			t.Fatalf("main state changed unexpectedly: %+v", got)
+		}
 	})
 
-	t.Run("zero-byte file after power failure", func(t *testing.T) {
-		// Sometimes power failure during write results in zero-byte file
-		os.WriteFile(tmpFile, []byte{}, 0644)
+	t.Run("zero-byte tmp file - removed", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		StateFile = filepath.Join(tmpDir, "state.json")
+		HistoryFile = filepath.Join(tmpDir, "sync-history.json")
+		tmpFile := StateFile + ".tmp"
 
-		data, _ := os.ReadFile(tmpFile)
-		var state CurrentState
-		err := json.Unmarshal(data, &state)
-
-		if err == nil {
-			t.Error("BUG: Empty file loaded as valid state!")
+		if err := os.WriteFile(tmpFile, []byte{}, 0644); err != nil {
+			t.Fatalf("seed tmp: %v", err)
 		}
 
-		t.Log("BUG FOUND: Zero-byte file created by power failure during write")
-		t.Log("Impact: Load will fail, but application might not have fallback")
-		t.Log("Recovery: Application should detect this and use last known good state")
+		if err := recoverOrphanedTempFiles(); err != nil {
+			t.Fatalf("recovery error: %v", err)
+		}
+
+		if _, err := os.Stat(tmpFile); !os.IsNotExist(err) {
+			t.Fatalf("zero-byte tmp should be removed, stat: %v", err)
+		}
+	})
+
+	t.Run("older tmp than main - removed without overwriting main", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		StateFile = filepath.Join(tmpDir, "state.json")
+		HistoryFile = filepath.Join(tmpDir, "sync-history.json")
+		stateFile := StateFile
+		tmpFile := stateFile + ".tmp"
+
+		// Newer good main.
+		good := CurrentState{Status: StatusSuccess}
+		goodData, _ := json.MarshalIndent(good, "", "  ")
+		if err := os.WriteFile(stateFile, goodData, 0644); err != nil {
+			t.Fatalf("seed main: %v", err)
+		}
+
+		// Stale tmp from a previous power loss, valid JSON but older.
+		stale := CurrentState{Status: StatusError}
+		staleData, _ := json.MarshalIndent(stale, "", "  ")
+		if err := os.WriteFile(tmpFile, staleData, 0644); err != nil {
+			t.Fatalf("seed tmp: %v", err)
+		}
+		past := time.Now().Add(-2 * time.Hour)
+		if err := os.Chtimes(tmpFile, past, past); err != nil {
+			t.Fatalf("chtimes tmp: %v", err)
+		}
+
+		if err := recoverOrphanedTempFiles(); err != nil {
+			t.Fatalf("recovery error: %v", err)
+		}
+
+		if _, err := os.Stat(tmpFile); !os.IsNotExist(err) {
+			t.Fatalf("older tmp should be removed, stat: %v", err)
+		}
+		final, _ := os.ReadFile(stateFile)
+		var got CurrentState
+		if err := json.Unmarshal(final, &got); err != nil {
+			t.Fatalf("main parse: %v", err)
+		}
+		if got.Status != StatusSuccess {
+			t.Fatalf("main overwritten by older tmp: %+v", got)
+		}
 	})
 }
 

@@ -1,7 +1,9 @@
 package state
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 
@@ -84,6 +86,96 @@ func ensureDirectories() error {
 // Uses the utils package for consistent atomic writes across the codebase
 func atomicWrite(path string, data []byte, perm os.FileMode) error {
 	return utils.AtomicWrite(path, data, perm)
+}
+
+// persistedFiles returns the list of files whose .tmp siblings should be
+// considered by boot-time recovery. Each entry pairs the canonical path with
+// a JSON-validator: if the orphaned .tmp does not parse into the expected
+// shape it is discarded rather than promoted to the canonical path.
+func persistedFiles() []persistedFile {
+	return []persistedFile{
+		{path: StateFile, validate: validateStateJSON},
+		{path: HistoryFile, validate: validateHistoryJSON},
+	}
+}
+
+type persistedFile struct {
+	path     string
+	validate func([]byte) error
+}
+
+func validateStateJSON(data []byte) error {
+	var s CurrentState
+	return json.Unmarshal(data, &s)
+}
+
+func validateHistoryJSON(data []byte) error {
+	var h []SyncRecord
+	return json.Unmarshal(data, &h)
+}
+
+// recoverOrphanedTempFiles inspects each persistence path for a leftover
+// ".tmp" sibling from a power loss between write and rename. If the .tmp is
+// newer than the main file AND parses cleanly, it is renamed into place to
+// recover the most recent write. Otherwise it is removed. Every action is
+// logged. Returns the first error encountered, but always attempts every
+// path so a problem with one file does not block recovery of the others.
+func recoverOrphanedTempFiles() error {
+	var firstErr error
+	for _, pf := range persistedFiles() {
+		if err := recoverOrphanedTempFile(pf); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+func recoverOrphanedTempFile(pf persistedFile) error {
+	tmpPath := pf.path + ".tmp"
+	tmpInfo, err := os.Stat(tmpPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		log.Printf("state recovery: stat %q failed: %v", tmpPath, err)
+		return nil
+	}
+
+	// #nosec G304 -- tmpPath is derived from a controlled application path.
+	data, readErr := os.ReadFile(tmpPath)
+	parseErr := readErr
+	if parseErr == nil {
+		parseErr = pf.validate(data)
+	}
+
+	mainInfo, statErr := os.Stat(pf.path)
+	mainExists := statErr == nil
+	if statErr != nil && !os.IsNotExist(statErr) {
+		log.Printf("state recovery: stat %q failed: %v", pf.path, statErr)
+		return nil
+	}
+
+	tmpNewer := !mainExists || tmpInfo.ModTime().After(mainInfo.ModTime())
+
+	if parseErr == nil && tmpNewer {
+		if err := os.Rename(tmpPath, pf.path); err != nil {
+			log.Printf("state recovery: failed to promote %q to %q: %v", tmpPath, pf.path, err)
+			return err
+		}
+		log.Printf("state recovery: promoted orphaned %q to %q (newer write recovered after power loss)", tmpPath, pf.path)
+		return nil
+	}
+
+	reason := "older than main file"
+	if parseErr != nil {
+		reason = fmt.Sprintf("invalid JSON: %v", parseErr)
+	}
+	if err := os.Remove(tmpPath); err != nil {
+		log.Printf("state recovery: failed to remove orphaned %q (%s): %v", tmpPath, reason, err)
+		return err
+	}
+	log.Printf("state recovery: removed orphaned %q (%s)", tmpPath, reason)
+	return nil
 }
 
 // saveState persists current state to disk
