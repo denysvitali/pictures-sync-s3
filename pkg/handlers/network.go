@@ -11,33 +11,9 @@ import (
 	"time"
 
 	probing "github.com/prometheus-community/pro-bing"
+
+	"github.com/denysvitali/pictures-sync-s3/pkg/middleware"
 )
-
-// getClientIP extracts the client IP address from the request
-func getClientIP(r *http.Request) string {
-	// Check X-Forwarded-For header first (in case behind proxy)
-	xff := r.Header.Get("X-Forwarded-For")
-	if xff != "" {
-		// Take the first IP in the list
-		ips := strings.Split(xff, ",")
-		if len(ips) > 0 {
-			return strings.TrimSpace(ips[0])
-		}
-	}
-
-	// Check X-Real-IP header
-	xri := r.Header.Get("X-Real-IP")
-	if xri != "" {
-		return xri
-	}
-
-	// Fall back to RemoteAddr
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return ip
-}
 
 // HandleNetworkDNS returns the DNS configuration
 func (ctx *Context) HandleNetworkDNS(w http.ResponseWriter, r *http.Request) {
@@ -153,7 +129,7 @@ func (ctx *Context) HandleDNSLookup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// SSRF Protection: Validate hostname before resolving
-	clientIP := getClientIP(r)
+	clientIP := middleware.GetClientIP(r)
 	if ctx.SSRFValidator == nil {
 		log.Printf("[SSRF] Warning: SSRFValidator not initialized, blocking request")
 		http.Error(w, "Service temporarily unavailable", http.StatusServiceUnavailable)
@@ -224,7 +200,7 @@ func (ctx *Context) HandlePing(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// SSRF Protection: Validate hostname and resolve safely
-	clientIP := getClientIP(r)
+	clientIP := middleware.GetClientIP(r)
 	if ctx.SSRFValidator == nil {
 		log.Printf("[SSRF] Warning: SSRFValidator not initialized, blocking request")
 		http.Error(w, "Service temporarily unavailable", http.StatusServiceUnavailable)
@@ -341,7 +317,7 @@ func (ctx *Context) HandleNetworkDiagnostics(w http.ResponseWriter, r *http.Requ
 
 	// Test internet connectivity via DNS resolution and ping
 	// Using SSRF protection for these lookups as well
-	clientIP := getClientIP(r)
+	clientIP := middleware.GetClientIP(r)
 	if ctx.SSRFValidator != nil {
 		// Validate google.com
 		ips, err := ctx.SSRFValidator.ValidateHostname("google.com", clientIP)
