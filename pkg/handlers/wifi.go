@@ -1,16 +1,37 @@
 package handlers
 
 import (
+	"crypto/subtle"
 	"encoding/json"
+	"log"
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/denysvitali/pictures-sync-s3/pkg/auth"
+	"github.com/denysvitali/pictures-sync-s3/pkg/ratelimit"
 	"github.com/denysvitali/pictures-sync-s3/pkg/websocket"
 	"github.com/denysvitali/pictures-sync-s3/pkg/wifimanager"
 )
 
-// HandleWSToken generates and returns a WebSocket authentication token
+var wsTokenRateLimitConfig = ratelimit.Config{
+	RequestsPerSecond: 5.0 / 60.0,
+	Burst:             5,
+	MaxAuthAttempts:   0,
+	AuthWindow:        0,
+	LockoutDuration:   0,
+	CleanupInterval:   5 * time.Minute,
+	ClientExpiry:      30 * time.Minute,
+}
+
+// WSTokenRateLimitConfig returns the per-IP rate-limit configuration used by
+// the ws-token endpoint (5 requests/minute per IP).
+func WSTokenRateLimitConfig() ratelimit.Config {
+	return wsTokenRateLimitConfig
+}
+
+// HandleWSToken generates and returns a WebSocket authentication token.
 func HandleWSToken(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -21,6 +42,45 @@ func HandleWSToken(w http.ResponseWriter, r *http.Request) {
 	JSONResponse(w, map[string]string{
 		"ws_token": token,
 	})
+}
+
+// WSTokenHandler returns an http.HandlerFunc for /api/ws-token that enforces
+// Basic Auth (gokrazy:<password>) and a tight per-IP rate limit before
+// minting a WebSocket auth token.
+func WSTokenHandler(passwordProvider auth.PasswordProvider, limiter *ratelimit.Limiter) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		ip := getClientIP(r)
+
+		if limiter != nil && !limiter.Allow(ip, wsTokenRateLimitConfig) {
+			log.Printf("SECURITY: ws-token rate limit exceeded for IP %s", ip)
+			http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
+			return
+		}
+
+		username, password, ok := r.BasicAuth()
+		expected := ""
+		if passwordProvider != nil {
+			expected = passwordProvider.CurrentPassword()
+		}
+		usernameMatch := subtle.ConstantTimeCompare([]byte(username), []byte("gokrazy")) == 1
+		passwordMatch := subtle.ConstantTimeCompare([]byte(password), []byte(expected)) == 1
+		if !ok || !usernameMatch || !passwordMatch {
+			w.Header().Set("WWW-Authenticate", `Basic realm="Photo Backup Station"`)
+			log.Printf("SECURITY: ws-token unauthenticated request from IP %s", ip)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		token := websocket.CreateWSToken()
+		JSONResponse(w, map[string]string{
+			"ws_token": token,
+		})
+	}
 }
 
 // HandleWiFiScan scans for available networks

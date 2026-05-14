@@ -39,6 +39,43 @@ func TestPasswordManagerChangePassword(t *testing.T) {
 	}
 }
 
+func TestPasswordManagerChangePasswordConstantTime(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gokr-pw.txt")
+	if err := os.WriteFile(path, []byte("photo-backup\n"), 0600); err != nil {
+		t.Fatalf("write password file: %v", err)
+	}
+
+	manager, err := NewPasswordManager(path, "dev-password")
+	if err != nil {
+		t.Fatalf("NewPasswordManager() error = %v", err)
+	}
+
+	cases := []struct {
+		name    string
+		attempt string
+	}{
+		{name: "empty", attempt: ""},
+		{name: "shorter", attempt: "photo"},
+		{name: "longer", attempt: "photo-backup-extra"},
+		{name: "different same length", attempt: "photo-bakcup"},
+		{name: "prefix match", attempt: "photo-backupX"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := manager.ChangePassword(tc.attempt, "new-password-1"); err != ErrCurrentPasswordInvalid {
+				t.Fatalf("ChangePassword(%q) error = %v, want ErrCurrentPasswordInvalid", tc.attempt, err)
+			}
+			if got := manager.CurrentPassword(); got != "photo-backup" {
+				t.Fatalf("CurrentPassword() = %q, want photo-backup (must be unchanged)", got)
+			}
+		})
+	}
+
+	if err := manager.ChangePassword("photo-backup", "new-password-1"); err != nil {
+		t.Fatalf("ChangePassword(correct) error = %v", err)
+	}
+}
+
 func TestValidateGokrazyPassword(t *testing.T) {
 	tests := []struct {
 		name     string

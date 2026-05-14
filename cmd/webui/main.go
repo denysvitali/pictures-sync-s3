@@ -246,7 +246,8 @@ func main() {
 	// (and an explicit ws-token for WebSocket); CSRF token middleware was
 	// removed because it produced spurious failures and added no defense
 	// beyond what credentialed same-origin already provides.
-	http.HandleFunc("/api/ws-token", handlers.HandleWSToken) // GET endpoint for WebSocket token
+	wsTokenLimiter := ratelimit.NewLimiter(handlers.WSTokenRateLimitConfig())
+	http.HandleFunc("/api/ws-token", handlers.WSTokenHandler(passwordMgr, wsTokenLimiter))
 	http.HandleFunc("/api/version", ctx.HandleVersion)
 	http.HandleFunc("/api/status", ctx.HandleStatus)
 	http.HandleFunc("/api/history", ctx.HandleHistory)
