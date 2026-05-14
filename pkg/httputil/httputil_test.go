@@ -2,6 +2,7 @@ package httputil
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -113,6 +114,37 @@ func TestErrorWithDetails(t *testing.T) {
 
 	if field, ok := response.Data["field"].(string); !ok || field != "email" {
 		t.Errorf("Expected field 'email', got %v", response.Data["field"])
+	}
+}
+
+func TestInternalError(t *testing.T) {
+	w := httptest.NewRecorder()
+	sensitive := errors.New("open /perm/secrets/backend.key: permission denied")
+
+	InternalError(w, sensitive)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("Expected status 500, got %d", w.Code)
+	}
+
+	var response Response
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
+
+	if response.Success {
+		t.Error("Expected success to be false")
+	}
+
+	if response.Error != "Internal Server Error" {
+		t.Errorf("Expected generic error message, got %q", response.Error)
+	}
+
+	if strings.Contains(w.Body.String(), "/perm/secrets/backend.key") {
+		t.Errorf("Response body leaked sensitive error detail: %s", w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "permission denied") {
+		t.Errorf("Response body leaked sensitive error detail: %s", w.Body.String())
 	}
 }
 
