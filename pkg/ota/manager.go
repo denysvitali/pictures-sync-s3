@@ -344,6 +344,15 @@ func (m *Manager) run(ctx context.Context, releaseTag string) {
 		TotalBytes:      asset.Size,
 	})
 
+	// Look up the SHA256 sidecar (if the release publishes one) before
+	// downloading the image, so we know up front whether we can perform a
+	// strict integrity check.
+	expectedHash, sidecarURL, err := m.resolveExpectedSHA256(ctx, release, asset)
+	if err != nil {
+		m.fail(fmt.Errorf("resolve OTA SHA256 sidecar: %w", err))
+		return
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, asset.BrowserDownloadURL, nil)
 	if err != nil {
 		m.fail(err)
@@ -366,7 +375,37 @@ func (m *Manager) run(ctx context.Context, releaseTag string) {
 	}
 	body := newDownloadProgressReader(resp.Body, totalBytes, m.updateDownloadProgress)
 
-	gz, err := gzip.NewReader(body)
+	// Stage the download to disk while computing SHA256. We must verify the
+	// image BEFORE handing any bytes to the gokrazy updater so a corrupted
+	// download never reaches the inactive partition.
+	staged, err := stageReader(otaStagingDir(), asset.Name, body)
+	if err != nil {
+		m.fail(fmt.Errorf("stage OTA image: %w", err))
+		return
+	}
+	defer func() {
+		_ = staged.Close()
+	}()
+
+	if expectedHash != "" {
+		source := "github-sidecar"
+		if sidecarURL != "" {
+			source = sidecarURL
+		}
+		if err := staged.VerifyExpected(expectedHash, source); err != nil {
+			m.fail(err)
+			return
+		}
+	}
+
+	imageFile, err := staged.Open()
+	if err != nil {
+		m.fail(fmt.Errorf("open staged OTA image: %w", err))
+		return
+	}
+	defer imageFile.Close()
+
+	gz, err := gzip.NewReader(imageFile)
 	if err != nil {
 		m.fail(fmt.Errorf("open gzip OTA asset: %w", err))
 		return
@@ -375,11 +414,11 @@ func (m *Manager) run(ctx context.Context, releaseTag string) {
 
 	m.updateInstallProgress(InstallProgress{
 		Phase:           "flashing",
-		Message:         "Downloading and flashing OTA image",
-		ProgressPercent: 10,
+		Message:         "Flashing verified OTA image",
+		ProgressPercent: 85,
 	})
 	if err := m.installer().InstallRoot(ctx, gz, m.updateInstallProgress); err != nil {
-		m.fail(err)
+		m.fail(fmt.Errorf("apply OTA image: %w", err))
 		return
 	}
 
@@ -391,6 +430,43 @@ func (m *Manager) run(ctx context.Context, releaseTag string) {
 	status.ProgressPercent = 100
 	m.set(status)
 	m.recordInstallHistory(m.historyFromStatus(status))
+}
+
+// resolveExpectedSHA256 looks for a SHA256 sidecar accompanying the release
+// asset and returns the parsed hex digest. It first checks for an asset named
+// "<asset>.sha256" attached to the same release, falling back to deriving the
+// sidecar URL from the asset's BrowserDownloadURL when releases.Assets has
+// already been filtered down. Returns an empty digest (with no error) when no
+// sidecar is present, unless OTA_REQUIRE_SHA256 is set.
+func (m *Manager) resolveExpectedSHA256(ctx context.Context, release *Release, asset *Asset) (string, string, error) {
+	sidecarName := asset.Name + SHA256SidecarSuffix
+	sidecar := findAsset(release.Assets, sidecarName)
+
+	var sidecarURL string
+	if sidecar != nil {
+		sidecarURL = sidecar.BrowserDownloadURL
+	} else if asset.BrowserDownloadURL != "" {
+		// Fallback: derive "<asset_url>.sha256" so operators can publish a
+		// sidecar without us having to re-list release assets. Only used if
+		// the sibling asset was not found in the release listing.
+		sidecarURL = asset.BrowserDownloadURL + SHA256SidecarSuffix
+	}
+
+	if sidecarURL == "" {
+		if envBool("OTA_REQUIRE_SHA256", false) {
+			return "", "", fmt.Errorf("no SHA256 sidecar available for asset %q and OTA_REQUIRE_SHA256 is set", asset.Name)
+		}
+		return "", "", nil
+	}
+
+	digest, err := downloadSHA256Sidecar(ctx, m.client(), sidecarURL)
+	if err != nil {
+		return "", sidecarURL, err
+	}
+	if digest == "" && envBool("OTA_REQUIRE_SHA256", false) {
+		return "", sidecarURL, fmt.Errorf("SHA256 sidecar at %s is missing and OTA_REQUIRE_SHA256 is set", sidecarURL)
+	}
+	return digest, sidecarURL, nil
 }
 
 func (m *Manager) AvailableReleases(ctx context.Context) ([]Release, error) {
@@ -409,10 +485,20 @@ func (m *Manager) AvailableReleases(ctx context.Context) ([]Release, error) {
 		if release.Draft {
 			continue
 		}
-		if asset := findAsset(release.Assets, m.assetName()); asset != nil {
-			release.Assets = []Asset{*asset}
-			filtered = append(filtered, release)
+		asset := findAsset(release.Assets, m.assetName())
+		if asset == nil {
+			continue
 		}
+		kept := []Asset{*asset}
+		// Retain the optional SHA256 sidecar so the installer can verify
+		// the downloaded image before applying it. The main asset must
+		// remain at index 0 — existing callers (e.g. the WebUI status
+		// handler) read release.Assets[0] as the image.
+		if sidecar := findAsset(release.Assets, m.assetName()+SHA256SidecarSuffix); sidecar != nil {
+			kept = append(kept, *sidecar)
+		}
+		release.Assets = kept
+		filtered = append(filtered, release)
 	}
 
 	if len(filtered) == 0 {
@@ -510,6 +596,12 @@ func (m *Manager) fail(err error) {
 	status.Phase = "failed"
 	status.Error = err.Error()
 	status.Message = "OTA installation failed"
+	// Surface verification failures distinctly so the UI (and operators)
+	// can tell a corrupted download apart from an install-time error.
+	if IsHashMismatch(err) {
+		status.Phase = "verification_failed"
+		status.Message = "OTA image rejected: SHA256 mismatch"
+	}
 	status.FinishedAt = time.Now()
 	m.set(status)
 	m.recordInstallHistory(m.historyFromStatus(status))
