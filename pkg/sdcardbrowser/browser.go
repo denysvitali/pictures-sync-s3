@@ -111,7 +111,8 @@ func ReadPreview(mountPath, requestedPath string) (*Preview, error) {
 // ReadThumbnail returns a thumbnail for an SD card JPEG. It prefers the
 // thumbnail embedded in the EXIF metadata (IFD1) to avoid decoding the
 // full-resolution image, falling back to decoding and resizing only when no
-// embedded thumbnail is present.
+// embedded thumbnail is present. The thumbnail is rotated to match the EXIF
+// Orientation tag so it displays the same way as the full image.
 func ReadThumbnail(mountPath, requestedPath string) (*Preview, error) {
 	if requestedPath == "" {
 		return nil, fmt.Errorf("path parameter required")
@@ -127,12 +128,17 @@ func ReadThumbnail(mountPath, requestedPath string) (*Preview, error) {
 		return nil, fmt.Errorf("only JPEG images supported")
 	}
 
-	if data, err := extractEXIFThumbnail(cleanFullPath); err == nil {
-		return &Preview{ContentType: "image/jpeg", Data: data}, nil
+	if data, orientation, err := extractEXIFThumbnail(cleanFullPath); err == nil {
+		oriented, err := applyJPEGOrientation(data, orientation)
+		if err == nil {
+			return &Preview{ContentType: "image/jpeg", Data: oriented}, nil
+		}
+		// If the rotation pass failed (corrupt embedded thumbnail) fall through
+		// to the full decode path below.
 	}
 
 	// #nosec G304 -- path is resolved and constrained to the SD card mount path above.
-	img, err := imaging.Open(cleanFullPath)
+	img, err := imaging.Open(cleanFullPath, imaging.AutoOrientation(true))
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode image: %w", err)
 	}
@@ -147,38 +153,109 @@ func ReadThumbnail(mountPath, requestedPath string) (*Preview, error) {
 }
 
 // extractEXIFThumbnail returns the JPEG thumbnail stored in IFD1 of the EXIF
-// metadata. It only reads the JPEG's APP1 segment instead of slurping the
-// entire image, which keeps thumbnail latency in the milliseconds even on
-// multi-megabyte source files.
-func extractEXIFThumbnail(filePath string) ([]byte, error) {
+// metadata along with the IFD0 Orientation value (defaulting to 1 when absent).
+// It only reads the JPEG's APP1 segment instead of slurping the entire image,
+// which keeps thumbnail latency in the milliseconds even on multi-megabyte
+// source files.
+func extractEXIFThumbnail(filePath string) ([]byte, int, error) {
 	// #nosec G304 -- caller resolves and validates the path within the mount.
 	f, err := os.Open(filePath)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer f.Close()
 
 	rawExif, err := readJPEGExifSegment(f)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	im, err := exifcommon.NewIfdMappingWithStandard()
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	_, index, err := exif.Collect(im, exif.NewTagIndex(), rawExif)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
+
+	orientation := readEXIFOrientation(index.RootIfd)
 
 	ifd1 := index.RootIfd.NextIfd()
 	if ifd1 == nil {
-		return nil, exif.ErrNoThumbnail
+		return nil, orientation, exif.ErrNoThumbnail
 	}
 
-	return ifd1.Thumbnail()
+	data, err := ifd1.Thumbnail()
+	if err != nil {
+		return nil, orientation, err
+	}
+	return data, orientation, nil
+}
+
+// readEXIFOrientation returns the IFD0 Orientation tag value (1..8), or 1 when
+// the tag is missing or unreadable.
+func readEXIFOrientation(ifd *exif.Ifd) int {
+	const orientationTagID = 0x0112
+	tags, err := ifd.FindTagWithId(orientationTagID)
+	if err != nil || len(tags) == 0 {
+		return 1
+	}
+	value, err := tags[0].Value()
+	if err != nil {
+		return 1
+	}
+	switch v := value.(type) {
+	case []uint16:
+		if len(v) > 0 && v[0] >= 1 && v[0] <= 8 {
+			return int(v[0])
+		}
+	case uint16:
+		if v >= 1 && v <= 8 {
+			return int(v)
+		}
+	}
+	return 1
+}
+
+// applyJPEGOrientation decodes a JPEG, applies the transform corresponding to
+// the given EXIF Orientation (1..8), and re-encodes it. Orientation 1 is a
+// no-op and returns the input unchanged.
+func applyJPEGOrientation(data []byte, orientation int) ([]byte, error) {
+	if orientation <= 1 || orientation > 8 {
+		return data, nil
+	}
+	img, err := imaging.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	// EXIF Orientation values map to these display transforms:
+	//   1 normal, 2 flip-H, 3 rotate 180, 4 flip-V,
+	//   5 transpose, 6 rotate 90 CW, 7 transverse, 8 rotate 90 CCW.
+	// imaging.Rotate90 rotates CCW; Rotate270 rotates CW.
+	var transformed = img
+	switch orientation {
+	case 2:
+		transformed = imaging.FlipH(img)
+	case 3:
+		transformed = imaging.Rotate180(img)
+	case 4:
+		transformed = imaging.FlipV(img)
+	case 5:
+		transformed = imaging.Rotate270(imaging.FlipH(img))
+	case 6:
+		transformed = imaging.Rotate270(img)
+	case 7:
+		transformed = imaging.Rotate90(imaging.FlipH(img))
+	case 8:
+		transformed = imaging.Rotate90(img)
+	}
+	var buf bytes.Buffer
+	if err := imaging.Encode(&buf, transformed, imaging.JPEG, imaging.JPEGQuality(85)); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 // errNoEXIFSegment indicates the JPEG was readable but contained no APP1/EXIF.

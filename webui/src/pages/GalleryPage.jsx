@@ -25,15 +25,71 @@ import { LoadingSpinner } from '../components/LoadingSpinner.jsx'
 const PAGE_SIZE = 40
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'tif', 'heic', 'heif', 'avif'])
 const VIDEO_EXTENSIONS = new Set(['mp4', 'm4v', 'mov', 'avi', 'mkv', 'mts', 'm2ts', '3gp', 'webm'])
+const RAW_EXTENSIONS = new Set(['arw', 'cr2', 'cr3', 'nef', 'nrw', 'dng', 'raf', 'rw2', 'orf', 'pef', 'srw', 'raw'])
+
+function fileExtension(name) {
+  const idx = name.lastIndexOf('.')
+  return idx >= 0 ? name.slice(idx + 1).toLowerCase() : ''
+}
+
+function fileStem(name) {
+  const idx = name.lastIndexOf('.')
+  return idx >= 0 ? name.slice(0, idx) : name
+}
 
 function isImageFile(name) {
-  const ext = name.split('.').pop()?.toLowerCase() || ''
-  return IMAGE_EXTENSIONS.has(ext)
+  return IMAGE_EXTENSIONS.has(fileExtension(name))
 }
 
 function isVideoFile(name) {
-  const ext = name.split('.').pop()?.toLowerCase() || ''
-  return VIDEO_EXTENSIONS.has(ext)
+  return VIDEO_EXTENSIONS.has(fileExtension(name))
+}
+
+function isRawFile(name) {
+  return RAW_EXTENSIONS.has(fileExtension(name))
+}
+
+// groupFileVariants merges sibling entries that share a basename (e.g.
+// DSC0001.JPG + DSC0001.ARW) into a single group entry. The group keeps the
+// image-typed variant as its preview/thumbnail source so we can still show a
+// fast embedded-EXIF thumbnail for the JPG; RAW-only stems are returned as-is.
+function groupFileVariants(files) {
+  const groups = new Map()
+  const out = []
+  for (const file of files) {
+    if (file.is_dir) {
+      out.push(file)
+      continue
+    }
+    const ext = fileExtension(file.name)
+    const isImg = IMAGE_EXTENSIONS.has(ext) || file.is_image
+    const isRaw = RAW_EXTENSIONS.has(ext) || file.is_raw
+    if (!isImg && !isRaw) {
+      out.push(file)
+      continue
+    }
+    const stem = fileStem(file.name).toUpperCase()
+    if (!groups.has(stem)) {
+      const placeholder = { __placeholder: true, index: out.length, stem }
+      groups.set(stem, { variants: [], placeholderIndex: out.push(placeholder) - 1 })
+    }
+    groups.get(stem).variants.push(file)
+  }
+  for (const { variants, placeholderIndex } of groups.values()) {
+    if (variants.length === 1) {
+      out[placeholderIndex] = variants[0]
+      continue
+    }
+    const primary = variants.find((v) => IMAGE_EXTENSIONS.has(fileExtension(v.name)) || v.is_image) || variants[0]
+    out[placeholderIndex] = {
+      ...primary,
+      name: primary.name,
+      is_group: true,
+      variants,
+      size: variants.reduce((sum, v) => sum + (v.size || 0), 0),
+    }
+  }
+  return out
 }
 
 function formatFileSize(bytes) {
@@ -80,6 +136,7 @@ export default function GalleryPage() {
   const [loading, setLoading] = useState(true)
   const [imagePreview, setImagePreview] = useState(null)
   const [videoPreview, setVideoPreview] = useState(null)
+  const [variantPicker, setVariantPicker] = useState(null)
   const [showThumbnails, setShowThumbnails] = useState(false)
   const [loadError, setLoadError] = useState(null)
   const requestIdRef = useRef(0)
@@ -130,10 +187,11 @@ export default function GalleryPage() {
           if (!a.is_dir && b.is_dir) return 1
           return a.name.localeCompare(b.name)
         })
-        setAllSDCardFiles(fileArr)
+        const grouped = groupFileVariants(fileArr)
+        setAllSDCardFiles(grouped)
         const start = (page - 1) * PAGE_SIZE
-        setFiles(fileArr.slice(start, start + PAGE_SIZE))
-        setTotal(fileArr.length)
+        setFiles(grouped.slice(start, start + PAGE_SIZE))
+        setTotal(grouped.length)
       } else {
         const data = await getFilesPaginated(deviceUrl, {
           path: currentPath,
@@ -148,7 +206,7 @@ export default function GalleryPage() {
           if (!a.is_dir && b.is_dir) return 1
           return a.name.localeCompare(b.name)
         })
-        setFiles(fileArr)
+        setFiles(groupFileVariants(fileArr))
         setTotal(data?.total ?? fileArr.length)
       }
     } catch (err) {
@@ -201,6 +259,10 @@ export default function GalleryPage() {
   const handleImageClick = useCallback(
     async (file) => {
       if (!deviceUrl) return
+      if (file.is_group && Array.isArray(file.variants) && file.variants.length > 1) {
+        setVariantPicker(file)
+        return
+      }
       try {
         const url = source === 'sdcard'
           ? getSDCardPreviewUrl(deviceUrl, file.path)
@@ -231,6 +293,10 @@ export default function GalleryPage() {
   const handleFileDownload = useCallback(
     async (file) => {
       if (!deviceUrl) return
+      if (file.is_group && Array.isArray(file.variants) && file.variants.length > 1) {
+        setVariantPicker(file)
+        return
+      }
       try {
         const url = source === 'sdcard'
           ? getSDCardFileUrl(deviceUrl, file.path, { download: true })
@@ -353,6 +419,36 @@ export default function GalleryPage() {
             onClick={(e) => e.stopPropagation()}
           />
         </div>
+      )}
+
+      {/* Variant picker overlay */}
+      {variantPicker && (
+        <VariantPicker
+          group={variantPicker}
+          onClose={() => setVariantPicker(null)}
+          onPickImage={async (variant) => {
+            setVariantPicker(null)
+            try {
+              const url = source === 'sdcard'
+                ? getSDCardPreviewUrl(deviceUrl, variant.path)
+                : await getCloudFileUrl(variant)
+              window.open(url, '_blank', 'noopener,noreferrer')
+            } catch (err) {
+              toast.error(`Could not open file: ${describeError(err)}`)
+            }
+          }}
+          onPickDownload={async (variant) => {
+            setVariantPicker(null)
+            try {
+              const url = source === 'sdcard'
+                ? getSDCardFileUrl(deviceUrl, variant.path, { download: true })
+                : await getCloudFileUrl(variant)
+              window.open(url, '_blank', 'noopener,noreferrer')
+            } catch (err) {
+              toast.error(`Could not download file: ${describeError(err)}`)
+            }
+          }}
+        />
       )}
 
       {/* Video preview overlay */}
@@ -535,6 +631,13 @@ function FileCard({ file, deviceUrl, source, onFolderClick, onImageClick, onImag
 
   const thumbUrl = getThumbnailUrl(deviceUrl, file.path)
 
+  const variantLabels = useMemo(() => {
+    if (!file.is_group || !Array.isArray(file.variants)) return null
+    const labels = file.variants.map((v) => fileExtension(v.name).toUpperCase()).filter(Boolean)
+    return Array.from(new Set(labels))
+  }, [file])
+  const displayName = file.is_group ? fileStem(file.name) : file.name
+
   const handleClick = () => {
     if (file.is_dir) {
       onFolderClick(file.path)
@@ -596,9 +699,14 @@ function FileCard({ file, deviceUrl, source, onFolderClick, onImageClick, onImag
           className="text-xs sm:text-sm font-medium text-surface-100 truncate"
           title={file.name}
         >
-          {file.name}
+          {displayName}
         </p>
         <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-surface-400">
+          {variantLabels && variantLabels.length > 0 && (
+            <span className="rounded bg-brand-400/15 px-1.5 py-0.5 font-semibold text-brand-300">
+              {variantLabels.join(' · ')}
+            </span>
+          )}
           {!file.is_dir && file.size != null && (
             <span>{formatFileSize(file.size)}</span>
           )}
@@ -652,5 +760,62 @@ function FileCard({ file, deviceUrl, source, onFolderClick, onImageClick, onImag
         </button>
       )}
     </Card>
+  )
+}
+
+function VariantPicker({ group, onClose, onPickImage, onPickDownload }) {
+  const variants = Array.isArray(group?.variants) ? group.variants : []
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-sm rounded-xl bg-surface-900 border border-surface-700 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-surface-700 px-4 py-3">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-surface-100 truncate">{fileStem(group.name)}</p>
+            <p className="text-xs text-surface-400">Choose a format</p>
+          </div>
+          <button
+            className="text-surface-300 hover:text-surface-50"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            <Icon name="x" className="w-5 h-5" />
+          </button>
+        </div>
+        <ul className="divide-y divide-surface-800">
+          {variants.map((variant) => {
+            const ext = fileExtension(variant.name).toUpperCase()
+            const previewable = isImageFile(variant.name) || variant.is_image
+            return (
+              <li key={variant.path} className="flex items-center gap-3 px-4 py-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-surface-100">{ext || 'FILE'}</p>
+                  <p className="text-xs text-surface-400 truncate">
+                    {variant.name}
+                    {variant.size != null && ` · ${formatFileSize(variant.size)}`}
+                  </p>
+                </div>
+                {previewable ? (
+                  <Button size="sm" onClick={() => onPickImage(variant)}>
+                    <Icon name="magnifying" className="w-4 h-4" />
+                    Open
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="secondary" onClick={() => onPickDownload(variant)}>
+                    <Icon name="arrow-down-tray" className="w-4 h-4" />
+                    Download
+                  </Button>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      </div>
+    </div>
   )
 }
