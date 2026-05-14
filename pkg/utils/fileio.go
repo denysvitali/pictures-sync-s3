@@ -5,7 +5,11 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
+	"sync/atomic"
 )
+
+var atomicWriteSeq uint64
 
 // AtomicWrite writes data to a file atomically by writing to a temp file and renaming.
 // This prevents partial writes if the process is interrupted.
@@ -14,10 +18,12 @@ import (
 // before the rename and the parent directory is fsynced afterward so the
 // rename itself is durable on disk.
 func AtomicWrite(filePath string, data []byte, perm os.FileMode) error {
-	tmpFile := filePath + ".tmp"
+	// Per-call unique tmp name so concurrent writers don't clobber each other's
+	// in-flight temp file. The boot recovery in pkg/state still scans for the
+	// canonical "<file>.tmp" sibling left by an interrupted older writer.
+	seq := atomic.AddUint64(&atomicWriteSeq, 1)
+	tmpFile := filePath + ".tmp." + strconv.Itoa(os.Getpid()) + "." + strconv.FormatUint(seq, 10)
 
-	// Write data to temp file and fsync it before the rename so the bytes are
-	// on disk by the time the rename is durable.
 	if err := writeAndSync(tmpFile, data, perm); err != nil {
 		os.Remove(tmpFile)
 		return err
