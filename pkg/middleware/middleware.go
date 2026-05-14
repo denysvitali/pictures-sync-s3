@@ -3,6 +3,7 @@ package middleware
 import (
 	"encoding/json"
 	"log"
+	"net"
 	"net/http"
 	"runtime/debug"
 )
@@ -140,29 +141,57 @@ func RequireQueryParam(param string) func(HandlerFunc) HandlerFunc {
 	}
 }
 
-// GetClientIP extracts the real client IP from request headers
+// GetClientIP extracts the real client IP from request headers. X-Forwarded-For
+// and X-Real-IP are only honored when RemoteAddr is a loopback or RFC1918
+// private address.
 func GetClientIP(r *http.Request) string {
-	// Check X-Forwarded-For header (proxy/load balancer)
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// Take the first IP in the comma-separated list
-		for i := 0; i < len(xff); i++ {
-			if xff[i] == ',' {
-				return xff[:i]
+	if isTrustedProxySource(r.RemoteAddr) {
+		// Check X-Forwarded-For header (proxy/load balancer)
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			// Take the first IP in the comma-separated list
+			for i := 0; i < len(xff); i++ {
+				if xff[i] == ',' {
+					return xff[:i]
+				}
 			}
+			return xff
 		}
-		return xff
+
+		// Check X-Real-IP header
+		if xri := r.Header.Get("X-Real-IP"); xri != "" {
+			return xri
+		}
 	}
 
-	// Check X-Real-IP header
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return xri
-	}
-
-	// Fall back to RemoteAddr
+	// Fall back to RemoteAddr (strip port). Preserve bracketed IPv6 form
+	// for backwards compatibility with existing callers/tests.
 	for i := len(r.RemoteAddr) - 1; i >= 0; i-- {
 		if r.RemoteAddr[i] == ':' {
 			return r.RemoteAddr[:i]
 		}
 	}
 	return r.RemoteAddr
+}
+
+// isTrustedProxySource reports whether the given RemoteAddr is a loopback,
+// RFC1918 private, or link-local address. Only such sources are honored for
+// X-Forwarded-For / X-Real-IP headers.
+func isTrustedProxySource(remoteAddr string) bool {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		// No port (or malformed) — try the raw value as an IP.
+		host = remoteAddr
+	}
+	// Strip IPv6 brackets if present (e.g. "[::1]").
+	if len(host) >= 2 && host[0] == '[' && host[len(host)-1] == ']' {
+		host = host[1 : len(host)-1]
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() {
+		return true
+	}
+	return false
 }
