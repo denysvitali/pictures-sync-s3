@@ -3,49 +3,10 @@ package middleware
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 )
-
-func TestMethodOnly(t *testing.T) {
-	tests := []struct {
-		name           string
-		allowedMethods []string
-		requestMethod  string
-		expectAllow    bool
-	}{
-		{"GET allowed", []string{http.MethodGet}, http.MethodGet, true},
-		{"POST not allowed", []string{http.MethodGet}, http.MethodPost, false},
-		{"Multiple methods allowed", []string{http.MethodGet, http.MethodPost}, http.MethodGet, true},
-		{"PUT not in allowed list", []string{http.MethodGet, http.MethodPost}, http.MethodPut, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			handler := MethodOnly(tt.allowedMethods...)(func(w http.ResponseWriter, r *http.Request) error {
-				w.WriteHeader(http.StatusOK)
-				return nil
-			})
-
-			req := httptest.NewRequest(tt.requestMethod, "/test", nil)
-			w := httptest.NewRecorder()
-
-			_ = handler(w, req)
-
-			if tt.expectAllow {
-				if w.Code != http.StatusOK {
-					t.Errorf("Expected status 200 for allowed method, got %d", w.Code)
-				}
-			} else {
-				if w.Code != http.StatusMethodNotAllowed {
-					t.Errorf("Expected status 405 for disallowed method, got %d", w.Code)
-				}
-			}
-		})
-	}
-}
 
 func TestRecovery(t *testing.T) {
 	handler := Recovery(func(w http.ResponseWriter, r *http.Request) error {
@@ -118,134 +79,6 @@ func TestGetClientIP(t *testing.T) {
 	}
 }
 
-func TestChain(t *testing.T) {
-	// Test that middlewares are applied in the correct order
-	var executionOrder []string
-
-	middleware1 := func(next HandlerFunc) HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) error {
-			executionOrder = append(executionOrder, "middleware1_before")
-			err := next(w, r)
-			executionOrder = append(executionOrder, "middleware1_after")
-			return err
-		}
-	}
-
-	middleware2 := func(next HandlerFunc) HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) error {
-			executionOrder = append(executionOrder, "middleware2_before")
-			err := next(w, r)
-			executionOrder = append(executionOrder, "middleware2_after")
-			return err
-		}
-	}
-
-	handler := func(w http.ResponseWriter, r *http.Request) error {
-		executionOrder = append(executionOrder, "handler")
-		return nil
-	}
-
-	chained := Chain(middleware1, middleware2)(handler)
-
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	w := httptest.NewRecorder()
-
-	_ = chained(w, req)
-
-	expected := []string{
-		"middleware1_before",
-		"middleware2_before",
-		"handler",
-		"middleware2_after",
-		"middleware1_after",
-	}
-
-	if len(executionOrder) != len(expected) {
-		t.Fatalf("Expected %d execution steps, got %d", len(expected), len(executionOrder))
-	}
-
-	for i, step := range expected {
-		if executionOrder[i] != step {
-			t.Errorf("Step %d: expected %s, got %s", i, step, executionOrder[i])
-		}
-	}
-}
-
-func TestAdapt(t *testing.T) {
-	tests := []struct {
-		name           string
-		handler        HandlerFunc
-		expectedStatus int
-	}{
-		{
-			name: "successful handler",
-			handler: func(w http.ResponseWriter, r *http.Request) error {
-				w.WriteHeader(http.StatusOK)
-				return nil
-			},
-			expectedStatus: http.StatusOK,
-		},
-		{
-			name: "handler with error",
-			handler: func(w http.ResponseWriter, r *http.Request) error {
-				return errors.New("test error")
-			},
-			expectedStatus: http.StatusInternalServerError,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			adapted := Adapt(tt.handler)
-			req := httptest.NewRequest(http.MethodGet, "/test", nil)
-			w := httptest.NewRecorder()
-
-			adapted(w, req)
-
-			if w.Code != tt.expectedStatus {
-				t.Errorf("Expected status %d, got %d", tt.expectedStatus, w.Code)
-			}
-		})
-	}
-}
-
-func TestRequireQueryParam(t *testing.T) {
-	tests := []struct {
-		name          string
-		param         string
-		queryString   string
-		expectSuccess bool
-	}{
-		{"param present", "id", "?id=123", true},
-		{"param missing", "id", "", false},
-		{"different param", "id", "?name=test", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			handler := RequireQueryParam(tt.param)(func(w http.ResponseWriter, r *http.Request) error {
-				w.WriteHeader(http.StatusOK)
-				return nil
-			})
-
-			req := httptest.NewRequest(http.MethodGet, "/test"+tt.queryString, nil)
-			w := httptest.NewRecorder()
-
-			_ = handler(w, req)
-
-			if tt.expectSuccess {
-				if w.Code != http.StatusOK {
-					t.Errorf("Expected status 200 when param present, got %d", w.Code)
-				}
-			} else {
-				if w.Code != http.StatusBadRequest {
-					t.Errorf("Expected status 400 when param missing, got %d", w.Code)
-				}
-			}
-		})
-	}
-}
-
 // TestWriteJSON tests JSON writing helper
 func TestWriteJSON(t *testing.T) {
 	w := httptest.NewRecorder()
@@ -284,31 +117,6 @@ func TestWriteError(t *testing.T) {
 
 	if response.Error != "test error" {
 		t.Errorf("Expected error 'test error', got '%s'", response.Error)
-	}
-}
-
-// TestWriteSuccess tests success response helper
-func TestWriteSuccess(t *testing.T) {
-	w := httptest.NewRecorder()
-
-	WriteSuccess(w, "operation completed", map[string]interface{}{
-		"id": "123",
-	})
-
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", w.Code)
-	}
-
-	var response SuccessResponse
-	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
-		t.Fatalf("Failed to decode success response: %v", err)
-	}
-
-	if response.Status != "ok" {
-		t.Errorf("Expected status 'ok', got '%s'", response.Status)
-	}
-	if response.Message != "operation completed" {
-		t.Errorf("Expected message 'operation completed', got '%s'", response.Message)
 	}
 }
 
@@ -445,72 +253,6 @@ func TestRecovery_NoError(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Errorf("Expected status 200, got %d", w.Code)
-	}
-}
-
-// TestChain_EmptyChain tests chaining with no middlewares
-func TestChain_EmptyChain(t *testing.T) {
-	handler := func(w http.ResponseWriter, r *http.Request) error {
-		w.WriteHeader(http.StatusOK)
-		return nil
-	}
-
-	chained := Chain()(handler)
-
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	w := httptest.NewRecorder()
-
-	err := chained(w, req)
-	if err != nil {
-		t.Errorf("Expected no error, got %v", err)
-	}
-
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", w.Code)
-	}
-}
-
-// BenchmarkMethodOnly measures method validation performance
-func BenchmarkMethodOnly(b *testing.B) {
-	handler := MethodOnly(http.MethodGet)(func(w http.ResponseWriter, r *http.Request) error {
-		return nil
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		w := httptest.NewRecorder()
-		_ = handler(w, req)
-	}
-}
-
-// BenchmarkChain measures chaining performance
-func BenchmarkChain(b *testing.B) {
-	middleware1 := func(next HandlerFunc) HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) error {
-			return next(w, r)
-		}
-	}
-
-	middleware2 := func(next HandlerFunc) HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) error {
-			return next(w, r)
-		}
-	}
-
-	handler := func(w http.ResponseWriter, r *http.Request) error {
-		return nil
-	}
-
-	chained := Chain(middleware1, middleware2)(handler)
-
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		w := httptest.NewRecorder()
-		_ = chained(w, req)
 	}
 }
 

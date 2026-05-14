@@ -17,13 +17,6 @@ type ErrorResponse struct {
 	Details map[string]interface{} `json:"details,omitempty"`
 }
 
-// SuccessResponse represents a standard success response
-type SuccessResponse struct {
-	Status  string                 `json:"status"`
-	Message string                 `json:"message,omitempty"`
-	Data    map[string]interface{} `json:"data,omitempty"`
-}
-
 // WriteJSON writes a JSON response with proper headers
 func WriteJSON(w http.ResponseWriter, statusCode int, data interface{}) error {
 	w.Header().Set("Content-Type", "application/json")
@@ -41,17 +34,6 @@ func WriteError(w http.ResponseWriter, statusCode int, message string, details m
 	}
 }
 
-// WriteSuccess writes a standard success response
-func WriteSuccess(w http.ResponseWriter, message string, data map[string]interface{}) {
-	if err := WriteJSON(w, http.StatusOK, SuccessResponse{
-		Status:  "ok",
-		Message: message,
-		Data:    data,
-	}); err != nil {
-		log.Printf("Failed to write success response: %v", err)
-	}
-}
-
 // DecodeJSON decodes JSON request body with size limit validation
 func DecodeJSON(r *http.Request, v interface{}, maxBytes int64) error {
 	if maxBytes > 0 {
@@ -60,27 +42,6 @@ func DecodeJSON(r *http.Request, v interface{}, maxBytes int64) error {
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields() // Strict parsing
 	return decoder.Decode(v)
-}
-
-// MethodOnly creates a middleware that only allows specific HTTP methods
-func MethodOnly(methods ...string) func(HandlerFunc) HandlerFunc {
-	allowedMethods := make(map[string]bool)
-	for _, method := range methods {
-		allowedMethods[method] = true
-	}
-
-	return func(next HandlerFunc) HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) error {
-			if !allowedMethods[r.Method] {
-				WriteError(w, http.StatusMethodNotAllowed, "Method not allowed", map[string]interface{}{
-					"allowed_methods": methods,
-					"received":        r.Method,
-				})
-				return nil // Already handled
-			}
-			return next(w, r)
-		}
-	}
 }
 
 // Recovery middleware recovers from panics and logs them
@@ -102,42 +63,6 @@ func RequestLogger(next HandlerFunc) HandlerFunc {
 		clientIP := GetClientIP(r)
 		log.Printf("[HTTP] %s %s from %s", r.Method, r.URL.Path, clientIP)
 		return next(w, r)
-	}
-}
-
-// Chain combines multiple middleware functions into one
-func Chain(middlewares ...func(HandlerFunc) HandlerFunc) func(HandlerFunc) HandlerFunc {
-	return func(final HandlerFunc) HandlerFunc {
-		// Apply middlewares in reverse order so they execute in the correct order
-		for i := len(middlewares) - 1; i >= 0; i-- {
-			final = middlewares[i](final)
-		}
-		return final
-	}
-}
-
-// Adapt converts our custom HandlerFunc to http.HandlerFunc
-func Adapt(h HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if err := h(w, r); err != nil {
-			log.Printf("Handler error for %s %s: %v", r.Method, r.URL.Path, err)
-			WriteError(w, http.StatusInternalServerError, err.Error(), nil)
-		}
-	}
-}
-
-// RequireQueryParam ensures a query parameter is present
-func RequireQueryParam(param string) func(HandlerFunc) HandlerFunc {
-	return func(next HandlerFunc) HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) error {
-			if r.URL.Query().Get(param) == "" {
-				WriteError(w, http.StatusBadRequest,
-					param+" parameter required",
-					map[string]interface{}{"parameter": param})
-				return nil
-			}
-			return next(w, r)
-		}
 	}
 }
 
