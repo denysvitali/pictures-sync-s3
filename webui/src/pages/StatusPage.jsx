@@ -24,6 +24,7 @@ const SYNC_STATUS_CONFIG = {
   idle: { variant: 'neutral', label: 'Idle', pulse: false },
   detected: { variant: 'info', label: 'Card Detected', pulse: false },
   syncing: { variant: 'success', label: 'Syncing', pulse: true },
+  cancelling: { variant: 'warning', label: 'Cancelling…', pulse: true },
   success: { variant: 'success', label: 'Completed', pulse: false },
   error: { variant: 'danger', label: 'Error', pulse: false },
 }
@@ -330,7 +331,7 @@ function DeviceInfoCard({
   const deviceName = selectedDevice?.volume_label || selectedDevice?.device_name || (hasCard ? 'SD Card' : null)
   const deviceSize = selectedDevice?.size_human || (selectedDevice?.size ? formatBytes(selectedDevice.size) : null)
   const devicePath = selectedDevice?.device_path || status.sdcard_device_path || null
-  const canFormat = hasCard && devicePath && status.status !== 'syncing'
+  const canFormat = hasCard && devicePath && status.status !== 'syncing' && status.status !== 'cancelling'
   const partitions = selectedDevice?.partitions || []
 
   return (
@@ -462,7 +463,7 @@ function DeviceInfoCard({
               size="md"
               onClick={() => onRedetectCard?.()}
               loading={isRedetecting}
-              disabled={status.status === 'syncing'}
+              disabled={status.status === 'syncing' || status.status === 'cancelling'}
               className="mt-4 w-full"
             >
               <Icon name="arrow-path" className="w-4 h-4" />
@@ -478,22 +479,24 @@ function DeviceInfoCard({
 function SyncControls({ status, onSync, onCancel, loading }) {
   const syncState = status.status
   const isSyncing = syncState === 'syncing'
+  const isCancelling = syncState === 'cancelling'
   const canStart = syncState === 'idle' || syncState === 'detected' || syncState === 'success' || syncState === 'error'
   const hasCard = status.sdcard_mounted
 
   return (
     <div className="flex gap-3">
-      {isSyncing ? (
+      {isSyncing || isCancelling ? (
         <Button
           variant="danger"
           size="lg"
           onClick={onCancel}
-          loading={loading}
+          loading={loading || isCancelling}
+          disabled={isCancelling}
           className="flex-1"
           aria-label="Cancel running sync"
         >
           <Icon name="stop" className="w-5 h-5" aria-hidden="true" />
-          Cancel Sync
+          {isCancelling ? 'Cancelling…' : 'Cancel Sync'}
         </Button>
       ) : (
         <Button
@@ -803,9 +806,9 @@ export default function StatusPage() {
     }
   }, [deviceUrl])
 
-  // Auto-refresh while syncing with exponential backoff on errors
+  // Auto-refresh while syncing or cancelling, with exponential backoff on errors
   useEffect(() => {
-    if (!status || status.status !== 'syncing') return
+    if (!status || (status.status !== 'syncing' && status.status !== 'cancelling')) return
 
     const scheduleNext = () => {
       const errors = consecutiveErrorsRef.current

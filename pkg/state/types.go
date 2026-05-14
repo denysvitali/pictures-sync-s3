@@ -6,11 +6,12 @@ import "time"
 type SyncStatus string
 
 const (
-	StatusIdle     SyncStatus = "idle"
-	StatusDetected SyncStatus = "detected"
-	StatusSyncing  SyncStatus = "syncing"
-	StatusSuccess  SyncStatus = "success"
-	StatusError    SyncStatus = "error"
+	StatusIdle       SyncStatus = "idle"
+	StatusDetected   SyncStatus = "detected"
+	StatusSyncing    SyncStatus = "syncing"
+	StatusCancelling SyncStatus = "cancelling"
+	StatusSuccess    SyncStatus = "success"
+	StatusError      SyncStatus = "error"
 )
 
 // SyncRecord represents a completed sync operation

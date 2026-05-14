@@ -133,6 +133,8 @@ func (c *Controller) handleStatusChange(status state.SyncStatus) {
 		c.startPattern(c.actLED, PatternSlowBlink)
 	case state.StatusSyncing:
 		c.startPattern(c.actLED, PatternFastBlink)
+	case state.StatusCancelling:
+		c.startPattern(c.actLED, PatternFastBlink)
 	case state.StatusSuccess:
 		c.startSuccessSequence()
 	case state.StatusError:

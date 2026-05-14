@@ -409,8 +409,13 @@ func (s *Service) handleCancelSyncCommand(ctx context.Context) daemoncontrol.Res
 		return daemoncontrol.Error(daemoncontrol.CodeInternalError, err.Error())
 	}
 
-	s.stateMgr.FinishSync(false, fmt.Errorf("cancelled by user"))
-	s.stateMgr.SetStatus(state.StatusIdle)
+	// Surface the cancellation to the UI immediately, but leave CurrentSync
+	// intact. The sync goroutine in cardhandler.performSync owns the final
+	// state transition and will move us to Idle (with a "cancelled by user"
+	// history record) once rclone has actually unwound.
+	if err := s.stateMgr.SetStatus(state.StatusCancelling); err != nil {
+		log.Printf("Failed to set cancelling status: %v", err)
+	}
 
 	return daemoncontrol.OK("Sync cancelled")
 }

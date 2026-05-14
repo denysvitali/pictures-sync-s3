@@ -1,10 +1,13 @@
 package cardhandler
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,6 +16,20 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/settings"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 )
+
+// isCancellationError reports whether err originates from a user cancellation
+// of the running sync (context.Canceled, or the wrapped "sync cancelled"
+// errors produced by the retry helper in pkg/syncmanager).
+func isCancellationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "sync cancelled") || strings.Contains(msg, "cancelled by user")
+}
 
 const (
 	// preSyncDelay is the wait time before starting sync operations after card detection.
@@ -348,10 +365,17 @@ func (h *Handler) performSync(mountPath, cardID string, totalFiles int, totalByt
 	err = h.syncMgr.Sync(dcimPath, cardID, totalFiles, totalBytes)
 
 	if err != nil {
-		log.Printf("Sync failed: %v", err)
-		h.eventMgr.EmitSyncFailed(cardID, err)
-		h.stateMgr.FinishSync(false, err)
-		h.stateMgr.SetStatus(state.StatusError)
+		if isCancellationError(err) {
+			log.Printf("Sync cancelled by user")
+			h.eventMgr.EmitSyncFailed(cardID, fmt.Errorf("cancelled by user"))
+			h.stateMgr.FinishSync(false, fmt.Errorf("cancelled by user"))
+			h.stateMgr.SetStatus(state.StatusIdle)
+		} else {
+			log.Printf("Sync failed: %v", err)
+			h.eventMgr.EmitSyncFailed(cardID, err)
+			h.stateMgr.FinishSync(false, err)
+			h.stateMgr.SetStatus(state.StatusError)
+		}
 	} else {
 		duration := time.Since(startTime)
 		log.Println("Sync completed successfully!")
