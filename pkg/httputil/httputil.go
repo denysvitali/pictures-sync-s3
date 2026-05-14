@@ -59,10 +59,12 @@ func ErrorWithDetails(w http.ResponseWriter, statusCode int, message string, det
 	})
 }
 
-// InternalError writes a 500 Internal Server Error response
+// InternalError writes a 500 Internal Server Error response. The full error
+// is logged server-side; the response body contains only a generic message to
+// avoid leaking internal paths or backend details to clients.
 func InternalError(w http.ResponseWriter, err error) {
 	log.Printf("Internal error: %v", err)
-	Error(w, http.StatusInternalServerError, fmt.Sprintf("Internal server error: %v", err))
+	Error(w, http.StatusInternalServerError, "Internal Server Error")
 }
 
 // BadRequest writes a 400 Bad Request response
