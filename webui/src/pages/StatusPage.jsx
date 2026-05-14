@@ -18,6 +18,7 @@ import { StatusBadge } from '../components/StatusBadge.jsx'
 import { Button } from '../components/Button.jsx'
 import { Icon } from '../components/Icons.jsx'
 import { PageLoader } from '../components/LoadingSpinner.jsx'
+import { Modal } from '../components/Modal.jsx'
 
 const SYNC_STATUS_CONFIG = {
   idle: { variant: 'neutral', label: 'Idle', pulse: false },
@@ -196,7 +197,13 @@ function SystemStatusCard({ status }) {
       <div className="space-y-3">
         {/* Active sync progress */}
         {status.current_sync && (
-          <div className="bg-surface-900/50 rounded-lg p-3">
+          <div
+            className="bg-surface-900/50 rounded-lg p-3"
+            role="region"
+            aria-label="Sync progress"
+            aria-live="polite"
+            aria-atomic="true"
+          >
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs text-surface-400">
                 {getProgressLabel(status.current_sync)}
@@ -205,7 +212,14 @@ function SystemStatusCard({ status }) {
                 {getProgressPercent(status.current_sync)}%
               </span>
             </div>
-            <div className="w-full h-1.5 bg-surface-700 rounded-full overflow-hidden">
+            <div
+              className="w-full h-1.5 bg-surface-700 rounded-full overflow-hidden"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={getProgressPercent(status.current_sync)}
+              aria-label={getProgressLabel(status.current_sync)}
+            >
               <div
                 className="h-full bg-brand-500 rounded-full transition-all duration-500"
                 style={{ width: `${getProgressPercent(status.current_sync)}%` }}
@@ -476,8 +490,9 @@ function SyncControls({ status, onSync, onCancel, loading }) {
           onClick={onCancel}
           loading={loading}
           className="flex-1"
+          aria-label="Cancel running sync"
         >
-          <Icon name="stop" className="w-5 h-5" />
+          <Icon name="stop" className="w-5 h-5" aria-hidden="true" />
           Cancel Sync
         </Button>
       ) : (
@@ -488,8 +503,9 @@ function SyncControls({ status, onSync, onCancel, loading }) {
           loading={loading}
           disabled={!canStart || !hasCard}
           className="flex-1"
+          aria-label="Start sync"
         >
-          <Icon name="play" className="w-5 h-5" />
+          <Icon name="play" className="w-5 h-5" aria-hidden="true" />
           Start Sync
         </Button>
       )}
@@ -561,6 +577,96 @@ function SyncHistoryCard({ history }) {
   )
 }
 
+function FormatSDCardModal({ open, onClose, devicePath, onConfirm, loading }) {
+  const [confirmation, setConfirmation] = useState('')
+  const [label, setLabel] = useState('')
+  const inputRef = useRef(null)
+
+  useEffect(() => {
+    if (open) {
+      setConfirmation('')
+      setLabel('')
+    }
+  }, [open])
+
+  const canSubmit = confirmation === 'FORMAT' && !loading
+
+  function handleSubmit(e) {
+    e?.preventDefault?.()
+    if (!canSubmit) return
+    onConfirm(confirmation, label.trim())
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={loading ? () => {} : onClose}
+      title="Format SD Card"
+      initialFocusRef={inputRef}
+    >
+      <form onSubmit={handleSubmit} className="space-y-3">
+        <p className="text-sm text-surface-300">
+          Formatting <span className="font-mono text-surface-100">{devicePath}</span>{' '}
+          will erase all files on the SD card. This action cannot be undone.
+        </p>
+        <div className="space-y-1">
+          <label htmlFor="format-confirm" className="block text-xs font-medium text-surface-400">
+            Type <span className="font-mono text-danger">FORMAT</span> to continue
+          </label>
+          <input
+            id="format-confirm"
+            ref={inputRef}
+            type="text"
+            autoComplete="off"
+            value={confirmation}
+            onChange={(e) => setConfirmation(e.target.value)}
+            disabled={loading}
+            className="w-full bg-surface-950 border border-surface-700 rounded-lg px-3 py-2 text-sm text-surface-100 placeholder:text-surface-500 focus:outline-none focus:ring-2 focus:ring-danger/50 focus:border-danger/50"
+            placeholder="FORMAT"
+            aria-required="true"
+          />
+        </div>
+        <div className="space-y-1">
+          <label htmlFor="format-label" className="block text-xs font-medium text-surface-400">
+            Optional volume label
+          </label>
+          <input
+            id="format-label"
+            type="text"
+            autoComplete="off"
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            disabled={loading}
+            className="w-full bg-surface-950 border border-surface-700 rounded-lg px-3 py-2 text-sm text-surface-100 placeholder:text-surface-500 focus:outline-none focus:ring-2 focus:ring-brand-400/50 focus:border-brand-400/50"
+            placeholder="Leave blank for no label"
+          />
+        </div>
+        <div className="flex justify-end gap-2 pt-2">
+          <Button
+            type="button"
+            variant="secondary"
+            size="md"
+            onClick={onClose}
+            disabled={loading}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            variant="danger"
+            size="md"
+            disabled={!canSubmit}
+            loading={loading}
+          >
+            <Icon name="trash" className="w-4 h-4" aria-hidden="true" />
+            Format
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
 export default function StatusPage() {
   const { deviceUrl } = useDevice()
   const toast = useToast()
@@ -574,6 +680,7 @@ export default function StatusPage() {
   const [formatLoading, setFormatLoading] = useState(false)
   const [redetectLoading, setRedetectLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [formatModal, setFormatModal] = useState({ open: false, devicePath: '' })
   const consecutiveErrorsRef = useRef(0)
   const timerRef = useRef(null)
   const wsReconnectRef = useRef(null)
@@ -755,34 +862,30 @@ export default function StatusPage() {
     }
   }, [deviceUrl, toast, fetchData])
 
-  const handleFormatDevice = useCallback(async (devicePath) => {
+  const handleFormatDevice = useCallback((devicePath) => {
     if (!deviceUrl || !devicePath) return
+    setFormatModal({ open: true, devicePath })
+  }, [deviceUrl])
 
-    const confirmation = window.prompt(
-      `Formatting ${devicePath} will erase all files on the SD card. Type FORMAT to continue.`
-    )
-    if (confirmation !== 'FORMAT') {
-      toast.info('Format cancelled')
-      return
-    }
-    const rawLabel = window.prompt('Optional volume label (leave blank for no label):', '')
-    if (rawLabel === null) {
-      toast.info('Format cancelled')
-      return
-    }
-    const label = rawLabel.trim()
-
+  const handleFormatConfirm = useCallback(async (confirmation, label) => {
+    const devicePath = formatModal.devicePath
+    if (!deviceUrl || !devicePath) return
     setFormatLoading(true)
     try {
       await formatSDCard(deviceUrl, devicePath, confirmation, label)
       toast.success('SD card formatted')
+      setFormatModal({ open: false, devicePath: '' })
       await fetchData()
     } catch (err) {
       toast.error(`Failed to format SD card: ${describeError(err)}`)
     } finally {
       setFormatLoading(false)
     }
-  }, [deviceUrl, toast, fetchData])
+  }, [deviceUrl, formatModal.devicePath, toast, fetchData])
+
+  const handleFormatCancel = useCallback(() => {
+    setFormatModal({ open: false, devicePath: '' })
+  }, [])
 
   const handleRedetectCard = useCallback(async () => {
     if (!deviceUrl) return
@@ -829,8 +932,9 @@ export default function StatusPage() {
           size="sm"
           onClick={() => fetchData()}
           loading={loading}
+          aria-label="Refresh status"
         >
-          <Icon name="arrow-path" className="w-4 h-4" />
+          <Icon name="arrow-path" className="w-4 h-4" aria-hidden="true" />
           Refresh
         </Button>
       </div>
@@ -875,6 +979,14 @@ export default function StatusPage() {
 
       {/* Sync history */}
       <SyncHistoryCard history={history} />
+
+      <FormatSDCardModal
+        open={formatModal.open}
+        devicePath={formatModal.devicePath}
+        onClose={handleFormatCancel}
+        onConfirm={handleFormatConfirm}
+        loading={formatLoading}
+      />
     </div>
   )
 }

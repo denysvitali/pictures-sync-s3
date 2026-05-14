@@ -30,10 +30,14 @@ export function Button({
         ${variants[variant]} ${sizes[size]} ${className}
       `}
       disabled={disabled || loading}
+      aria-busy={loading || undefined}
       {...props}
     >
       {loading && (
-        <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+        <span
+          className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"
+          aria-hidden="true"
+        />
       )}
       {children}
     </button>
