@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/denysvitali/pictures-sync-s3/pkg/utils"
 )
 
 const (
@@ -122,27 +124,10 @@ func writeCardID(idPath, cardID string) error {
 		return err
 	}
 
-	dir := filepath.Dir(idPath)
-	tmp, err := os.CreateTemp(dir, CardIDFile+".tmp-*")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-
-	if _, err := tmp.WriteString(cardID + "\n"); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Chmod(0644); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-
-	return os.Rename(tmpPath, idPath)
+	// utils.AtomicWrite fsyncs the temp file and the parent directory before
+	// returning, so a power loss between the rename and the next umount can
+	// no longer leave a zero-length card-ID file.
+	return utils.AtomicWrite(idPath, []byte(cardID+"\n"), 0644)
 }
 
 func lockCardIDPath(idPath string) func() {
