@@ -158,19 +158,18 @@ func waitForConnection(ctx context.Context, cfg Config, connected func(Config) b
 }
 
 func hasUsableConnectivity(cfg Config) bool {
-	interfaces, err := net.Interfaces()
+	// The provisioning hotspot exists to recover Wi-Fi, so the readiness check
+	// is scoped to cfg.Interface (wlan0). Allowing any interface here lets a
+	// USB gadget / host-bridge link or stale Ethernet lease mask a dead Wi-Fi
+	// client and suppress the fallback hotspot.
+	intf, err := net.InterfaceByName(cfg.Interface)
 	if err != nil {
 		return false
 	}
-	for _, intf := range interfaces {
-		if intf.Flags&net.FlagUp == 0 || intf.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		if interfaceHasUsableIPv4(intf, cfg) {
-			return true
-		}
+	if intf.Flags&net.FlagUp == 0 || intf.Flags&net.FlagLoopback != 0 {
+		return false
 	}
-	return false
+	return interfaceHasUsableIPv4(*intf, cfg)
 }
 
 func interfaceHasUsableIPv4(intf net.Interface, cfg Config) bool {
