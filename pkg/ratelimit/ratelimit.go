@@ -2,12 +2,13 @@ package ratelimit
 
 import (
 	"log"
-	"net"
 	"net/http"
 	"sync"
 	"time"
 
 	"golang.org/x/time/rate"
+
+	"github.com/denysvitali/pictures-sync-s3/pkg/middleware"
 )
 
 // Limiter provides rate limiting functionality
@@ -237,87 +238,12 @@ func (l *Limiter) IsLockedOut(ip string) bool {
 	return false
 }
 
-// extractIP extracts the real IP address from the request
-// Handles X-Forwarded-For and X-Real-IP headers for reverse proxies
+// extractIP extracts the real IP address from the request. X-Forwarded-For
+// and X-Real-IP are honored only when RemoteAddr is a loopback / RFC1918
+// private / link-local address; otherwise a public client could spoof these
+// headers to bypass per-IP rate-limit state.
 func extractIP(r *http.Request) string {
-	// Check X-Forwarded-For header
-	xff := r.Header.Get("X-Forwarded-For")
-	if xff != "" {
-		// Take the first IP in the list
-		if ip := net.ParseIP(xff); ip != nil {
-			return ip.String()
-		}
-		// If it's a list, take the first one
-		if ips := splitAndTrim(xff, ","); len(ips) > 0 {
-			if ip := net.ParseIP(ips[0]); ip != nil {
-				return ip.String()
-			}
-		}
-	}
-
-	// Check X-Real-IP header
-	xri := r.Header.Get("X-Real-IP")
-	if xri != "" {
-		if ip := net.ParseIP(xri); ip != nil {
-			return ip.String()
-		}
-	}
-
-	// Fall back to RemoteAddr
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return ip
-}
-
-// splitAndTrim splits a string and trims whitespace from each part
-func splitAndTrim(s, sep string) []string {
-	parts := []string{}
-	for _, part := range splitString(s, sep) {
-		trimmed := trimSpace(part)
-		if trimmed != "" {
-			parts = append(parts, trimmed)
-		}
-	}
-	return parts
-}
-
-func splitString(s, sep string) []string {
-	if s == "" {
-		return []string{}
-	}
-	result := []string{}
-	current := ""
-	for _, c := range s {
-		if string(c) == sep {
-			result = append(result, current)
-			current = ""
-		} else {
-			current += string(c)
-		}
-	}
-	if current != "" {
-		result = append(result, current)
-	}
-	return result
-}
-
-func trimSpace(s string) string {
-	start := 0
-	end := len(s)
-
-	// Trim leading whitespace
-	for start < end && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r') {
-		start++
-	}
-
-	// Trim trailing whitespace
-	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\n' || s[end-1] == '\r') {
-		end--
-	}
-
-	return s[start:end]
+	return middleware.GetClientIP(r)
 }
 
 // Middleware creates an HTTP middleware that enforces rate limiting

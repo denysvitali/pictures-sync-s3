@@ -3,11 +3,11 @@ package auth
 import (
 	"crypto/subtle"
 	"log"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
 
+	"github.com/denysvitali/pictures-sync-s3/pkg/middleware"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ratelimit"
 )
 
@@ -104,36 +104,12 @@ func SecurityHeadersMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// extractIP extracts the real IP address from the request
-// Handles X-Forwarded-For and X-Real-IP headers for reverse proxies
+// extractIP extracts the real IP address from the request. X-Forwarded-For
+// and X-Real-IP are honored only when RemoteAddr is a loopback / RFC1918
+// private / link-local address; otherwise a public client could spoof these
+// headers to bypass per-IP auth-lockout and rate-limit state.
 func extractIP(r *http.Request) string {
-	// Check X-Forwarded-For header
-	xff := r.Header.Get("X-Forwarded-For")
-	if xff != "" {
-		// Take the first IP in the list
-		parts := strings.Split(xff, ",")
-		if len(parts) > 0 {
-			ip := strings.TrimSpace(parts[0])
-			if net.ParseIP(ip) != nil {
-				return ip
-			}
-		}
-	}
-
-	// Check X-Real-IP header
-	xri := r.Header.Get("X-Real-IP")
-	if xri != "" {
-		if net.ParseIP(xri) != nil {
-			return xri
-		}
-	}
-
-	// Fall back to RemoteAddr
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return ip
+	return middleware.GetClientIP(r)
 }
 
 // ExpensiveOperationMiddleware rate limits expensive operations like thumbnails and file listings
