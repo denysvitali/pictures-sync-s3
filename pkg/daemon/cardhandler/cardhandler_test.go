@@ -148,8 +148,10 @@ func TestHandleInserted_BasicFlow(t *testing.T) {
 	// Handle the insertion event
 	handler.HandleInserted(event)
 
-	// Give goroutine time to process
-	time.Sleep(100 * time.Millisecond)
+	// Wait for processSyncOperation to settle. Without rclone configured the
+	// goroutine ends in StatusError; polling lets the test finish before the
+	// next one calls configurePaths and trips the race detector.
+	waitForStatusIn(stateMgr, []state.SyncStatus{state.StatusIdle, state.StatusError}, 2*time.Second)
 
 	// Verify state was updated
 	if !stateMgr.GetState().SDCardMounted {
@@ -186,21 +188,41 @@ func TestHandleInserted_NoDCIM(t *testing.T) {
 
 	handler.HandleInserted(event)
 
-	// Give goroutine time to process
-	time.Sleep(100 * time.Millisecond)
+	// processSyncOperation runs in a goroutine and emits an EmitError before
+	// SetStatus(Idle); both can take >100ms on a slow CI runner. Poll the
+	// state instead of using a fixed sleep so the test isn't racing the
+	// scheduler.
+	if !waitForStatus(stateMgr, state.StatusIdle, 2*time.Second) {
+		t.Errorf("Expected status idle, got %s", stateMgr.GetState().Status)
+	}
+}
 
-	// Sync should not be called when DCIM folder is missing.
+// waitForStatus polls the state manager until Status matches want or timeout
+// elapses. Returns true on match.
+func waitForStatus(mgr *state.Manager, want state.SyncStatus, timeout time.Duration) bool {
+	return waitForStatusIn(mgr, []state.SyncStatus{want}, timeout)
+}
 
-	// Status should return to idle
-	currentState := stateMgr.GetState()
-	if currentState.Status != state.StatusIdle {
-		t.Errorf("Expected status idle, got %s", currentState.Status)
+// waitForStatusIn polls until Status matches any value in wants.
+func waitForStatusIn(mgr *state.Manager, wants []state.SyncStatus, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		got := mgr.GetState().Status
+		for _, want := range wants {
+			if got == want {
+				return true
+			}
+		}
+		if !time.Now().Before(deadline) {
+			return false
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
 // TestHandleInserted_NoPhotos verifies handling of empty DCIM
 func TestHandleInserted_NoPhotos(t *testing.T) {
-	handler, _, _, tempDir := setupTestEnvironment(t)
+	handler, stateMgr, _, tempDir := setupTestEnvironment(t)
 
 	// Create DCIM but with no photos
 	mountPath := filepath.Join(tempDir, "sdcard")
@@ -218,10 +240,9 @@ func TestHandleInserted_NoPhotos(t *testing.T) {
 
 	handler.HandleInserted(event)
 
-	// Give goroutine time to process
-	time.Sleep(100 * time.Millisecond)
-
-	// Sync should not be called for empty DCIM.
+	// Wait for the goroutine to settle so leaked SetStatus writes don't race
+	// the next test's configurePaths under -race.
+	waitForStatusIn(stateMgr, []state.SyncStatus{state.StatusIdle, state.StatusError}, 2*time.Second)
 }
 
 // TestHandleInserted_RaceCondition tests that concurrent insertions are handled safely
@@ -383,7 +404,7 @@ func TestReformatDetection(t *testing.T) {
 
 // TestConcurrentInsertions verifies thread safety with rapid insertions
 func TestConcurrentInsertions(t *testing.T) {
-	handler, _, _, tempDir := setupTestEnvironment(t)
+	handler, stateMgr, _, tempDir := setupTestEnvironment(t)
 
 	// Create multiple mount points
 	for i := 0; i < 5; i++ {
@@ -420,8 +441,9 @@ func TestConcurrentInsertions(t *testing.T) {
 		<-done
 	}
 
-	// Should not panic or deadlock
-	time.Sleep(100 * time.Millisecond)
+	// Wait for the winning goroutine's processSyncOperation to settle so it
+	// doesn't race the next test's configurePaths under -race.
+	waitForStatusIn(stateMgr, []state.SyncStatus{state.StatusIdle, state.StatusError}, 2*time.Second)
 }
 
 // BenchmarkHandleInserted measures insertion handling performance
