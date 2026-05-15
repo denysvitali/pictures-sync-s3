@@ -473,6 +473,9 @@ func (ctx *Context) HandleSDCardPreview(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", preview.ContentType)
 	w.Header().Set("Cache-Control", "public, max-age=3600")
+	// Preserve the source filename so browser "Save As" doesn't default to
+	// "preview" (derived from the URL path) plus the served MIME extension.
+	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", filepath.Base(requestedPath)))
 	if _, err := w.Write(preview.Data); err != nil {
 		log.Printf("[Gallery] sdcard preview write failed path=%q error=%v", requestedPath, err)
 	}
