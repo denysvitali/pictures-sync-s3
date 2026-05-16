@@ -9,6 +9,30 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/settings"
 )
 
+func TestTailscaleUpArgsDefaultsToSSHWithoutAcceptingDNS(t *testing.T) {
+	got := tailscaleUpArgs("")
+	want := []string{"--ssh", "--accept-dns=false"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("tailscaleUpArgs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestTailscaleUpArgsAddsAcceptDNSFalse(t *testing.T) {
+	got := tailscaleUpArgs("--ssh --advertise-tags=tag:camera")
+	want := []string{"--ssh", "--advertise-tags=tag:camera", "--accept-dns=false"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("tailscaleUpArgs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestTailscaleUpArgsPreservesExplicitAcceptDNS(t *testing.T) {
+	got := tailscaleUpArgs("--ssh --accept-dns=true")
+	want := []string{"--ssh", "--accept-dns=true"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("tailscaleUpArgs() = %#v, want %#v", got, want)
+	}
+}
+
 func TestCandidateAuthKeyPathsDeduplicatesConfiguredPath(t *testing.T) {
 	got := candidateAuthKeyPaths(settings.TailscaleAuthKeyFile)
 	want := []string{

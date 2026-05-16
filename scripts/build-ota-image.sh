@@ -171,7 +171,7 @@ $(emit_packages_json '    ')
       "Environment": [
         "TS_AUTH_KEY_PATH=/perm/tailscale/authkey",
         "TS_HOSTNAME=${GOKRAZY_INSTANCE}",
-        "TS_TAILSCALE_UP_ARGS=--ssh"
+        "TS_TAILSCALE_UP_ARGS=--ssh --accept-dns=false"
       ]
     },
     "tailscale.com/cmd/tailscale": {

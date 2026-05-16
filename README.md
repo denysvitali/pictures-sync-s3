@@ -182,7 +182,7 @@ Supporting packages:
          "Environment": [
            "TS_AUTH_KEY_PATH=/perm/tailscale/authkey",
            "TS_HOSTNAME=photo-backup",
-           "TS_TAILSCALE_UP_ARGS=--ssh"
+           "TS_TAILSCALE_UP_ARGS=--ssh --accept-dns=false"
          ]
        },
        "github.com/denysvitali/pictures-sync-s3/cmd/webui": {

@@ -11,8 +11,10 @@ import (
 )
 
 const (
-	defaultHostname = "photo-backup"
-	tailscaleBinary = "/user/tailscale"
+	defaultHostname  = "photo-backup"
+	defaultUpArgSSH  = "--ssh"
+	defaultAcceptDNS = "--accept-dns=false"
+	tailscaleBinary  = "/user/tailscale"
 )
 
 func main() {
@@ -20,7 +22,7 @@ func main() {
 
 	authKeyPath := getenv("TS_AUTH_KEY_PATH", settings.TailscaleAuthKeyFile)
 	hostname := getenv("TS_HOSTNAME", defaultHostname)
-	extraArgs := strings.Fields(os.Getenv("TS_TAILSCALE_UP_ARGS"))
+	extraArgs := tailscaleUpArgs(os.Getenv("TS_TAILSCALE_UP_ARGS"))
 
 	key, keyPath, err := readAuthKey(candidateAuthKeyPaths(authKeyPath))
 	if err != nil {
@@ -52,6 +54,26 @@ func getenv(name, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func tailscaleUpArgs(configured string) []string {
+	args := strings.Fields(configured)
+	if len(args) == 0 {
+		args = append(args, defaultUpArgSSH)
+	}
+	if !hasFlag(args, "--accept-dns") {
+		args = append(args, defaultAcceptDNS)
+	}
+	return args
+}
+
+func hasFlag(args []string, flag string) bool {
+	for _, arg := range args {
+		if arg == flag || strings.HasPrefix(arg, flag+"=") {
+			return true
+		}
+	}
+	return false
 }
 
 func candidateAuthKeyPaths(configured string) []string {

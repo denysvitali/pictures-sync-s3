@@ -158,7 +158,7 @@ cat >> "$CONFIG_FILE" <<EOF
       "Environment": [
         "TS_AUTH_KEY_PATH=$TAILSCALE_AUTHKEY_PATH",
         "TS_HOSTNAME=$INSTANCE_NAME",
-        "TS_TAILSCALE_UP_ARGS=--ssh"
+        "TS_TAILSCALE_UP_ARGS=--ssh --accept-dns=false"
       ]
     },
 EOF
