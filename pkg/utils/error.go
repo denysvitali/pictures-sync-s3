@@ -37,6 +37,9 @@ func IsRetryableNetworkError(err error) bool {
 		strings.Contains(errStr, "timeout") ||
 		strings.Contains(errStr, "temporary failure") ||
 		strings.Contains(errStr, "no such host") ||
+		strings.Contains(errStr, "server misbehaving") ||
+		strings.Contains(errStr, "servfail") ||
+		strings.Contains(errStr, "no upstream resolvers set") ||
 		strings.Contains(errStr, "network is unreachable") ||
 		strings.Contains(errStr, "broken pipe") ||
 		strings.Contains(errStr, "eof") {
