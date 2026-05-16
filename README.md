@@ -156,6 +156,9 @@ Supporting packages:
        "github.com/denysvitali/pictures-sync-s3/cmd/provision-ap"
      ],
      "PackageConfig": {
+       "github.com/gokrazy/gokrazy/cmd/dhcp": {
+         "DontStart": true
+       },
        "github.com/gokrazy/breakglass": {
          "CommandLineFlags": [
            "-authorized_keys=/perm/breakglass/authorized_keys"

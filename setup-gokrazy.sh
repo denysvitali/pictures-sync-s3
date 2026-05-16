@@ -130,6 +130,9 @@ cat > "$CONFIG_FILE" <<EOF
 $(emit_packages_json '    ')
   ],
   "PackageConfig": {
+    "github.com/gokrazy/gokrazy/cmd/dhcp": {
+      "DontStart": true
+    },
     "github.com/gokrazy/breakglass": {
       "CommandLineFlags": [
         "-authorized_keys=/perm/breakglass/authorized_keys"
