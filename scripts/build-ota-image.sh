@@ -171,7 +171,9 @@ $(emit_packages_json '    ')
         "TS_TAILSCALE_UP_ARGS=--ssh"
       ]
     },
-    "tailscale.com/cmd/tailscale": {},
+    "tailscale.com/cmd/tailscale": {
+      "DontStart": true
+    },
     "github.com/gokrazy/breakglass": {
       "CommandLineFlags": [
         "-authorized_keys=/perm/breakglass/authorized_keys"

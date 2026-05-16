@@ -148,9 +148,12 @@ Supporting packages:
        "github.com/gokrazy/breakglass",
        "tailscale.com/cmd/tailscaled",
        "tailscale.com/cmd/tailscale",
+       "github.com/denysvitali/pictures-sync-s3/cmd/perm-init",
+       "github.com/denysvitali/pictures-sync-s3/cmd/wifi-init",
+       "github.com/denysvitali/pictures-sync-s3/cmd/tailscale-init",
        "github.com/denysvitali/pictures-sync-s3/cmd/pictures-sync",
        "github.com/denysvitali/pictures-sync-s3/cmd/webui",
-       "github.com/denysvitali/pictures-sync-s3/cmd/tailscale-init"
+       "github.com/denysvitali/pictures-sync-s3/cmd/provision-ap"
      ],
      "PackageConfig": {
        "github.com/gokrazy/breakglass": {
@@ -163,7 +166,14 @@ Supporting packages:
            "/usr/bin/mkfs.exfat": "/path/to/target-arm64/mkfs.exfat"
          }
        },
-       "tailscale.com/cmd/tailscale": {},
+       "github.com/denysvitali/pictures-sync-s3/cmd/perm-init": {
+         "ExtraFilePaths": {
+           "/usr/local/bin/mke2fs": "/path/to/target-arm64/mke2fs"
+         }
+       },
+       "tailscale.com/cmd/tailscale": {
+         "DontStart": true
+       },
        "github.com/denysvitali/pictures-sync-s3/cmd/tailscale-init": {
          "CommandLineFlags": [],
          "Environment": [
@@ -176,6 +186,14 @@ Supporting packages:
          "Environment": [
            "PORT=8080"
          ]
+       },
+       "github.com/denysvitali/pictures-sync-s3/cmd/provision-ap": {
+         "Environment": [
+           "HOSTAPD_PATH=/usr/bin/hostapd"
+         ],
+         "ExtraFilePaths": {
+           "/usr/bin/hostapd": "/path/to/target-arm64/hostapd"
+         }
        }
      }
    }
@@ -362,6 +380,7 @@ region = auto
 
 /perm/wifi.json          # Active WiFi client profile (managed by gokrazy/wifi)
 /perm/extra-wifi.json    # Web UI list of saved WiFi networks
+/perm/tailscale/authkey  # Tailscale auth key used by tailscale-init
 ```
 
 **Note**: The `.pictures-sync-id` file is written to the root of each SD card and persists across insertions. If the card is reformatted, this file is lost and a new ID is generated.

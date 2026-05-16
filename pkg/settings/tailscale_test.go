@@ -65,3 +65,23 @@ func TestHasTailscaleAuthKeyAt(t *testing.T) {
 		t.Fatalf("HasTailscaleAuthKeyAt(auth key) = %v, %v; want true, nil", configured, err)
 	}
 }
+
+func TestHasTailscaleAuthKeyChecksLegacyPath(t *testing.T) {
+	dir := t.TempDir()
+	canonicalPath := filepath.Join(dir, "authkey")
+	legacyPath := filepath.Join(dir, "auth_key")
+
+	configured, err := hasTailscaleAuthKey(canonicalPath, legacyPath)
+	if err != nil || configured {
+		t.Fatalf("hasTailscaleAuthKey(missing) = %v, %v; want false, nil", configured, err)
+	}
+
+	if err := os.WriteFile(legacyPath, []byte("tskey-auth-test123\n"), 0600); err != nil {
+		t.Fatalf("WriteFile(legacy) error = %v", err)
+	}
+
+	configured, err = hasTailscaleAuthKey(canonicalPath, legacyPath)
+	if err != nil || !configured {
+		t.Fatalf("hasTailscaleAuthKey(legacy) = %v, %v; want true, nil", configured, err)
+	}
+}

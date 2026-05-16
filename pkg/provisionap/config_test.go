@@ -70,6 +70,35 @@ func TestHasConfiguredNetworks(t *testing.T) {
 	})
 }
 
+func TestWiFiConfigChangeTriggersRebootForExistingConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	clientPath := filepath.Join(tmpDir, "wifi.json")
+	appPath := filepath.Join(tmpDir, "extra-wifi.json")
+
+	if err := os.WriteFile(clientPath, []byte(`{"ssid":"Old","psk":"password123"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	initial, err := readWiFiConfigSnapshot(clientPath, appPath)
+	if err != nil {
+		t.Fatalf("initial snapshot: %v", err)
+	}
+
+	if err := os.WriteFile(clientPath, []byte(`{"ssid":"New","psk":"password123"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	current, err := readWiFiConfigSnapshot(clientPath, appPath)
+	if err != nil {
+		t.Fatalf("current snapshot: %v", err)
+	}
+
+	if !shouldRebootForWiFiConfigChange(initial, current) {
+		t.Fatal("expected changed Wi-Fi config to trigger reboot")
+	}
+	if shouldRebootForWiFiConfigChange(current, current) {
+		t.Fatal("unchanged Wi-Fi config should not trigger reboot")
+	}
+}
+
 func TestRenderHostapdConfig(t *testing.T) {
 	cfg := testConfig(t)
 	rendered := RenderHostapdConfig(cfg)

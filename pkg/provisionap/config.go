@@ -20,6 +20,7 @@ const (
 	defaultHostapdPath     = "/usr/bin/hostapd"
 	defaultConfigDir       = "/tmp/provision-ap"
 	defaultStartupWait     = 90 * time.Second
+	defaultInterfaceWait   = 30 * time.Second
 	defaultConfigPollDelay = 5 * time.Second
 )
 
@@ -37,6 +38,7 @@ type Config struct {
 	ClientConfigPath string
 	AppConfigPath    string
 	StartupWait      time.Duration
+	InterfaceWait    time.Duration
 	ConfigPollDelay  time.Duration
 }
 
@@ -51,6 +53,7 @@ func ConfigFromEnv() (Config, error) {
 		ClientConfigPath: getenv("WIFI_CONFIG_PATH", "/perm/wifi.json"),
 		AppConfigPath:    getenv("EXTRA_WIFI_CONFIG_PATH", "/perm/extra-wifi.json"),
 		StartupWait:      getenvDuration("PROVISION_AP_STARTUP_WAIT", defaultStartupWait),
+		InterfaceWait:    getenvDuration("PROVISION_AP_INTERFACE_WAIT", defaultInterfaceWait),
 		ConfigPollDelay:  getenvDuration("PROVISION_AP_CONFIG_POLL", defaultConfigPollDelay),
 	}
 
@@ -111,6 +114,9 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.ConfigDir) == "" {
 		return fmt.Errorf("config dir cannot be empty")
+	}
+	if c.InterfaceWait < 0 {
+		return fmt.Errorf("interface wait must not be negative")
 	}
 	if c.ConfigPollDelay <= 0 {
 		return fmt.Errorf("config poll delay must be positive")

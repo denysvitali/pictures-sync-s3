@@ -1,35 +1,35 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/denysvitali/pictures-sync-s3/pkg/settings"
 )
 
 const (
-	defaultAuthKeyPath = "/perm/tailscale/authkey"
-	defaultHostname    = "photo-backup"
-	tailscaleBinary    = "/user/tailscale"
+	defaultHostname = "photo-backup"
+	tailscaleBinary = "/user/tailscale"
 )
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
-	authKeyPath := getenv("TS_AUTH_KEY_PATH", defaultAuthKeyPath)
+	authKeyPath := getenv("TS_AUTH_KEY_PATH", settings.TailscaleAuthKeyFile)
 	hostname := getenv("TS_HOSTNAME", defaultHostname)
 	extraArgs := strings.Fields(os.Getenv("TS_TAILSCALE_UP_ARGS"))
 
-	// #nosec G304 -- authKeyPath is a controlled config path (/perm/tailscale/authkey)
-	authKey, err := os.ReadFile(authKeyPath)
+	key, keyPath, err := readAuthKey(candidateAuthKeyPaths(authKeyPath))
 	if err != nil {
-		log.Printf("tailscale-init: auth key path %q not readable, skipping Tailscale connect: %v", authKeyPath, err)
+		log.Printf("tailscale-init: no readable auth key found, skipping Tailscale connect: %v", err)
 		return
 	}
 
-	key := strings.TrimSpace(string(authKey))
 	if key == "" {
-		log.Printf("tailscale-init: auth key file %q is empty, skipping Tailscale connect", authKeyPath)
+		log.Printf("tailscale-init: auth key file %q is empty, skipping Tailscale connect", keyPath)
 		return
 	}
 
@@ -52,4 +52,46 @@ func getenv(name, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func candidateAuthKeyPaths(configured string) []string {
+	paths := []string{
+		configured,
+		settings.TailscaleAuthKeyFile,
+		settings.LegacyTailscaleAuthKeyFile,
+	}
+	seen := make(map[string]bool, len(paths))
+	result := make([]string, 0, len(paths))
+	for _, path := range paths {
+		path = strings.TrimSpace(path)
+		if path == "" || seen[path] {
+			continue
+		}
+		seen[path] = true
+		result = append(result, path)
+	}
+	return result
+}
+
+func readAuthKey(paths []string) (string, string, error) {
+	var failures []string
+	var emptyPaths []string
+	for _, path := range paths {
+		// #nosec G304 -- paths are controlled Tailscale auth-key locations.
+		authKey, err := os.ReadFile(path)
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", path, err))
+			continue
+		}
+		key := strings.TrimSpace(string(authKey))
+		if key == "" {
+			emptyPaths = append(emptyPaths, path)
+			continue
+		}
+		return key, path, nil
+	}
+	if len(emptyPaths) > 0 {
+		return "", emptyPaths[0], nil
+	}
+	return "", "", fmt.Errorf("%s", strings.Join(failures, "; "))
 }

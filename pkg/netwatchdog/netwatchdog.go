@@ -35,6 +35,7 @@ type Config struct {
 	LogPath          string
 	MaxLogBytes      int64
 	RebootOnFailure  bool
+	SetupModeIP      net.IP
 
 	Ping    PingFunc
 	Reboot  RebootFunc
@@ -52,6 +53,7 @@ func DefaultConfig() Config {
 		LogPath:          "/perm/logs/netwatchdog.log",
 		MaxLogBytes:      1 << 20,
 		RebootOnFailure:  true,
+		SetupModeIP:      net.IPv4(192, 168, 44, 1),
 	}
 }
 
@@ -81,6 +83,9 @@ func New(cfg Config) *Watchdog {
 	}
 	if cfg.Gateway == nil {
 		cfg.Gateway = DefaultGateway
+	}
+	if cfg.SetupModeIP != nil {
+		cfg.SetupModeIP = cfg.SetupModeIP.To4()
 	}
 	return &Watchdog{cfg: cfg, plog: newPersistLog(cfg.LogPath, cfg.MaxLogBytes)}
 }
@@ -126,6 +131,9 @@ func (w *Watchdog) Run(ctx context.Context) {
 }
 
 func (w *Watchdog) checkOnce(ctx context.Context) (bool, string) {
+	if interfaceHasIPv4(w.cfg.Interface, w.cfg.SetupModeIP) {
+		return true, fmt.Sprintf("setup hotspot active on %s (%s)", w.cfg.Interface, w.cfg.SetupModeIP)
+	}
 	gw, err := w.cfg.Gateway(w.cfg.Interface)
 	if err != nil {
 		return false, fmt.Sprintf("no default gateway on %s: %v", w.cfg.Interface, err)
@@ -136,6 +144,31 @@ func (w *Watchdog) checkOnce(ctx context.Context) (bool, string) {
 		return false, fmt.Sprintf("ping %s: %v", gw, err)
 	}
 	return true, fmt.Sprintf("ping %s OK", gw)
+}
+
+func interfaceHasIPv4(iface string, target net.IP) bool {
+	target = target.To4()
+	if target == nil {
+		return false
+	}
+	intf, err := net.InterfaceByName(iface)
+	if err != nil {
+		return false
+	}
+	addrs, err := intf.Addrs()
+	if err != nil {
+		return false
+	}
+	for _, addr := range addrs {
+		ipNet, ok := addr.(*net.IPNet)
+		if !ok {
+			continue
+		}
+		if ip := ipNet.IP.To4(); ip != nil && ip.Equal(target) {
+			return true
+		}
+	}
+	return false
 }
 
 func (w *Watchdog) logf(format string, args ...any) {

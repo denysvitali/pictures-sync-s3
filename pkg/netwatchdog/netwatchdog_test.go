@@ -148,6 +148,33 @@ func TestWatchdogRecoveryResetsCounter(t *testing.T) {
 	}
 }
 
+func TestCheckOnceTreatsSetupHotspotAsHealthy(t *testing.T) {
+	var gatewayCalls atomic.Int32
+	cfg := Config{
+		Interface:   "lo",
+		SetupModeIP: net.IPv4(127, 0, 0, 1),
+		Gateway: func(string) (net.IP, error) {
+			gatewayCalls.Add(1)
+			return nil, errors.New("gateway should not be checked")
+		},
+		Ping: func(context.Context, string) error {
+			t.Fatal("ping should not be called while setup hotspot is active")
+			return nil
+		},
+	}
+
+	ok, msg := New(cfg).checkOnce(context.Background())
+	if !ok {
+		t.Fatalf("checkOnce() ok = false, msg = %q", msg)
+	}
+	if !strings.Contains(msg, "setup hotspot active") {
+		t.Fatalf("checkOnce() msg = %q, want setup hotspot message", msg)
+	}
+	if gatewayCalls.Load() != 0 {
+		t.Fatalf("gateway was called %d times, want 0", gatewayCalls.Load())
+	}
+}
+
 func TestPersistLogRotates(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "log")

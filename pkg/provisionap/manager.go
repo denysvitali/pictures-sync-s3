@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/denysvitali/pictures-sync-s3/pkg/netwatchdog"
 )
 
 // Manager runs the provisioning hotspot fallback.
@@ -50,10 +52,11 @@ func (m *Manager) Run(ctx context.Context) error {
 		m.Reboot = rebootSystem
 	}
 
-	initialHasConfig, err := HasConfiguredNetworks(m.Config.ClientConfigPath, m.Config.AppConfigPath)
+	initialSnapshot, err := readWiFiConfigSnapshot(m.Config.ClientConfigPath, m.Config.AppConfigPath)
 	if err != nil {
 		log.Printf("provision-ap: Wi-Fi config check warning: %v", err)
 	}
+	initialHasConfig := initialSnapshot.HasNetworks
 
 	if initialHasConfig {
 		log.Printf("provision-ap: Wi-Fi config exists; waiting %s for client connection", m.Config.StartupWait)
@@ -66,6 +69,9 @@ func (m *Manager) Run(ctx context.Context) error {
 		log.Printf("provision-ap: no Wi-Fi config found; starting setup hotspot")
 	}
 
+	if err := waitForInterface(ctx, m.Config.Interface, m.Config.InterfaceWait); err != nil {
+		return fmt.Errorf("wait for AP interface: %w", err)
+	}
 	if err := m.Configurer.Configure(m.Config.Interface, m.Config.APIP, m.Config.Netmask); err != nil {
 		return fmt.Errorf("configure AP interface: %w", err)
 	}
@@ -119,13 +125,13 @@ func (m *Manager) Run(ctx context.Context) error {
 			}
 			return nil
 		case <-ticker.C:
-			hasConfig, err := HasConfiguredNetworks(m.Config.ClientConfigPath, m.Config.AppConfigPath)
+			snapshot, err := readWiFiConfigSnapshot(m.Config.ClientConfigPath, m.Config.AppConfigPath)
 			if err != nil {
 				log.Printf("provision-ap: Wi-Fi config check warning: %v", err)
 				continue
 			}
-			if hasConfig && !initialHasConfig {
-				log.Printf("provision-ap: Wi-Fi config saved; rebooting into client mode")
+			if shouldRebootForWiFiConfigChange(initialSnapshot, snapshot) {
+				log.Printf("provision-ap: Wi-Fi config changed; rebooting into client mode")
 				cancelServers()
 				wg.Wait()
 				return m.Reboot()
@@ -157,6 +163,32 @@ func waitForConnection(ctx context.Context, cfg Config, connected func(Config) b
 	}
 }
 
+func waitForInterface(ctx context.Context, name string, timeout time.Duration) error {
+	if timeout < 0 {
+		timeout = 0
+	}
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		if _, err := net.InterfaceByName(name); err == nil {
+			return nil
+		}
+		if timeout == 0 {
+			return fmt.Errorf("%s is not available", name)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return fmt.Errorf("%s did not appear within %s", name, timeout)
+		case <-ticker.C:
+		}
+	}
+}
+
 func hasUsableConnectivity(cfg Config) bool {
 	// The provisioning hotspot exists to recover Wi-Fi, so the readiness check
 	// is scoped to cfg.Interface (wlan0). Allowing any interface here lets a
@@ -167,6 +199,9 @@ func hasUsableConnectivity(cfg Config) bool {
 		return false
 	}
 	if intf.Flags&net.FlagUp == 0 || intf.Flags&net.FlagLoopback != 0 {
+		return false
+	}
+	if _, err := netwatchdog.DefaultGateway(cfg.Interface); err != nil {
 		return false
 	}
 	return interfaceHasUsableIPv4(*intf, cfg)

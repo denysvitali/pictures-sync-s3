@@ -148,7 +148,9 @@ cat >> "$CONFIG_FILE" <<EOF
         "/usr/local/bin/mke2fs": "$MKE2FS_BINARY"
       }
     },
-    "tailscale.com/cmd/tailscale": {},
+    "tailscale.com/cmd/tailscale": {
+      "DontStart": true
+    },
     "github.com/denysvitali/pictures-sync-s3/cmd/tailscale-init": {
       "Environment": [
         "TS_AUTH_KEY_PATH=$TAILSCALE_AUTHKEY_PATH",
