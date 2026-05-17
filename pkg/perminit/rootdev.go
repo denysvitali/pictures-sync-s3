@@ -7,6 +7,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	diskfs "github.com/diskfs/go-diskfs"
+	"github.com/diskfs/go-diskfs/partition/gpt"
 )
 
 // CmdlineFile is the file used by BootBlockDevice to read the kernel command
@@ -21,11 +24,15 @@ var PartUUIDDir = "/dev/disk/by-partuuid"
 // tests that resolve PARTUUID links in a temporary filesystem tree.
 var DeviceDir = "/dev"
 
+// SysBlockDir is the sysfs block device directory used as a fallback when
+// /dev/disk/by-partuuid is unavailable during early boot.
+var SysBlockDir = "/sys/block"
+
 // rootRe matches a literal device path passed via root=.
 //
 // The same patterns gokrazy uses; see github.com/gokrazy/internal/rootdev.
 var rootRe = regexp.MustCompile(`(?:^|\s)(?:root|ubd0)=(/dev/(?:mmcblk[01]p|sda|loop0p|nvme0n1p))([23])\b`)
-var rootPartUUIDRe = regexp.MustCompile(`(?:^|\s)root=PARTUUID=([A-Fa-f0-9-]+)(?:/PARTNROFF=[+-]?\d+)?\b`)
+var rootPartUUIDRe = regexp.MustCompile(`(?:^|\s)root=PARTUUID=([A-Fa-f0-9-]+)(?:/PARTNROFF=([+-]?\d+))?\b`)
 
 // BootBlockDevice returns the file system path to the block device gokrazy
 // booted from (e.g. /dev/mmcblk0).
@@ -40,7 +47,7 @@ func BootBlockDevice() (string, error) {
 	}
 
 	matches = rootPartUUIDRe.FindStringSubmatch(string(b))
-	if len(matches) == 2 {
+	if len(matches) == 3 {
 		dev, err := blockDeviceForPartUUID(matches[1])
 		if err != nil {
 			return "", err
@@ -55,7 +62,11 @@ func blockDeviceForPartUUID(partUUID string) (string, error) {
 	path := filepath.Join(PartUUIDDir, partUUID)
 	target, err := os.Readlink(path)
 	if err != nil {
-		return "", fmt.Errorf("resolve PARTUUID %s: %w", partUUID, err)
+		dev, scanErr := scanBlockDevicesForPartUUID(partUUID)
+		if scanErr == nil {
+			return dev, nil
+		}
+		return "", fmt.Errorf("resolve PARTUUID %s: %w; sysfs fallback: %w", partUUID, err, scanErr)
 	}
 	if !filepath.IsAbs(target) {
 		target = filepath.Clean(filepath.Join(filepath.Dir(path), target))
@@ -65,6 +76,40 @@ func blockDeviceForPartUUID(partUUID string) (string, error) {
 		return "", fmt.Errorf("resolve PARTUUID %s: target %q is not under %s", partUUID, target, deviceDir)
 	}
 	return partitionParentDevice(target), nil
+}
+
+func scanBlockDevicesForPartUUID(partUUID string) (string, error) {
+	entries, err := os.ReadDir(SysBlockDir)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", SysBlockDir, err)
+	}
+	want := strings.ToLower(partUUID)
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.HasPrefix(name, "ram") || strings.HasPrefix(name, "loop") {
+			continue
+		}
+		devPath := filepath.Join(DeviceDir, name)
+		disk, err := diskfs.Open(devPath, diskfs.WithOpenMode(diskfs.ReadOnly))
+		if err != nil {
+			continue
+		}
+		table, err := disk.GetPartitionTable()
+		_ = disk.Backend.Close()
+		if err != nil {
+			continue
+		}
+		gptTable, ok := table.(*gpt.Table)
+		if !ok {
+			continue
+		}
+		for _, part := range gptTable.Partitions {
+			if strings.EqualFold(part.GUID, want) {
+				return devPath, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("PARTUUID=%s not found under %s", partUUID, SysBlockDir)
 }
 
 func partitionParentDevice(partition string) string {

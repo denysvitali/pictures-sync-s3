@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	diskfs "github.com/diskfs/go-diskfs"
+	"github.com/diskfs/go-diskfs/partition/gpt"
 )
 
 func TestBootBlockDevice(t *testing.T) {
@@ -59,16 +62,27 @@ func TestBootBlockDevice(t *testing.T) {
 			cmdline: "root=PARTUUID=8bc8f0e6-5655-4937-93cb-f2e2878b48a2",
 			want:    "$DEV/nvme0n1",
 		},
+		{
+			name:    "PARTUUID sysfs fallback",
+			cmdline: "root=PARTUUID=$IMGUUID/PARTNROFF=1",
+			want:    "$DEV/mmcblk1",
+		},
 	}
 
 	dir := t.TempDir()
 	origCmdline := CmdlineFile
 	origPartUUIDDir := PartUUIDDir
 	origDeviceDir := DeviceDir
+	origSysBlockDir := SysBlockDir
 	deviceRoot := filepath.Join(dir, "dev")
+	sysBlockRoot := filepath.Join(dir, "sys", "block")
 	PartUUIDDir = filepath.Join(deviceRoot, "disk", "by-partuuid")
 	DeviceDir = deviceRoot
+	SysBlockDir = sysBlockRoot
 	if err := os.MkdirAll(PartUUIDDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(SysBlockDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	for _, device := range []string{"mmcblk0p1", "nvme0n1p2"} {
@@ -82,17 +96,27 @@ func TestBootBlockDevice(t *testing.T) {
 	if err := os.Symlink("../../nvme0n1p2", filepath.Join(PartUUIDDir, "8bc8f0e6-5655-4937-93cb-f2e2878b48a2")); err != nil {
 		t.Fatal(err)
 	}
+	imagePath := makeGokrazyLikeImage(t, 8*1024*1024*1024)
+	imageGUID := firstPartitionGUID(t, imagePath)
+	if err := os.Link(imagePath, filepath.Join(deviceRoot, "mmcblk1")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(sysBlockRoot, "mmcblk1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() {
 		CmdlineFile = origCmdline
 		PartUUIDDir = origPartUUIDDir
 		DeviceDir = origDeviceDir
+		SysBlockDir = origSysBlockDir
 	})
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			want := strings.ReplaceAll(tc.want, "$DEV", deviceRoot)
+			cmdline := strings.ReplaceAll(tc.cmdline, "$IMGUUID", imageGUID)
 			path := filepath.Join(dir, "cmdline-"+tc.name)
-			if err := os.WriteFile(path, []byte(tc.cmdline), 0o600); err != nil {
+			if err := os.WriteFile(path, []byte(cmdline), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			CmdlineFile = path
@@ -111,6 +135,27 @@ func TestBootBlockDevice(t *testing.T) {
 			}
 		})
 	}
+}
+
+func firstPartitionGUID(t *testing.T, path string) string {
+	t.Helper()
+	disk, err := diskfs.Open(path, diskfs.WithOpenMode(diskfs.ReadOnly))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer disk.Backend.Close()
+	table, err := disk.GetPartitionTable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	gptTable, ok := table.(*gpt.Table)
+	if !ok {
+		t.Fatalf("partition table = %T, want GPT", table)
+	}
+	if len(gptTable.Partitions) == 0 {
+		t.Fatal("expected at least one partition")
+	}
+	return gptTable.Partitions[0].GUID
 }
 
 func TestPartitionDevice(t *testing.T) {
