@@ -68,6 +68,10 @@ func RenderHostapdConfig(cfg Config) string {
 	fmt.Fprintf(&b, "interface=%s\n", cfg.Interface)
 	b.WriteString("driver=nl80211\n")
 	fmt.Fprintf(&b, "ssid=%s\n", escapeHostapdValue(cfg.SSID))
+	if cfg.CountryCode != "" {
+		fmt.Fprintf(&b, "country_code=%s\n", cfg.CountryCode)
+		b.WriteString("ieee80211d=1\n")
+	}
 	b.WriteString("hw_mode=g\n")
 	b.WriteString("channel=6\n")
 	b.WriteString("ieee80211n=1\n")

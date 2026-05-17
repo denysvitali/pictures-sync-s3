@@ -161,6 +161,9 @@ $(emit_packages_json '    ')
       "GoBuildFlags": [
         "-trimpath",
         "-ldflags=${VERSION_LDFLAGS}"
+      ],
+      "Environment": [
+        "WIFI_COUNTRY=${WIFI_COUNTRY:-US}"
       ]
     },
     "github.com/denysvitali/pictures-sync-s3/cmd/tailscale-init": {
@@ -188,7 +191,8 @@ $(emit_packages_json '    ')
         "-ldflags=${VERSION_LDFLAGS}"
       ],
       "Environment": [
-        "HOSTAPD_PATH=/usr/bin/hostapd"
+        "HOSTAPD_PATH=/usr/bin/hostapd",
+        "WIFI_COUNTRY=${WIFI_COUNTRY:-US}"
       ],
       "ExtraFilePaths": {
         "/usr/bin/hostapd": "$HOSTAPD_BINARY"

@@ -19,6 +19,7 @@ const (
 	defaultDHCPEnd         = "192.168.44.150"
 	defaultHostapdPath     = "/usr/bin/hostapd"
 	defaultConfigDir       = "/tmp/provision-ap"
+	defaultCountryCode     = "US"
 	defaultStartupWait     = 90 * time.Second
 	defaultInterfaceWait   = 30 * time.Second
 	defaultConfigPollDelay = 5 * time.Second
@@ -35,6 +36,7 @@ type Config struct {
 	DHCPEnd          net.IP
 	HostapdPath      string
 	ConfigDir        string
+	CountryCode      string
 	ClientConfigPath string
 	AppConfigPath    string
 	StartupWait      time.Duration
@@ -50,6 +52,7 @@ func ConfigFromEnv() (Config, error) {
 		PSK:              getenv("SETUP_WIFI_PSK", defaultPSK),
 		HostapdPath:      getenv("HOSTAPD_PATH", defaultHostapdPath),
 		ConfigDir:        getenv("PROVISION_AP_CONFIG_DIR", defaultConfigDir),
+		CountryCode:      strings.ToUpper(getenv("WIFI_COUNTRY", getenv("PROVISION_AP_COUNTRY", defaultCountryCode))),
 		ClientConfigPath: getenv("WIFI_CONFIG_PATH", "/perm/wifi.json"),
 		AppConfigPath:    getenv("EXTRA_WIFI_CONFIG_PATH", "/perm/extra-wifi.json"),
 		StartupWait:      getenvDuration("PROVISION_AP_STARTUP_WAIT", defaultStartupWait),
@@ -114,6 +117,16 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.ConfigDir) == "" {
 		return fmt.Errorf("config dir cannot be empty")
+	}
+	if c.CountryCode != "" {
+		if len(c.CountryCode) != 2 {
+			return fmt.Errorf("country code must be a two-letter ISO 3166-1 alpha-2 code")
+		}
+		for _, r := range c.CountryCode {
+			if r < 'A' || r > 'Z' {
+				return fmt.Errorf("country code must contain only uppercase ASCII letters")
+			}
+		}
 	}
 	if c.InterfaceWait < 0 {
 		return fmt.Errorf("interface wait must not be negative")

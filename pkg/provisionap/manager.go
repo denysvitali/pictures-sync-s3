@@ -1,6 +1,7 @@
 package provisionap
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/netwatchdog"
+	"github.com/mdlayher/wifi"
 )
 
 // Manager runs the provisioning hotspot fallback.
@@ -61,10 +63,15 @@ func (m *Manager) Run(ctx context.Context) error {
 	if initialHasConfig {
 		log.Printf("provision-ap: Wi-Fi config exists; waiting %s for client connection", m.Config.StartupWait)
 		if waitForConnection(ctx, m.Config, m.Connected) {
-			log.Printf("provision-ap: %s has a usable client address; hotspot not needed", m.Config.Interface)
-			return nil
+			log.Printf("provision-ap: %s has usable client connectivity; monitoring for loss", m.Config.Interface)
+			if waitForConnectionLoss(ctx, m.Config, m.Connected) {
+				log.Printf("provision-ap: Wi-Fi client connectivity was lost; starting fallback hotspot")
+			} else {
+				return nil
+			}
+		} else {
+			log.Printf("provision-ap: Wi-Fi client did not become reachable; starting fallback hotspot")
 		}
-		log.Printf("provision-ap: Wi-Fi client did not become reachable; starting fallback hotspot")
 	} else {
 		log.Printf("provision-ap: no Wi-Fi config found; starting setup hotspot")
 	}
@@ -155,10 +162,26 @@ func waitForConnection(ctx context.Context, cfg Config, connected func(Config) b
 		}
 		select {
 		case <-ctx.Done():
-			return true
+			return false
 		case <-deadline.C:
 			return connected(cfg)
 		case <-ticker.C:
+		}
+	}
+}
+
+func waitForConnectionLoss(ctx context.Context, cfg Config, connected func(Config) bool) bool {
+	ticker := time.NewTicker(cfg.ConfigPollDelay)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-ticker.C:
+			if !connected(cfg) {
+				return true
+			}
 		}
 	}
 }
@@ -204,7 +227,13 @@ func hasUsableConnectivity(cfg Config) bool {
 	if _, err := netwatchdog.DefaultGateway(cfg.Interface); err != nil {
 		return false
 	}
-	return interfaceHasUsableIPv4(*intf, cfg)
+	if !interfaceHasUsableIPv4(*intf, cfg) {
+		return false
+	}
+	if !interfaceHasAssociatedStation(cfg.Interface) {
+		return false
+	}
+	return true
 }
 
 func interfaceHasUsableIPv4(intf net.Interface, cfg Config) bool {
@@ -225,6 +254,40 @@ func interfaceHasUsableIPv4(intf net.Interface, cfg Config) bool {
 			continue
 		}
 		return true
+	}
+	return false
+}
+
+func interfaceHasAssociatedStation(name string) bool {
+	cl, err := wifi.New()
+	if err != nil {
+		log.Printf("provision-ap: Wi-Fi association check unavailable: %v", err)
+		return false
+	}
+	defer cl.Close()
+
+	intfs, err := cl.Interfaces()
+	if err != nil {
+		log.Printf("provision-ap: Wi-Fi interface list unavailable: %v", err)
+		return false
+	}
+	for _, intf := range intfs {
+		if intf.Name != name {
+			continue
+		}
+		stationInfos, err := cl.StationInfo(intf)
+		if err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				log.Printf("provision-ap: Wi-Fi station info unavailable for %s: %v", name, err)
+			}
+			return false
+		}
+		for _, sta := range stationInfos {
+			if !bytes.Equal(sta.HardwareAddr, net.HardwareAddr{}) {
+				return true
+			}
+		}
+		return false
 	}
 	return false
 }

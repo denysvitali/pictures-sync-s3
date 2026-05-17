@@ -190,9 +190,15 @@ Supporting packages:
            "PORT=8080"
          ]
        },
+       "github.com/denysvitali/pictures-sync-s3/cmd/wifi-init": {
+         "Environment": [
+           "WIFI_COUNTRY=US"
+         ]
+       },
        "github.com/denysvitali/pictures-sync-s3/cmd/provision-ap": {
          "Environment": [
-           "HOSTAPD_PATH=/usr/bin/hostapd"
+           "HOSTAPD_PATH=/usr/bin/hostapd",
+           "WIFI_COUNTRY=US"
          ],
          "ExtraFilePaths": {
            "/usr/bin/hostapd": "/path/to/target-arm64/hostapd"
@@ -253,6 +259,7 @@ on boot.
    - Override hotspot defaults with env vars:
      - `SETUP_WIFI_SSID`
      - `SETUP_WIFI_PSK`
+     - `WIFI_COUNTRY` (defaults to `US`; set this to your deployment country for 5 GHz regulatory support)
    - Or pre-seed `/perm/wifi.json` before first boot with your network. Gokrazy expects a single client network object:
      ```json
      {"ssid": "YourNetwork", "psk": "YourPassword"}

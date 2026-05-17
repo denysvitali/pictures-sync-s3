@@ -18,6 +18,7 @@ import (
 const (
 	defaultInterface = "wlan0"
 	defaultTimeout   = 15 * time.Second
+	defaultCountry   = "US"
 )
 
 type kernelModule struct {
@@ -36,6 +37,7 @@ func main() {
 
 	iface := getenv("WIFI_INIT_INTERFACE", defaultInterface)
 	timeout := getenvDuration("WIFI_INIT_TIMEOUT", defaultTimeout)
+	country := strings.ToUpper(getenv("WIFI_COUNTRY", defaultCountry))
 
 	for _, module := range moduleOrder {
 		if err := loadModule(module.name); err != nil {
@@ -51,6 +53,12 @@ func main() {
 		log.Fatalf("wait for %s: %v", iface, err)
 	}
 	log.Printf("wifi-init: %s is available", iface)
+
+	if err := setRegulatoryDomain(country); err != nil {
+		log.Printf("wifi-init: failed to set WiFi country %s: %v", country, err)
+	} else {
+		log.Printf("wifi-init: set WiFi country to %s", country)
+	}
 
 	if err := disablePowerSave(iface); err != nil {
 		log.Printf("wifi-init: failed to disable power save on %s: %v", iface, err)
@@ -98,6 +106,47 @@ func disablePowerSave(iface string) error {
 	}, family.ID, netlink.Request|netlink.Acknowledge)
 	if err != nil {
 		return fmt.Errorf("set power save: %w", err)
+	}
+	return nil
+}
+
+func setRegulatoryDomain(country string) error {
+	if len(country) != 2 {
+		return fmt.Errorf("country must be a two-letter ISO 3166-1 alpha-2 code")
+	}
+	for _, r := range country {
+		if r < 'A' || r > 'Z' {
+			return fmt.Errorf("country must contain only uppercase ASCII letters")
+		}
+	}
+
+	conn, err := genetlink.Dial(nil)
+	if err != nil {
+		return fmt.Errorf("genetlink dial: %w", err)
+	}
+	defer conn.Close()
+
+	family, err := conn.GetFamily(unix.NL80211_GENL_NAME)
+	if err != nil {
+		return fmt.Errorf("get nl80211 family: %w", err)
+	}
+
+	ae := netlink.NewAttributeEncoder()
+	ae.String(unix.NL80211_ATTR_REG_ALPHA2, country)
+	data, err := ae.Encode()
+	if err != nil {
+		return fmt.Errorf("encode attrs: %w", err)
+	}
+
+	_, err = conn.Execute(genetlink.Message{
+		Header: genetlink.Header{
+			Command: unix.NL80211_CMD_REQ_SET_REG,
+			Version: family.Version,
+		},
+		Data: data,
+	}, family.ID, netlink.Request|netlink.Acknowledge)
+	if err != nil {
+		return fmt.Errorf("set regulatory domain: %w", err)
 	}
 	return nil
 }
