@@ -3,6 +3,7 @@ package perminit
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -49,18 +50,47 @@ func TestBootBlockDevice(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "PARTUUID form is not supported",
-			cmdline: "root=PARTUUID=aabbccdd-02",
-			wantErr: true,
+			name:    "PARTUUID with PARTNROFF",
+			cmdline: "console=tty1 root=PARTUUID=60c24cc1-f3f9-427a-8199-89a6807c0001/PARTNROFF=1 init=/gokrazy/init rootwait",
+			want:    "$DEV/mmcblk0",
+		},
+		{
+			name:    "PARTUUID relative symlink to nvme",
+			cmdline: "root=PARTUUID=8bc8f0e6-5655-4937-93cb-f2e2878b48a2",
+			want:    "$DEV/nvme0n1",
 		},
 	}
 
 	dir := t.TempDir()
 	origCmdline := CmdlineFile
-	t.Cleanup(func() { CmdlineFile = origCmdline })
+	origPartUUIDDir := PartUUIDDir
+	origDeviceDir := DeviceDir
+	deviceRoot := filepath.Join(dir, "dev")
+	PartUUIDDir = filepath.Join(deviceRoot, "disk", "by-partuuid")
+	DeviceDir = deviceRoot
+	if err := os.MkdirAll(PartUUIDDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, device := range []string{"mmcblk0p1", "nvme0n1p2"} {
+		if err := os.WriteFile(filepath.Join(deviceRoot, device), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink("../../mmcblk0p1", filepath.Join(PartUUIDDir, "60c24cc1-f3f9-427a-8199-89a6807c0001")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../../nvme0n1p2", filepath.Join(PartUUIDDir, "8bc8f0e6-5655-4937-93cb-f2e2878b48a2")); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		CmdlineFile = origCmdline
+		PartUUIDDir = origPartUUIDDir
+		DeviceDir = origDeviceDir
+	})
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			want := strings.ReplaceAll(tc.want, "$DEV", deviceRoot)
 			path := filepath.Join(dir, "cmdline-"+tc.name)
 			if err := os.WriteFile(path, []byte(tc.cmdline), 0o600); err != nil {
 				t.Fatal(err)
@@ -76,8 +106,8 @@ func TestBootBlockDevice(t *testing.T) {
 			if err != nil {
 				t.Fatalf("BootBlockDevice() error: %v", err)
 			}
-			if got != tc.want {
-				t.Errorf("BootBlockDevice() = %q, want %q", got, tc.want)
+			if got != want {
+				t.Errorf("BootBlockDevice() = %q, want %q", got, want)
 			}
 		})
 	}
