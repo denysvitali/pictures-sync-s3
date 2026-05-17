@@ -19,24 +19,24 @@ const (
 
 	// Detection Events
 	EventDetectingPhotos EventType = "detecting_photos"
-	EventPhotosDetected EventType = "photos_detected"
-	EventNoPhotosFound  EventType = "no_photos_found"
+	EventPhotosDetected  EventType = "photos_detected"
+	EventNoPhotosFound   EventType = "no_photos_found"
 
 	// Card ID Events
-	EventCardIDFound    EventType = "card_id_found"
-	EventCardIDCreated  EventType = "card_id_created"
+	EventCardIDFound      EventType = "card_id_found"
+	EventCardIDCreated    EventType = "card_id_created"
 	EventReformatDetected EventType = "reformat_detected"
 
 	// Sync Events
-	EventSyncStarting   EventType = "sync_starting"
-	EventSyncStarted    EventType = "sync_started"
-	EventSyncProgress   EventType = "sync_progress"
-	EventSyncCompleted  EventType = "sync_completed"
-	EventSyncFailed     EventType = "sync_failed"
-	EventSyncCanceled   EventType = "sync_canceled"
+	EventSyncStarting  EventType = "sync_starting"
+	EventSyncStarted   EventType = "sync_started"
+	EventSyncProgress  EventType = "sync_progress"
+	EventSyncCompleted EventType = "sync_completed"
+	EventSyncFailed    EventType = "sync_failed"
+	EventSyncCanceled  EventType = "sync_canceled"
 
 	// System Events
-	EventStatusChanged  EventType = "status_changed"
+	EventStatusChanged EventType = "status_changed"
 	EventError         EventType = "error"
 	EventInfo          EventType = "info"
 )
@@ -52,13 +52,42 @@ type Event struct {
 // Manager manages event distribution
 type Manager struct {
 	mu        sync.RWMutex
-	listeners []chan Event
+	listeners []*subscriber
+}
+
+type subscriber struct {
+	mu     sync.Mutex
+	ch     chan Event
+	closed bool
+}
+
+func (s *subscriber) send(event Event) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	select {
+	case s.ch <- event:
+	default:
+		// Skip if channel is full (prevents blocking)
+	}
+}
+
+func (s *subscriber) close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	s.closed = true
+	close(s.ch)
 }
 
 // NewManager creates a new event manager
 func NewManager() *Manager {
 	return &Manager{
-		listeners: make([]chan Event, 0),
+		listeners: make([]*subscriber, 0),
 	}
 }
 
@@ -68,7 +97,7 @@ func (m *Manager) Subscribe() chan Event {
 	defer m.mu.Unlock()
 
 	ch := make(chan Event, 100) // Buffer to prevent blocking
-	m.listeners = append(m.listeners, ch)
+	m.listeners = append(m.listeners, &subscriber{ch: ch})
 	return ch
 }
 
@@ -79,11 +108,11 @@ func (m *Manager) Unsubscribe(ch chan Event) {
 
 	// Find and remove the channel
 	for i, listener := range m.listeners {
-		if listener == ch {
+		if listener.ch == ch {
 			// Remove from slice
 			m.listeners = append(m.listeners[:i], m.listeners[i+1:]...)
 			// Close the channel to signal the subscriber
-			close(ch)
+			listener.close()
 			break
 		}
 	}
@@ -100,17 +129,13 @@ func (m *Manager) Emit(eventType EventType, message string, data map[string]inte
 
 	m.mu.RLock()
 	// Create a copy of listeners to avoid race conditions
-	listenersCopy := make([]chan Event, len(m.listeners))
+	listenersCopy := make([]*subscriber, len(m.listeners))
 	copy(listenersCopy, m.listeners)
 	m.mu.RUnlock()
 
 	// Send to all listeners without holding the lock
-	for _, ch := range listenersCopy {
-		select {
-		case ch <- event:
-		default:
-			// Skip if channel is full (prevents blocking)
-		}
+	for _, listener := range listenersCopy {
+		listener.send(event)
 	}
 }
 
@@ -132,9 +157,9 @@ func (m *Manager) EmitSDCardRemoved(deviceName string) {
 // EmitPhotosDetected emits a photos detected event
 func (m *Manager) EmitPhotosDetected(count int, totalBytes int64) {
 	m.Emit(EventPhotosDetected, "Photos detected on SD card", map[string]interface{}{
-		"photo_count":  count,
-		"total_bytes":  totalBytes,
-		"total_mb":     float64(totalBytes) / (1024 * 1024),
+		"photo_count": count,
+		"total_bytes": totalBytes,
+		"total_mb":    float64(totalBytes) / (1024 * 1024),
 	})
 }
 
@@ -155,8 +180,8 @@ func (m *Manager) EmitCardIDCreated(cardID string) {
 // EmitReformatDetected emits a reformat detection event
 func (m *Manager) EmitReformatDetected(cardID, newCardID string, percentageOfLast float64) {
 	m.Emit(EventReformatDetected, "Card reformat detected", map[string]interface{}{
-		"old_card_id":       cardID,
-		"new_card_id":       newCardID,
+		"old_card_id":        cardID,
+		"new_card_id":        newCardID,
 		"percentage_of_last": percentageOfLast,
 	})
 }
@@ -177,7 +202,7 @@ func (m *Manager) EmitSyncProgress(filesSynced, bytesSynced int64, currentFile s
 		"bytes_synced":   bytesSynced,
 		"current_file":   currentFile,
 		"transfer_speed": transferSpeed,
-		"eta":           eta,
+		"eta":            eta,
 	})
 }
 

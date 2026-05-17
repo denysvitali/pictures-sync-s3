@@ -18,10 +18,12 @@ export function Button({
   disabled = false,
   loading = false,
   className = '',
+  type = 'button',
   ...props
 }) {
   return (
     <button
+      type={type}
       className={`
         inline-flex items-center justify-center gap-2 font-medium rounded-lg shrink-0
         transition-all duration-150 active:scale-[0.97]

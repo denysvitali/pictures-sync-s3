@@ -82,7 +82,7 @@ if ! command -v pnpm >/dev/null 2>&1; then
 fi
 
 echo "Building embedded WebUI bundle..."
-(cd "$REPO_DIR/webui" && pnpm install --frozen-lockfile) || (cd "$REPO_DIR/webui" && pnpm install)
+(cd "$REPO_DIR/webui" && pnpm install --frozen-lockfile)
 (cd "$REPO_DIR/webui" && pnpm build)
 if [ ! -f "$REPO_DIR/pkg/webui/dist/index.html" ]; then
   echo "Error: pkg/webui/dist/index.html is missing after webui build"

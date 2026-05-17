@@ -103,7 +103,35 @@ type Manager struct {
 	mu             sync.Mutex
 	status         Status
 	installHistory []InstallHistoryEntry
-	subscribers    []chan Status
+	subscribers    []*statusSubscriber
+}
+
+type statusSubscriber struct {
+	mu     sync.Mutex
+	ch     chan Status
+	closed bool
+}
+
+func (s *statusSubscriber) send(status Status) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	select {
+	case s.ch <- status:
+	default:
+	}
+}
+
+func (s *statusSubscriber) close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	s.closed = true
+	close(s.ch)
 }
 
 type Status struct {
@@ -171,7 +199,7 @@ func NewManager() *Manager {
 		},
 		status:         Status{State: "idle"},
 		installHistory: make([]InstallHistoryEntry, 0),
-		subscribers:    make([]chan Status, 0),
+		subscribers:    make([]*statusSubscriber, 0),
 	}
 	_ = mgr.loadInstallHistory()
 	return mgr
@@ -197,7 +225,7 @@ func (m *Manager) Subscribe() chan Status {
 	defer m.mu.Unlock()
 
 	ch := make(chan Status, 16)
-	m.subscribers = append(m.subscribers, ch)
+	m.subscribers = append(m.subscribers, &statusSubscriber{ch: ch})
 	return ch
 }
 
@@ -206,9 +234,9 @@ func (m *Manager) Unsubscribe(ch chan Status) {
 	defer m.mu.Unlock()
 
 	for i, subscriber := range m.subscribers {
-		if subscriber == ch {
+		if subscriber.ch == ch {
 			m.subscribers = append(m.subscribers[:i], m.subscribers[i+1:]...)
-			close(ch)
+			subscriber.close()
 			break
 		}
 	}
@@ -547,18 +575,15 @@ func (m *Manager) set(status Status) {
 	publishStatus(status, subscribers)
 }
 
-func (m *Manager) subscribersSnapshotLocked() []chan Status {
-	subscribers := make([]chan Status, len(m.subscribers))
+func (m *Manager) subscribersSnapshotLocked() []*statusSubscriber {
+	subscribers := make([]*statusSubscriber, len(m.subscribers))
 	copy(subscribers, m.subscribers)
 	return subscribers
 }
 
-func publishStatus(status Status, subscribers []chan Status) {
-	for _, ch := range subscribers {
-		select {
-		case ch <- status:
-		default:
-		}
+func publishStatus(status Status, subscribers []*statusSubscriber) {
+	for _, subscriber := range subscribers {
+		subscriber.send(status)
 	}
 }
 

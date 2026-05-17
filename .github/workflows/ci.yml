@@ -70,7 +70,7 @@ jobs:
         run: |
           cd webui
           corepack enable
-          pnpm install --frozen-lockfile || pnpm install
+          pnpm install --frozen-lockfile
           pnpm build
 
       - name: Run tests with race detector

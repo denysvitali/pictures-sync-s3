@@ -3,14 +3,16 @@ import { useDevice } from '../DeviceContext.jsx'
 import { Icon } from './Icons.jsx'
 
 export function DeviceSwitcher() {
-  const { deviceUrl, setDeviceUrl, isLocalhost } = useDevice()
+  const { deviceUrl, setDeviceUrl } = useDevice()
   const [input, setInput] = useState(deviceUrl)
   const [editing, setEditing] = useState(false)
 
-  if (isLocalhost) return null
-
   const handleSave = () => {
-    setDeviceUrl(input)
+    const trimmed = input.trim().replace(/\/+$/, '')
+    if (!trimmed) return
+    const nextUrl = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`
+    setDeviceUrl(nextUrl)
+    setInput(nextUrl)
     setEditing(false)
   }
 

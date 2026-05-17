@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"net/url"
@@ -166,6 +167,7 @@ func main() {
 	// Setup signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
+	defer signal.Stop(sigChan)
 	go func() {
 		sig := <-sigChan
 		log.Printf("Received signal %v, initiating graceful shutdown...", sig)
@@ -349,7 +351,9 @@ func main() {
 
 		// Get cert and key paths from resolved config
 		cfg := tlsconfig.ResolveConfig()
-		if err := server.ListenAndServeTLS(cfg.CertFile, cfg.KeyFile); err != nil {
+		if err := serveWithShutdown(shutdownCtx, server, func() error {
+			return server.ListenAndServeTLS(cfg.CertFile, cfg.KeyFile)
+		}); err != nil {
 			log.Fatalf("Failed to start HTTPS server: %v", err)
 		}
 		return
@@ -368,7 +372,33 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	if err := server.ListenAndServe(); err != nil {
+	if err := serveWithShutdown(shutdownCtx, server, server.ListenAndServe); err != nil {
 		log.Fatalf("Failed to start HTTP server: %v", err)
+	}
+}
+
+func serveWithShutdown(ctx context.Context, server *http.Server, serve func() error) error {
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- serve()
+	}()
+
+	select {
+	case err := <-errCh:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			return err
+		}
+		err := <-errCh
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
 	}
 }

@@ -55,7 +55,7 @@ webui-sync-embedded: ## Build the embedded webui bundle (real React source)
 		echo "Error: pnpm is required to build embedded webui assets"; \
 		exit 1; \
 	fi
-	@(cd webui && pnpm install --frozen-lockfile) || (cd webui && pnpm install)
+	@cd webui && pnpm install --frozen-lockfile
 	@cd webui && pnpm build
 	@test -f pkg/webui/dist/index.html
 
