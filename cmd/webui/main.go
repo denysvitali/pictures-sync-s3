@@ -122,10 +122,6 @@ func repairClockAndPersistentCertificateBeforeTLS() {
 		log.Println("System time synchronized before TLS setup")
 	}
 
-	if !tlsconfig.CurrentTimeCanIssueCertificate(time.Now()) {
-		log.Println("Skipping persistent TLS certificate repair until system time is valid")
-		return
-	}
 	if _, err := os.Stat("/perm"); err != nil {
 		log.Printf("Skipping persistent TLS certificate repair because /perm is not available: %v", err)
 		return

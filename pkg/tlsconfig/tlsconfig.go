@@ -18,14 +18,18 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/denysvitali/pictures-sync-s3/pkg/version"
 )
 
 const (
-	certificateValidity    = 365 * 24 * time.Hour
-	certificateBackdate    = 5 * time.Minute
-	certificateRenewWithin = 30 * 24 * time.Hour
+	certificateValidity            = 365 * 24 * time.Hour
+	certificateBackdate            = 5 * time.Minute
+	certificateRenewWithin         = 30 * 24 * time.Hour
+	defaultFallbackCertificateYear = 2026
 )
 
 var (
@@ -35,6 +39,7 @@ var (
 	permCertFile                      = "/perm/ssl/gokrazy-web.pem"
 	permKeyFile                       = "/perm/ssl/gokrazy-web.key.pem"
 	earliestReasonableCertificateTime = time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC)
+	currentTime                       = time.Now
 )
 
 // Config provides TLS configuration for the webui server
@@ -170,23 +175,57 @@ func fileExists(path string) bool {
 	return true
 }
 
-// CurrentTimeCanIssueCertificate reports whether now is sane enough to write a
-// long-lived certificate. This prevents persisting certificates generated at
-// gokrazy's initial placeholder clock value.
+// CurrentTimeCanIssueCertificate reports whether now is sane enough to use as a
+// certificate reference time without falling back to build metadata.
 func CurrentTimeCanIssueCertificate(now time.Time) bool {
 	return !now.IsZero() && !now.Before(earliestReasonableCertificateTime)
 }
 
+// CertificateReferenceTime returns the time used to inspect or issue
+// certificates. If the system clock is still at gokrazy's placeholder value,
+// use a deterministic build-year date so HTTPS can still start without NTP.
+func CertificateReferenceTime(now time.Time) time.Time {
+	if CurrentTimeCanIssueCertificate(now) {
+		return now
+	}
+	return fallbackCertificateStartTime()
+}
+
+func fallbackCertificateStartTime() time.Time {
+	year := fallbackCertificateYear(version.BuildDate)
+	return time.Date(year, time.January, 1, 0, 0, 0, 0, time.UTC)
+}
+
+func fallbackCertificateYear(buildDate string) int {
+	buildDate = strings.TrimSpace(buildDate)
+	if buildDate == "" {
+		return defaultFallbackCertificateYear
+	}
+
+	if parsed, err := time.Parse(time.RFC3339Nano, buildDate); err == nil {
+		return parsed.UTC().Year()
+	}
+
+	if len(buildDate) >= 4 {
+		if year, err := strconv.Atoi(buildDate[:4]); err == nil && year > 0 {
+			return year
+		}
+	}
+
+	return defaultFallbackCertificateYear
+}
+
 // PersistentCertificateInfo inspects the certificate pair stored under /perm.
 func PersistentCertificateInfo(now time.Time) (*CertificateInfo, error) {
-	return inspectCertificate(PersistentConfig(), now)
+	return inspectCertificate(PersistentConfig(), CertificateReferenceTime(now))
 }
 
 // EnsurePersistentSelfSignedCertificate creates or renews the /perm certificate
 // pair when it is missing, invalid, or close to expiry.
 func EnsurePersistentSelfSignedCertificate(hosts []string) (*CertificateInfo, bool, error) {
-	now := time.Now()
-	info, err := PersistentCertificateInfo(now)
+	now := currentTime()
+	referenceTime := CertificateReferenceTime(now)
+	info, err := inspectCertificate(PersistentConfig(), referenceTime)
 	if err == nil && info.Exists && !info.NeedsRegeneration {
 		return info, false, nil
 	}
@@ -201,13 +240,11 @@ func EnsurePersistentSelfSignedCertificate(hosts []string) (*CertificateInfo, bo
 // GeneratePersistentSelfSignedCertificate writes a new self-signed certificate
 // pair to /perm/ssl.
 func GeneratePersistentSelfSignedCertificate(hosts []string) (*CertificateInfo, error) {
-	return generateSelfSignedCertificate(PersistentConfig(), hosts, time.Now())
+	return generateSelfSignedCertificate(PersistentConfig(), hosts, currentTime())
 }
 
 func generateSelfSignedCertificate(cfg *Config, hosts []string, now time.Time) (*CertificateInfo, error) {
-	if !CurrentTimeCanIssueCertificate(now) {
-		return nil, fmt.Errorf("system time %s is too early to issue a persistent certificate", now.UTC().Format(time.RFC3339))
-	}
+	issueTime := CertificateReferenceTime(now)
 
 	dnsNames, ipAddresses := certificateNames(hosts)
 	commonName := "gokrazy-web"
@@ -232,8 +269,8 @@ func generateSelfSignedCertificate(cfg *Config, hosts []string, now time.Time) (
 			Organization: []string{"Photo Backup Station"},
 			CommonName:   commonName,
 		},
-		NotBefore:             now.Add(-certificateBackdate).UTC(),
-		NotAfter:              now.Add(certificateValidity).UTC(),
+		NotBefore:             issueTime.Add(-certificateBackdate).UTC(),
+		NotAfter:              issueTime.Add(certificateValidity).UTC(),
 		KeyUsage:              x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
@@ -261,7 +298,7 @@ func generateSelfSignedCertificate(cfg *Config, hosts []string, now time.Time) (
 		return nil, fmt.Errorf("write certificate: %w", err)
 	}
 
-	return inspectCertificate(cfg, now)
+	return inspectCertificate(cfg, issueTime)
 }
 
 func inspectCertificate(cfg *Config, now time.Time) (*CertificateInfo, error) {
@@ -480,11 +517,11 @@ func sha256Sum(raw []byte) []byte {
 // Returns (tlsConfig, useTLS, error)
 func LoadOrDefault() (*tls.Config, bool, error) {
 	cfg := ResolveConfig()
-	now := time.Now()
+	now := currentTime()
+	referenceTime := CertificateReferenceTime(now)
 
-	if !CurrentTimeCanIssueCertificate(now) {
-		log.Printf("System time %s is too early for reliable TLS certificates", now.UTC().Format(time.RFC3339))
-		return nil, false, nil
+	if !now.Equal(referenceTime) {
+		log.Printf("System time %s is too early for reliable TLS certificate dates; using %s as the certificate reference time", now.UTC().Format(time.RFC3339), referenceTime.UTC().Format(time.RFC3339))
 	}
 
 	// Check if certificates exist
@@ -493,12 +530,12 @@ func LoadOrDefault() (*tls.Config, bool, error) {
 		return nil, false, nil
 	}
 
-	info, err := inspectCertificate(cfg, now)
+	info, err := inspectCertificate(cfg, referenceTime)
 	if err != nil || !info.ValidNow {
 		if err != nil {
 			log.Printf("TLS certificate at %s is not usable: %v", cfg.CertFile, err)
 		} else {
-			log.Printf("TLS certificate at %s is not valid for current time %s", cfg.CertFile, now.UTC().Format(time.RFC3339))
+			log.Printf("TLS certificate at %s is not valid for certificate reference time %s", cfg.CertFile, referenceTime.UTC().Format(time.RFC3339))
 		}
 		return nil, false, nil
 	}

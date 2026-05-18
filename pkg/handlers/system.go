@@ -76,12 +76,6 @@ func (ctx *Context) HandleSystemTLSCertificate(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	now := time.Now()
-	if !tlsconfig.CurrentTimeCanIssueCertificate(now) {
-		httputil.BadRequest(w, fmt.Sprintf("system time %s is too early to generate a certificate", now.UTC().Format(time.RFC3339)))
-		return
-	}
-
 	hosts := append([]string{}, req.Hosts...)
 	hosts = append(hosts, requestHost(r))
 	info, err := generateCert(hosts)

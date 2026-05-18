@@ -17,6 +17,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/denysvitali/pictures-sync-s3/pkg/version"
 )
 
 // generateTestCertificate creates a self-signed certificate for testing
@@ -256,18 +258,61 @@ func TestGeneratePersistentSelfSignedCertificate(t *testing.T) {
 	}
 }
 
-func TestGeneratePersistentSelfSignedCertificateRejectsInvalidClock(t *testing.T) {
+func TestGeneratePersistentSelfSignedCertificateUsesFallbackClock(t *testing.T) {
 	tmpDir := t.TempDir()
 	rootDir := filepath.Join(tmpDir, "root")
 	permDir := filepath.Join(tmpDir, "perm")
 	setTestTLSPaths(t, rootDir, permDir)
+	setTestBuildDate(t, "")
 
-	_, err := generateSelfSignedCertificate(PersistentConfig(), nil, time.Date(1980, time.January, 1, 0, 0, 3, 0, time.UTC))
-	if err == nil {
-		t.Fatal("expected invalid clock error")
+	info, err := generateSelfSignedCertificate(PersistentConfig(), nil, time.Date(1980, time.January, 1, 0, 0, 3, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("generate certificate with fallback clock: %v", err)
 	}
-	if fileExists(permCertFile) || fileExists(permKeyFile) {
-		t.Fatal("certificate files should not be written when clock is invalid")
+	if !info.Exists || !info.ValidNow || info.NeedsRegeneration {
+		t.Fatalf("expected usable generated certificate, got %+v", info)
+	}
+
+	wantNotBefore := time.Date(defaultFallbackCertificateYear, time.January, 1, 0, 0, 0, 0, time.UTC).Add(-certificateBackdate)
+	if !info.NotBefore.Equal(wantNotBefore) {
+		t.Fatalf("expected fallback not_before %s, got %s", wantNotBefore, info.NotBefore)
+	}
+	if !fileExists(permCertFile) || !fileExists(permKeyFile) {
+		t.Fatal("certificate files should be written when clock is invalid")
+	}
+}
+
+func TestCertificateReferenceTimeUsesBuildDateYear(t *testing.T) {
+	setTestBuildDate(t, "2029-06-07T08:09:10Z")
+
+	got := CertificateReferenceTime(time.Date(1980, time.January, 1, 0, 0, 3, 0, time.UTC))
+	want := time.Date(2029, time.January, 1, 0, 0, 0, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Fatalf("CertificateReferenceTime() = %s, want %s", got, want)
+	}
+}
+
+func TestLoadOrDefaultUsesCertificateWhenClockInvalid(t *testing.T) {
+	tmpDir := t.TempDir()
+	rootDir := filepath.Join(tmpDir, "root")
+	permDir := filepath.Join(tmpDir, "perm")
+	setTestTLSPaths(t, rootDir, permDir)
+	setTestBuildDate(t, "")
+	setTestCurrentTime(t, time.Date(1980, time.January, 1, 0, 0, 3, 0, time.UTC))
+
+	if _, err := generateSelfSignedCertificate(PersistentConfig(), nil, currentTime()); err != nil {
+		t.Fatalf("generate certificate: %v", err)
+	}
+
+	tlsConfig, useTLS, err := LoadOrDefault()
+	if err != nil {
+		t.Fatalf("LoadOrDefault: %v", err)
+	}
+	if !useTLS {
+		t.Fatal("expected TLS to be enabled when only the local clock is invalid")
+	}
+	if tlsConfig == nil {
+		t.Fatal("expected TLS config")
 	}
 }
 
@@ -301,6 +346,28 @@ func setTestTLSPaths(t *testing.T, rootDir, permDir string) {
 		rootUsePermFile = origRootUsePermFile
 		permCertFile = origPermCertFile
 		permKeyFile = origPermKeyFile
+	})
+}
+
+func setTestBuildDate(t *testing.T, buildDate string) {
+	t.Helper()
+
+	origBuildDate := version.BuildDate
+	version.BuildDate = buildDate
+	t.Cleanup(func() {
+		version.BuildDate = origBuildDate
+	})
+}
+
+func setTestCurrentTime(t *testing.T, now time.Time) {
+	t.Helper()
+
+	origCurrentTime := currentTime
+	currentTime = func() time.Time {
+		return now
+	}
+	t.Cleanup(func() {
+		currentTime = origCurrentTime
 	})
 }
 
