@@ -9,7 +9,10 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/netwatchdog"
@@ -74,6 +77,13 @@ func (m *Manager) Run(ctx context.Context) error {
 		}
 	} else {
 		log.Printf("provision-ap: no Wi-Fi config found; starting setup hotspot")
+	}
+
+	if err := disableClientWiFiForAP(m.Config); err != nil {
+		log.Printf("provision-ap: client Wi-Fi disable warning: %v", err)
+	}
+	if snapshot, err := readWiFiConfigSnapshot(m.Config.ClientConfigPath, m.Config.AppConfigPath); err == nil {
+		initialSnapshot = snapshot
 	}
 
 	if err := waitForInterface(ctx, m.Config.Interface, m.Config.InterfaceWait); err != nil {
@@ -184,6 +194,68 @@ func waitForConnectionLoss(ctx context.Context, cfg Config, connected func(Confi
 			}
 		}
 	}
+}
+
+func disableClientWiFiForAP(cfg Config) error {
+	var errs []error
+	if err := moveClientWiFiConfigAside(cfg.ClientConfigPath); err != nil {
+		errs = append(errs, err)
+	}
+	if err := terminateClientWiFiProcesses(); err != nil {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
+}
+
+func moveClientWiFiConfigAside(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	backup := path + ".provision-ap-disabled"
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("stat client Wi-Fi config: %w", err)
+	}
+	_ = os.Remove(backup)
+	if err := os.Rename(path, backup); err != nil {
+		return fmt.Errorf("move client Wi-Fi config aside: %w", err)
+	}
+	log.Printf("provision-ap: moved %s to %s while setup hotspot is active", path, backup)
+	return nil
+}
+
+func terminateClientWiFiProcesses() error {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return fmt.Errorf("read /proc: %w", err)
+	}
+	var errs []error
+	for _, entry := range entries {
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil || pid == os.Getpid() {
+			continue
+		}
+		exe, err := os.Readlink(filepath.Join("/proc", entry.Name(), "exe"))
+		if err != nil {
+			continue
+		}
+		if exe != "/user/wifi" && filepath.Base(exe) != "wifi" {
+			continue
+		}
+		process, err := os.FindProcess(pid)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("find wifi process %d: %w", pid, err))
+			continue
+		}
+		if err := process.Signal(syscall.SIGTERM); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			errs = append(errs, fmt.Errorf("terminate wifi process %d: %w", pid, err))
+			continue
+		}
+		log.Printf("provision-ap: terminated client Wi-Fi process pid=%d", pid)
+	}
+	return errors.Join(errs...)
 }
 
 func waitForInterface(ctx context.Context, name string, timeout time.Duration) error {
