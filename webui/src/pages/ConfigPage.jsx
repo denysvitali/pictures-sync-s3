@@ -598,7 +598,7 @@ function SyncSettingsSection() {
         if (data) {
           setTransfers(String(data.transfers ?? '4'))
           setBandwidth(data.bandwidth || '')
-          setGooglePhotos(!!data.google_photos)
+          setGooglePhotos(!!(data.google_photos_enabled ?? data.google_photos))
         }
       })
       .catch((err) => { if (!cancelled) setLoadError(describeError(err)) })
@@ -622,7 +622,7 @@ function SyncSettingsSection() {
       await saveSettings(deviceUrl, {
         transfers: t,
         bandwidth: bandwidth.trim() || undefined,
-        google_photos: googlePhotos,
+        google_photos_enabled: googlePhotos,
       })
       toast.success('Sync settings saved')
     } catch (err) {
@@ -682,7 +682,122 @@ function SyncSettingsSection() {
 }
 
 // ---------------------------------------------------------------------------
-// Section 4 - OTA Updates
+// Section 4 - Tailscale
+// ---------------------------------------------------------------------------
+
+function TailscaleSection() {
+  const { deviceUrl } = useDevice()
+  const toast = useToast()
+
+  const [configured, setConfigured] = useState(false)
+  const [authKeyPath, setAuthKeyPath] = useState('/perm/tailscale/authkey')
+  const [authKey, setAuthKey] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
+
+  const fetchSettings = useCallback(async () => {
+    setLoading(true)
+    setLoadError(null)
+    try {
+      const data = await getSettings(deviceUrl)
+      setConfigured(!!data?.tailscale_auth_key_configured)
+      setAuthKeyPath(data?.tailscale_auth_key_path || '/perm/tailscale/authkey')
+    } catch (err) {
+      setLoadError(describeError(err))
+    } finally {
+      setLoading(false)
+    }
+  }, [deviceUrl])
+
+  useEffect(() => {
+    fetchSettings()
+  }, [fetchSettings])
+
+  const handleSave = useCallback(async () => {
+    if (loadError) {
+      toast.error('Reload Tailscale settings before saving')
+      return
+    }
+
+    const key = authKey.trim()
+    if (!key) {
+      toast.error('Tailscale auth key is required')
+      return
+    }
+    if (!key.startsWith('tskey-auth-')) {
+      toast.error('Tailscale auth key must start with tskey-auth-')
+      return
+    }
+
+    setSaving(true)
+    try {
+      const res = await saveSettings(deviceUrl, { tailscale_auth_key: key })
+      setConfigured(true)
+      setAuthKey('')
+      if (res?.tailscale_auth_key_path) {
+        setAuthKeyPath(res.tailscale_auth_key_path)
+      }
+      if (res?.warning) {
+        toast.warning(res.warning)
+      } else {
+        toast.success('Tailscale auth key saved')
+      }
+    } catch (err) {
+      toast.error(describeError(err) || 'Failed to save Tailscale auth key')
+    } finally {
+      setSaving(false)
+    }
+  }, [deviceUrl, authKey, loadError, toast])
+
+  return (
+    <AccordionSection title="Tailscale" icon="wifi" badge={
+      loading ? null : (
+        <StatusBadge variant={configured ? 'success' : 'warning'}>
+          {configured ? 'Configured' : 'Not configured'}
+        </StatusBadge>
+      )
+    }>
+      {loading ? (
+        <div className="flex items-center justify-center py-6">
+          <LoadingSpinner size="sm" />
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {loadError ? (
+            <div className="mb-3 rounded-lg border border-danger/20 bg-danger/10 p-3 text-xs text-danger">
+              {loadError}
+            </div>
+          ) : null}
+          <div className="bg-surface-900 rounded-lg p-3">
+            <p className="text-xs text-surface-400 mb-1">Auth Key</p>
+            <p className="text-sm font-medium text-surface-100">
+              {configured ? 'Stored' : 'No key stored'}
+            </p>
+            <p className="text-xs text-surface-500 mt-1 break-all">{authKeyPath}</p>
+          </div>
+          <Field label="New Auth Key" hint="Paste a Tailscale auth key. It is stored locally and not shown after saving.">
+            <PasswordInput
+              value={authKey}
+              onChange={setAuthKey}
+              placeholder="tskey-auth-..."
+              disabled={saving || !!loadError}
+            />
+          </Field>
+          <div className="flex justify-end pt-2">
+            <Button variant="primary" size="sm" loading={saving} disabled={!!loadError} onClick={handleSave}>
+              <Icon name="lock" className="w-4 h-4" />
+              Save & Connect
+            </Button>
+          </div>
+        </div>
+      )}
+    </AccordionSection>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Section 5 - OTA Updates
 // ---------------------------------------------------------------------------
 
 function OtaSection() {
@@ -1060,7 +1175,7 @@ function OtaSection() {
 }
 
 // ---------------------------------------------------------------------------
-// Section 5 - System Clock + TLS
+// Section 6 - System Clock + TLS
 // ---------------------------------------------------------------------------
 
 function SystemMaintenanceSection() {
@@ -1205,7 +1320,7 @@ function SystemMaintenanceSection() {
 }
 
 // ---------------------------------------------------------------------------
-// Section 6 - Danger Zone (Password + Breakglass)
+// Section 7 - Danger Zone (Password + Breakglass)
 // ---------------------------------------------------------------------------
 
 function DangerZonePassword() {
@@ -1394,6 +1509,7 @@ export default function ConfigPage() {
       <RemoteStorageSection />
       <B2SetupSection />
       <SyncSettingsSection />
+      <TailscaleSection />
       <OtaSection />
       <SystemMaintenanceSection />
       <DangerZoneSection />

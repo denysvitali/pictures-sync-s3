@@ -21,7 +21,11 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/validation"
 )
 
-var tailscaleCommandContext = exec.CommandContext
+var (
+	tailscaleAuthKeyPath    = settings.TailscaleAuthKeyFile
+	tailscaleBinary         = "/user/tailscale"
+	tailscaleCommandContext = exec.CommandContext
+)
 
 // HandleConfig handles rclone configuration
 func (ctx *Context) HandleConfig(w http.ResponseWriter, r *http.Request) {
@@ -380,24 +384,25 @@ func (ctx *Context) HandleSettings(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		response := ctx.AppSettings.ToJSON()
-		tailscaleConfigured, err := settings.HasTailscaleAuthKey()
+		tailscaleConfigured, err := hasConfiguredTailscaleAuthKey()
 		if err != nil {
 			log.Printf("Failed to read Tailscale auth key status: %v", err)
 		}
 		response["tailscale_auth_key_configured"] = tailscaleConfigured
-		response["tailscale_auth_key_path"] = settings.TailscaleAuthKeyFile
+		response["tailscale_auth_key_path"] = tailscaleAuthKeyPath
 		JSONResponse(w, response)
 
 	case http.MethodPost:
 		var req struct {
-			RemoteName             string  `json:"remote_name"`
-			RemotePath             string  `json:"remote_path"`
-			ReformatThreshold      float64 `json:"reformat_threshold"`
-			Transfers              int     `json:"transfers"`
-			Checkers               int     `json:"checkers"`
-			GooglePhotosEnabled    bool    `json:"google_photos_enabled"`
-			GooglePhotosRemoteName string  `json:"google_photos_remote_name"`
-			TailscaleAuthKey       string  `json:"tailscale_auth_key"`
+			RemoteName             *string  `json:"remote_name"`
+			RemotePath             *string  `json:"remote_path"`
+			ReformatThreshold      *float64 `json:"reformat_threshold"`
+			Transfers              *int     `json:"transfers"`
+			Checkers               *int     `json:"checkers"`
+			GooglePhotosEnabled    *bool    `json:"google_photos_enabled"`
+			GooglePhotos           *bool    `json:"google_photos"`
+			GooglePhotosRemoteName *string  `json:"google_photos_remote_name"`
+			TailscaleAuthKey       *string  `json:"tailscale_auth_key"`
 		}
 
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -405,66 +410,100 @@ func (ctx *Context) HandleSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if req.TailscaleAuthKey != "" {
-			if err := settings.ValidateTailscaleAuthKey(req.TailscaleAuthKey); err != nil {
+		if req.TailscaleAuthKey != nil && *req.TailscaleAuthKey != "" {
+			if err := settings.ValidateTailscaleAuthKey(*req.TailscaleAuthKey); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
 		}
 
 		// Update settings
-		if req.RemoteName != "" || req.RemotePath != "" {
-			if err := ctx.AppSettings.SetRemote(req.RemoteName, req.RemotePath); err != nil {
+		if req.RemoteName != nil || req.RemotePath != nil {
+			remoteName := ctx.AppSettings.GetRemoteName()
+			remotePath := ctx.AppSettings.GetRemotePath()
+			if req.RemoteName != nil {
+				remoteName = *req.RemoteName
+			}
+			if req.RemotePath != nil {
+				remotePath = *req.RemotePath
+			}
+			if err := ctx.AppSettings.SetRemote(remoteName, remotePath); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
 			// Update sync manager
-			ctx.SyncMgr.SetRemote(req.RemoteName, req.RemotePath)
+			ctx.SyncMgr.SetRemote(remoteName, remotePath)
 		}
 
-		if req.ReformatThreshold > 0 {
-			if err := ctx.AppSettings.SetReformatThreshold(req.ReformatThreshold); err != nil {
+		if req.ReformatThreshold != nil {
+			if err := ctx.AppSettings.SetReformatThreshold(*req.ReformatThreshold); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
 		}
 
-		if req.Transfers > 0 {
-			if err := ctx.AppSettings.SetTransfers(req.Transfers); err != nil {
+		if req.Transfers != nil {
+			if err := ctx.AppSettings.SetTransfers(*req.Transfers); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
 		}
 
-		if req.Checkers > 0 {
-			if err := ctx.AppSettings.SetCheckers(req.Checkers); err != nil {
+		if req.Checkers != nil {
+			if err := ctx.AppSettings.SetCheckers(*req.Checkers); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
 		}
 
-		// Update Google Photos settings
-		if err := ctx.AppSettings.SetGooglePhotos(req.GooglePhotosEnabled, req.GooglePhotosRemoteName); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		// Update sync manager with Google Photos settings
-		ctx.SyncMgr.SetGooglePhotos(req.GooglePhotosEnabled, req.GooglePhotosRemoteName)
+		// Update Google Photos settings only when requested. The legacy
+		// google_photos key is kept for older UI payloads.
+		if req.GooglePhotosEnabled != nil || req.GooglePhotos != nil || req.GooglePhotosRemoteName != nil {
+			googlePhotosEnabled := ctx.AppSettings.GetGooglePhotosEnabled()
+			googlePhotosRemoteName := ctx.AppSettings.GetGooglePhotosRemoteName()
+			if req.GooglePhotosEnabled != nil {
+				googlePhotosEnabled = *req.GooglePhotosEnabled
+			} else if req.GooglePhotos != nil {
+				googlePhotosEnabled = *req.GooglePhotos
+			}
+			if req.GooglePhotosRemoteName != nil {
+				googlePhotosRemoteName = *req.GooglePhotosRemoteName
+			}
 
-		if req.TailscaleAuthKey != "" {
-			if err := configureTailscale(req.TailscaleAuthKey); err != nil {
+			if err := ctx.AppSettings.SetGooglePhotos(googlePhotosEnabled, googlePhotosRemoteName); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			log.Println("Tailscale configured")
+			// Update sync manager with Google Photos settings
+			ctx.SyncMgr.SetGooglePhotos(googlePhotosEnabled, googlePhotosRemoteName)
+		}
+
+		response := map[string]any{"status": "ok"}
+		if req.TailscaleAuthKey != nil && *req.TailscaleAuthKey != "" {
+			if warning, err := configureTailscale(*req.TailscaleAuthKey); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			} else if warning != "" {
+				response["warning"] = warning
+			}
+			response["tailscale_auth_key_configured"] = true
+			response["tailscale_auth_key_path"] = tailscaleAuthKeyPath
+			log.Println("Tailscale auth key saved")
 		}
 
 		log.Println("Settings updated")
-		JSONResponse(w, map[string]any{"status": "ok"})
+		JSONResponse(w, response)
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+func hasConfiguredTailscaleAuthKey() (bool, error) {
+	if tailscaleAuthKeyPath == settings.TailscaleAuthKeyFile {
+		return settings.HasTailscaleAuthKey()
+	}
+	return settings.HasTailscaleAuthKeyAt(tailscaleAuthKeyPath)
 }
 
 type b2ConfigRequest struct {
@@ -547,12 +586,12 @@ func resolveB2Endpoint(endpoint, region string) (string, error) {
 	return "", fmt.Errorf("unknown B2 region: %s", region)
 }
 
-func configureTailscale(authKey string) error {
+func configureTailscale(authKey string) (string, error) {
 	if err := settings.ValidateTailscaleAuthKey(authKey); err != nil {
-		return err
+		return "", err
 	}
-	if err := settings.SaveTailscaleAuthKey(authKey); err != nil {
-		return fmt.Errorf("failed to store tailscale auth key: %w", err)
+	if err := settings.SaveTailscaleAuthKeyTo(tailscaleAuthKeyPath, authKey); err != nil {
+		return "", fmt.Errorf("failed to store tailscale auth key: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -568,14 +607,14 @@ func configureTailscale(authKey string) error {
 		args = append(args, "--hostname="+strings.TrimSpace(hostname))
 	}
 
-	output, err := tailscaleCommandContext(ctx, "tailscale", args...).CombinedOutput()
+	output, err := tailscaleCommandContext(ctx, tailscaleBinary, args...).CombinedOutput()
 	if err != nil {
 		details := strings.ReplaceAll(strings.TrimSpace(string(output)), authKey, "[redacted]")
 		if details == "" {
 			details = err.Error()
 		}
-		return fmt.Errorf("failed to configure tailscale: %s", details)
+		return fmt.Sprintf("Tailscale auth key was saved, but immediate Tailscale connect failed: %s", details), nil
 	}
 
-	return nil
+	return "", nil
 }
