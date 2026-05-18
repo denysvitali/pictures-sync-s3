@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/denysvitali/pictures-sync-s3/pkg/utils"
 )
 
 const (
@@ -153,25 +155,7 @@ func writePasswordFile(path, password string) error {
 		return fmt.Errorf("create password directory: %w", err)
 	}
 
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".gokr-pw-*.tmp")
-	if err != nil {
-		return fmt.Errorf("create temporary password file: %w", err)
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-
-	if _, err := tmp.WriteString(password + "\n"); err != nil {
-		tmp.Close()
-		return fmt.Errorf("write temporary password file: %w", err)
-	}
-	if err := tmp.Chmod(0600); err != nil {
-		tmp.Close()
-		return fmt.Errorf("set password file permissions: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close temporary password file: %w", err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := utils.AtomicWrite(path, []byte(password+"\n"), 0600); err != nil {
 		return fmt.Errorf("replace password file: %w", err)
 	}
 	return nil
