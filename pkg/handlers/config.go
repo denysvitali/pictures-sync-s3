@@ -562,6 +562,7 @@ func configureTailscale(authKey string) error {
 		"up",
 		"--auth-key=" + authKey,
 		"--ssh",
+		"--accept-dns=false",
 	}
 	if hostname, err := os.Hostname(); err == nil && strings.TrimSpace(hostname) != "" {
 		args = append(args, "--hostname="+strings.TrimSpace(hostname))
