@@ -86,6 +86,8 @@ func TestValidateGokrazyPassword(t *testing.T) {
 		{name: "too short", password: "short", wantErr: true},
 		{name: "leading whitespace", password: " photo-backup-2", wantErr: true},
 		{name: "newline", password: "photo\nbackup", wantErr: true},
+		{name: "non-ascii", password: "photo-backup-é", wantErr: true},
+		{name: "emoji", password: "photo-backup-🔒", wantErr: true},
 	}
 
 	for _, tt := range tests {

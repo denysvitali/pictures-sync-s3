@@ -140,6 +140,11 @@ func ValidateGokrazyPassword(password string) error {
 	if strings.ContainsAny(password, "\x00\r\n\t") {
 		return errors.New("new password contains invalid control characters")
 	}
+	for i, r := range password {
+		if r < 32 || r > 126 {
+			return fmt.Errorf("new password contains invalid character at position %d (only printable ASCII characters allowed)", i)
+		}
+	}
 	return nil
 }
 
