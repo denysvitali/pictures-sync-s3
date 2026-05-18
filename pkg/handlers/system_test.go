@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"syscall"
 	"testing"
 	"time"
 
@@ -43,6 +45,90 @@ func TestHandleSystemTimeSyncsClientTime(t *testing.T) {
 	}
 	if response["synced"] != true {
 		t.Fatalf("expected synced response, got %v", response)
+	}
+}
+
+func TestHandleSystemServicesRestartDefaultsToAppServices(t *testing.T) {
+	restore := overrideServiceRestartForTest(t)
+	defer restore()
+
+	findServicePIDs = func(exePath string) ([]int, error) {
+		if exePath != "/user/pictures-sync" {
+			t.Fatalf("findServicePIDs path = %q", exePath)
+		}
+		return []int{42}, nil
+	}
+	currentPID = func() int { return 99 }
+
+	var signaled []int
+	signalService = func(pid int, sig syscall.Signal) error {
+		if sig != syscall.SIGTERM {
+			t.Fatalf("signal = %v, want SIGTERM", sig)
+		}
+		signaled = append(signaled, pid)
+		return nil
+	}
+	scheduleServiceSignal = func(fn func()) {
+		fn()
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/system/services/restart", bytes.NewBufferString(`{}`))
+	rr := httptest.NewRecorder()
+
+	(&Context{}).HandleSystemServicesRestart(rr, req)
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusAccepted, rr.Body.String())
+	}
+	if !reflect.DeepEqual(signaled, []int{42, 99}) {
+		t.Fatalf("signaled pids = %#v, want []int{42, 99}", signaled)
+	}
+
+	var response struct {
+		Success bool                   `json:"success"`
+		Results []serviceRestartResult `json:"results"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&response); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if !response.Success {
+		t.Fatal("success = false, want true")
+	}
+	if len(response.Results) != 2 {
+		t.Fatalf("results len = %d, want 2", len(response.Results))
+	}
+	if response.Results[0].Service != servicePicturesSync || response.Results[0].Status != "signaled" {
+		t.Fatalf("unexpected first result: %+v", response.Results[0])
+	}
+	if response.Results[1].Service != serviceWebUI || response.Results[1].Status != "scheduled" {
+		t.Fatalf("unexpected second result: %+v", response.Results[1])
+	}
+}
+
+func TestHandleSystemServicesRestartRejectsUnknownService(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/system/services/restart", bytes.NewBufferString(`{"services":["ssh"]}`))
+	rr := httptest.NewRecorder()
+
+	(&Context{}).HandleSystemServicesRestart(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusBadRequest, rr.Body.String())
+	}
+}
+
+func overrideServiceRestartForTest(t *testing.T) func() {
+	t.Helper()
+
+	oldFind := findServicePIDs
+	oldSignal := signalService
+	oldCurrentPID := currentPID
+	oldSchedule := scheduleServiceSignal
+
+	return func() {
+		findServicePIDs = oldFind
+		signalService = oldSignal
+		currentPID = oldCurrentPID
+		scheduleServiceSignal = oldSchedule
 	}
 }
 

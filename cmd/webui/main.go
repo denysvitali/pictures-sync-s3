@@ -287,6 +287,7 @@ func main() {
 	http.HandleFunc("/api/ota/install", ctx.HandleOTAInstall)
 	http.HandleFunc("/api/system/time", ctx.HandleSystemTime)
 	http.HandleFunc("/api/system/tls-certificate", ctx.HandleSystemTLSCertificate)
+	http.HandleFunc("/api/system/services/restart", ctx.HandleSystemServicesRestart)
 	http.HandleFunc("/ws", websocket.HandleWebSocket(stateMgr, eventMgr, otaMgr))
 
 	// SPA route and static assets for React frontend

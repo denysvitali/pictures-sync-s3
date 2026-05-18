@@ -23,6 +23,7 @@ import {
   getSystemTime,
   syncSystemTime,
   generateTLSCertificate,
+  restartAppServices,
 } from '../api.js'
 
 function describeError(err) {
@@ -1164,6 +1165,8 @@ function SystemMaintenanceSection() {
   const [loading, setLoading] = useState(true)
   const [syncingTime, setSyncingTime] = useState(false)
   const [generatingCert, setGeneratingCert] = useState(false)
+  const [restartTarget, setRestartTarget] = useState('app')
+  const [restartingServices, setRestartingServices] = useState(false)
 
   const cert = status?.tls_certificate || {}
   const certReady = !!cert.exists && !!cert.valid_now && !cert.needs_regeneration
@@ -1212,6 +1215,28 @@ function SystemMaintenanceSection() {
     }
   }, [deviceUrl, toast])
 
+  const handleRestartServices = useCallback(async () => {
+    const labels = {
+      app: 'app services',
+      'pictures-sync': 'sync daemon',
+      webui: 'web UI',
+    }
+    const services = restartTarget === 'app' ? ['pictures-sync', 'webui'] : [restartTarget]
+    if (!window.confirm(`Restart ${labels[restartTarget] || 'selected services'}?`)) {
+      return
+    }
+
+    setRestartingServices(true)
+    try {
+      await restartAppServices(deviceUrl, services)
+      toast.success('Service restart requested')
+    } catch (err) {
+      toast.error(describeError(err) || 'Failed to restart services')
+    } finally {
+      setRestartingServices(false)
+    }
+  }, [deviceUrl, restartTarget, toast])
+
   return (
     <AccordionSection title="System Clock & TLS" icon="clock" badge={
       loading ? null : (
@@ -1258,6 +1283,32 @@ function SystemMaintenanceSection() {
               {cert.error}
             </p>
           ) : null}
+          <div className="bg-surface-900 rounded-lg p-3">
+            <Field label="Restart services">
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <SelectInput
+                  value={restartTarget}
+                  onChange={setRestartTarget}
+                  disabled={restartingServices}
+                  options={[
+                    { value: 'app', label: 'App services' },
+                    { value: 'pictures-sync', label: 'Sync daemon' },
+                    { value: 'webui', label: 'Web UI' },
+                  ]}
+                />
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  loading={restartingServices}
+                  disabled={syncingTime || generatingCert || restartingServices}
+                  onClick={handleRestartServices}
+                >
+                  <Icon name="arrow-path" className="w-4 h-4" />
+                  Restart
+                </Button>
+              </div>
+            </Field>
+          </div>
           <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 pt-1">
             <Button
               variant="ghost"

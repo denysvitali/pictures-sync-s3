@@ -180,6 +180,8 @@ export const syncSystemTime = (d, clientTime) =>
   apiRequest('/api/system/time', { deviceUrl: d, method: 'POST', body: { client_time: clientTime } })
 export const generateTLSCertificate = (d, hosts = []) =>
   apiRequest('/api/system/tls-certificate', { deviceUrl: d, method: 'POST', body: { hosts } })
+export const restartAppServices = (d, services = ['pictures-sync', 'webui']) =>
+  apiRequest('/api/system/services/restart', { deviceUrl: d, method: 'POST', body: { services } })
 export const getDevices = (d) => apiRequest('/api/devices', { deviceUrl: d })
 export const selectDevice = (d, devicePath) =>
   apiRequest('/api/devices/select', { deviceUrl: d, method: 'POST', body: { device_path: devicePath } })
