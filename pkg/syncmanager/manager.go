@@ -41,8 +41,8 @@ type Progress struct {
 	Percentage       int     `json:"percentage"`
 	TransferredFiles int     `json:"transferred_files"`
 	TotalFiles       int     `json:"total_files"`
-	Speed            float64 `json:"speed"` // bytes per second
-	ETA              int     `json:"eta"`   // seconds
+	Speed            float64 `json:"speed"`                       // bytes per second
+	ETA              int     `json:"eta"`                         // seconds
 	CurrentFile      string  `json:"current_file,omitempty"`      // Current file being transferred
 	CurrentFileSize  int64   `json:"current_file_size,omitempty"` // Size of current file
 }
@@ -71,6 +71,20 @@ func (m *Manager) SetRemote(remoteName, remotePath string) {
 	defer m.mu.Unlock()
 	m.remoteName = remoteName
 	m.remotePath = remotePath
+}
+
+// ApplySettings updates sync runtime settings from persisted application
+// settings. It is used by the daemon before starting a sync so changes made by
+// the separate web UI process are picked up without a restart.
+func (m *Manager) ApplySettings(remoteName, remotePath string, transfers, checkers int, googlePhotosEnabled bool, googlePhotosRemoteName string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.remoteName = remoteName
+	m.remotePath = remotePath
+	m.transfers = transfers
+	m.checkers = checkers
+	m.googlePhotosEnabled = googlePhotosEnabled
+	m.googlePhotosRemoteName = googlePhotosRemoteName
 }
 
 // SetGooglePhotos updates the Google Photos settings

@@ -10,7 +10,6 @@ import {
   getConfig,
   saveConfig,
   testConfig,
-  getB2Regions,
   saveB2Config,
   getSettings,
   saveSettings,
@@ -470,25 +469,12 @@ function B2SetupSection() {
   const [bucket, setBucket] = useState('')
   const [keyId, setKeyId] = useState('')
   const [appKey, setAppKey] = useState('')
-  const [region, setRegion] = useState('')
-  const [regions, setRegions] = useState([])
   const [saving, setSaving] = useState(false)
-  const [loadingRegions, setLoadingRegions] = useState(true)
-
-  useEffect(() => {
-    let cancelled = false
-    getB2Regions(deviceUrl)
-      .then((data) => { if (!cancelled) setRegions(Array.isArray(data) ? data : []) })
-      .catch(() => {})
-      .finally(() => { if (!cancelled) setLoadingRegions(false) })
-    return () => { cancelled = true }
-  }, [deviceUrl])
 
   const handleSave = useCallback(async () => {
     if (!bucket.trim()) { toast.error('Bucket name is required'); return }
     if (!keyId.trim()) { toast.error('Key ID is required'); return }
     if (!appKey.trim()) { toast.error('Application key is required'); return }
-    if (!region) { toast.error('Region is required'); return }
 
     const bucketName = bucket.trim()
     setSaving(true)
@@ -499,7 +485,6 @@ function B2SetupSection() {
         application_key: appKey.trim(),
         remote_name: 'b2',
         remote_path: `${bucketName}/photos`,
-        region,
       })
       if (res?.success === false) {
         throw new Error(res.error || 'Failed to save B2 configuration')
@@ -516,7 +501,7 @@ function B2SetupSection() {
     } finally {
       setSaving(false)
     }
-  }, [deviceUrl, bucket, keyId, appKey, region, regions, toast])
+  }, [deviceUrl, bucket, keyId, appKey, toast])
 
   return (
     <AccordionSection title="Backblaze B2 Quick Setup" icon="cloud">
@@ -544,24 +529,6 @@ function B2SetupSection() {
             placeholder="K001..."
             disabled={saving}
           />
-        </Field>
-        <Field label="Region">
-          {loadingRegions ? (
-            <div className="flex items-center gap-2 py-2">
-              <LoadingSpinner size="sm" />
-              <span className="text-xs text-surface-400">Loading regions...</span>
-            </div>
-          ) : (
-            <SelectInput
-              value={region}
-              onChange={setRegion}
-              placeholder="Select a region"
-              options={regions.map((r) =>
-                typeof r === 'string' ? r : { value: r.id || r.name || r.value, label: r.name || r.id || r.value }
-              )}
-              disabled={saving}
-            />
-          )}
         </Field>
         <div className="flex justify-end pt-2">
           <Button variant="primary" size="sm" loading={saving} onClick={handleSave}>

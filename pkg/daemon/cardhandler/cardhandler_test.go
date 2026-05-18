@@ -59,11 +59,17 @@ func setupTestEnvironment(t *testing.T) (*Handler, *state.Manager, *testSyncMana
 
 // testSyncManager is a mock implementation of syncmanager.Manager
 type testSyncManager struct {
-	mu           sync.Mutex
-	isRunning    bool
-	cancelCalled bool
-	cancelFunc   func()
-	syncError    error
+	mu                     sync.Mutex
+	isRunning              bool
+	cancelCalled           bool
+	cancelFunc             func()
+	syncError              error
+	remoteName             string
+	remotePath             string
+	transfers              int
+	checkers               int
+	googlePhotosEnabled    bool
+	googlePhotosRemoteName string
 }
 
 func (m *testSyncManager) setIsRunning(running bool) {
@@ -101,6 +107,17 @@ func (m *testSyncManager) Sync(string, string, int, int64) error {
 	return m.syncError
 }
 
+func (m *testSyncManager) ApplySettings(remoteName, remotePath string, transfers, checkers int, googlePhotosEnabled bool, googlePhotosRemoteName string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.remoteName = remoteName
+	m.remotePath = remotePath
+	m.transfers = transfers
+	m.checkers = checkers
+	m.googlePhotosEnabled = googlePhotosEnabled
+	m.googlePhotosRemoteName = googlePhotosRemoteName
+}
+
 // TestNewHandler verifies handler initialization
 func TestNewHandler(t *testing.T) {
 	handler, stateMgr, mockSyncMgr, _ := setupTestEnvironment(t)
@@ -116,6 +133,48 @@ func TestNewHandler(t *testing.T) {
 	}
 	if handler.syncStarting {
 		t.Error("syncStarting should be false initially")
+	}
+}
+
+func TestRefreshSettingsAppliesPersistedRemote(t *testing.T) {
+	handler, _, mockSyncMgr, _ := setupTestEnvironment(t)
+
+	if err := handler.settings.SetRemote("b2", "my-photo-backup/photos"); err != nil {
+		t.Fatalf("SetRemote() error = %v", err)
+	}
+	if err := handler.settings.SetTransfers(3); err != nil {
+		t.Fatalf("SetTransfers() error = %v", err)
+	}
+	if err := handler.settings.SetCheckers(5); err != nil {
+		t.Fatalf("SetCheckers() error = %v", err)
+	}
+	if err := handler.settings.SetGooglePhotos(true, "gphotos"); err != nil {
+		t.Fatalf("SetGooglePhotos() error = %v", err)
+	}
+
+	if err := handler.refreshSettings(); err != nil {
+		t.Fatalf("refreshSettings() error = %v", err)
+	}
+
+	mockSyncMgr.mu.Lock()
+	defer mockSyncMgr.mu.Unlock()
+	if mockSyncMgr.remoteName != "b2" {
+		t.Fatalf("remoteName = %q, want b2", mockSyncMgr.remoteName)
+	}
+	if mockSyncMgr.remotePath != "my-photo-backup/photos" {
+		t.Fatalf("remotePath = %q, want my-photo-backup/photos", mockSyncMgr.remotePath)
+	}
+	if mockSyncMgr.transfers != 3 {
+		t.Fatalf("transfers = %d, want 3", mockSyncMgr.transfers)
+	}
+	if mockSyncMgr.checkers != 5 {
+		t.Fatalf("checkers = %d, want 5", mockSyncMgr.checkers)
+	}
+	if !mockSyncMgr.googlePhotosEnabled {
+		t.Fatal("googlePhotosEnabled = false, want true")
+	}
+	if mockSyncMgr.googlePhotosRemoteName != "gphotos" {
+		t.Fatalf("googlePhotosRemoteName = %q, want gphotos", mockSyncMgr.googlePhotosRemoteName)
 	}
 }
 

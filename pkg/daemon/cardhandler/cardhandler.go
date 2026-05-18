@@ -57,6 +57,7 @@ type syncManager interface {
 	IsRunning() bool
 	Cancel() error
 	Sync(sourcePath, cardID string, totalFiles int, totalBytes int64) error
+	ApplySettings(remoteName, remotePath string, transfers, checkers int, googlePhotosEnabled bool, googlePhotosRemoteName string)
 }
 
 // NewHandler creates a new card handler
@@ -189,6 +190,13 @@ func (h *Handler) processSyncOperation(event sdmonitor.Event) {
 		return
 	}
 
+	if err := h.refreshSettings(); err != nil {
+		log.Printf("Error loading latest settings: %v", err)
+		h.eventMgr.EmitError("Failed to load sync settings", err)
+		h.stateMgr.SetStatus(state.StatusError)
+		return
+	}
+
 	// Count photos
 	totalFiles, totalBytes, err := sdmonitor.CountPhotos(event.MountPath)
 	if err != nil {
@@ -254,6 +262,24 @@ func (h *Handler) processSyncOperation(event sdmonitor.Event) {
 
 	// Perform the sync
 	h.performSync(event.MountPath, cardID, totalFiles, totalBytes)
+}
+
+func (h *Handler) refreshSettings() error {
+	latest, err := settings.Load()
+	if err != nil {
+		return err
+	}
+
+	h.settings = latest
+	h.syncMgr.ApplySettings(
+		latest.GetRemoteName(),
+		latest.GetRemotePath(),
+		latest.GetTransfers(),
+		latest.GetCheckers(),
+		latest.GetGooglePhotosEnabled(),
+		latest.GetGooglePhotosRemoteName(),
+	)
+	return nil
 }
 
 // handleNoDCIM logs details about a card without a DCIM directory
