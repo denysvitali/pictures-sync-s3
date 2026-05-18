@@ -402,6 +402,7 @@ func (ctx *Context) HandleSettings(w http.ResponseWriter, r *http.Request) {
 			GooglePhotosEnabled    *bool    `json:"google_photos_enabled"`
 			GooglePhotos           *bool    `json:"google_photos"`
 			GooglePhotosRemoteName *string  `json:"google_photos_remote_name"`
+			Prefer5GHzWiFi         *bool    `json:"prefer_5ghz_wifi"`
 			TailscaleAuthKey       *string  `json:"tailscale_auth_key"`
 		}
 
@@ -476,6 +477,16 @@ func (ctx *Context) HandleSettings(w http.ResponseWriter, r *http.Request) {
 			}
 			// Update sync manager with Google Photos settings
 			ctx.SyncMgr.SetGooglePhotos(googlePhotosEnabled, googlePhotosRemoteName)
+		}
+
+		if req.Prefer5GHzWiFi != nil {
+			if err := ctx.AppSettings.SetPrefer5GHzWiFi(*req.Prefer5GHzWiFi); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if ctx.WiFiMgr != nil {
+				ctx.WiFiMgr.SetPrefer5GHzNetworks(*req.Prefer5GHzWiFi)
+			}
 		}
 
 		response := map[string]any{"status": "ok"}

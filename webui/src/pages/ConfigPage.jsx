@@ -551,6 +551,7 @@ function SyncSettingsSection() {
   const [transfers, setTransfers] = useState('4')
   const [bandwidth, setBandwidth] = useState('')
   const [googlePhotos, setGooglePhotos] = useState(false)
+  const [prefer5GHzWiFi, setPrefer5GHzWiFi] = useState(true)
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
@@ -566,6 +567,7 @@ function SyncSettingsSection() {
           setTransfers(String(data.transfers ?? '4'))
           setBandwidth(data.bandwidth || '')
           setGooglePhotos(!!(data.google_photos_enabled ?? data.google_photos))
+          setPrefer5GHzWiFi(data.prefer_5ghz_wifi ?? true)
         }
       })
       .catch((err) => { if (!cancelled) setLoadError(describeError(err)) })
@@ -590,6 +592,7 @@ function SyncSettingsSection() {
         transfers: t,
         bandwidth: bandwidth.trim() || undefined,
         google_photos_enabled: googlePhotos,
+        prefer_5ghz_wifi: prefer5GHzWiFi,
       })
       toast.success('Sync settings saved')
     } catch (err) {
@@ -597,7 +600,7 @@ function SyncSettingsSection() {
     } finally {
       setSaving(false)
     }
-  }, [deviceUrl, transfers, bandwidth, googlePhotos, loadError, toast])
+  }, [deviceUrl, transfers, bandwidth, googlePhotos, prefer5GHzWiFi, loadError, toast])
 
   return (
     <AccordionSection title="Sync Settings" icon="settings">
@@ -634,6 +637,14 @@ function SyncSettingsSection() {
               checked={googlePhotos}
               onChange={setGooglePhotos}
               label="Enable Google Photos integration"
+              disabled={saving || !!loadError}
+            />
+          </div>
+          <div className="py-2">
+            <Toggle
+              checked={prefer5GHzWiFi}
+              onChange={setPrefer5GHzWiFi}
+              label="Prefer 5 GHz Wi-Fi for matching network names"
               disabled={saving || !!loadError}
             />
           </div>

@@ -208,6 +208,7 @@ func main() {
 	if err != nil {
 		log.Printf("Warning: Failed to initialize WiFi manager: %v", err)
 	} else {
+		wifiMgr.SetPrefer5GHzNetworks(appSettings.GetPrefer5GHzWiFi())
 		// Log configured WiFi networks
 		logConfiguredWiFiNetworks(wifiMgr)
 	}

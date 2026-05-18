@@ -32,6 +32,9 @@ type Settings struct {
 	GooglePhotosEnabled    bool   `json:"google_photos_enabled"`     // Enable uploading JPG files to Google Photos
 	GooglePhotosRemoteName string `json:"google_photos_remote_name"` // Google Photos rclone remote name
 
+	// WiFi scan behavior
+	Prefer5GHzWiFi bool `json:"prefer_5ghz_wifi"` // Prefer 5 GHz APs when duplicate SSIDs are found
+
 	mu sync.RWMutex
 }
 
@@ -52,6 +55,10 @@ func (s *Settings) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
 
 	s.RemoteName = decoded.RemoteName
 	s.RemotePath = decoded.RemotePath
@@ -60,6 +67,10 @@ func (s *Settings) UnmarshalJSON(data []byte) error {
 	s.Checkers = decoded.Checkers
 	s.GooglePhotosEnabled = decoded.GooglePhotosEnabled
 	s.GooglePhotosRemoteName = decoded.GooglePhotosRemoteName
+	s.Prefer5GHzWiFi = decoded.Prefer5GHzWiFi
+	if _, ok := raw["prefer_5ghz_wifi"]; !ok {
+		s.Prefer5GHzWiFi = true
+	}
 	return nil
 }
 
@@ -121,6 +132,7 @@ func DefaultSettings() *Settings {
 		ReformatThreshold: 0.3, // 30%
 		Transfers:         4,   // 4 parallel uploads
 		Checkers:          8,   // 8 parallel file checkers
+		Prefer5GHzWiFi:    true,
 	}
 }
 
@@ -318,6 +330,13 @@ func (s *Settings) GetGooglePhotosRemoteName() string {
 	return s.GooglePhotosRemoteName
 }
 
+// GetPrefer5GHzWiFi returns whether 5 GHz APs are preferred for duplicate SSIDs.
+func (s *Settings) GetPrefer5GHzWiFi() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.Prefer5GHzWiFi
+}
+
 // Setters (with validation and auto-save)
 
 // SetRemote updates the remote name and path
@@ -390,6 +409,15 @@ func (s *Settings) SetGooglePhotos(enabled bool, remoteName string) error {
 	return s.Save()
 }
 
+// SetPrefer5GHzWiFi updates WiFi scan preference behavior.
+func (s *Settings) SetPrefer5GHzWiFi(prefer bool) error {
+	s.mu.Lock()
+	s.Prefer5GHzWiFi = prefer
+	s.mu.Unlock()
+
+	return s.Save()
+}
+
 // Helper methods
 
 // ToJSON returns settings as JSON for API responses
@@ -405,6 +433,7 @@ func (s *Settings) ToJSON() map[string]any {
 		"checkers":                  s.Checkers,
 		"google_photos_enabled":     s.GooglePhotosEnabled,
 		"google_photos_remote_name": s.GooglePhotosRemoteName,
+		"prefer_5ghz_wifi":          s.Prefer5GHzWiFi,
 	}
 }
 
@@ -438,5 +467,6 @@ func (s *Settings) Clone() *Settings {
 		Checkers:               s.Checkers,
 		GooglePhotosEnabled:    s.GooglePhotosEnabled,
 		GooglePhotosRemoteName: s.GooglePhotosRemoteName,
+		Prefer5GHzWiFi:         s.Prefer5GHzWiFi,
 	}
 }

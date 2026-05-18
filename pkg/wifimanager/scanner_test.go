@@ -112,3 +112,37 @@ func TestScanInterfaceFallsBackToCachedAccessPoints(t *testing.T) {
 		t.Fatalf("APs = %+v, want cached connected AP", aps)
 	}
 }
+
+func TestProcessAccessPointsPrefers5GHzDuplicateSSID(t *testing.T) {
+	networks := make(map[string]ScanResult)
+	aps := []*wifi.BSS{
+		{SSID: "Home", Frequency: 2412, Signal: -4000},
+		{SSID: "Home", Frequency: 5180, Signal: -6500},
+	}
+
+	processed, _, skipped := processAccessPoints(aps, networks, true)
+	if processed != 1 {
+		t.Fatalf("processed = %d, want 1", processed)
+	}
+	if skipped != 1 {
+		t.Fatalf("skipped = %d, want 1", skipped)
+	}
+	got := networks["Home"]
+	if got.Frequency != 5180 {
+		t.Fatalf("frequency = %d, want 5180", got.Frequency)
+	}
+}
+
+func TestProcessAccessPointsKeepsFirstDuplicateSSIDWhen5GHzPreferenceDisabled(t *testing.T) {
+	networks := make(map[string]ScanResult)
+	aps := []*wifi.BSS{
+		{SSID: "Home", Frequency: 2412, Signal: -4000},
+		{SSID: "Home", Frequency: 5180, Signal: -6500},
+	}
+
+	processAccessPoints(aps, networks, false)
+	got := networks["Home"]
+	if got.Frequency != 2412 {
+		t.Fatalf("frequency = %d, want 2412", got.Frequency)
+	}
+}

@@ -852,9 +852,11 @@ func TestMigrationFromOldSettingsFormat(t *testing.T) {
 		if s.GooglePhotosRemoteName != "" {
 			t.Error("GooglePhotosRemoteName should default to empty string")
 		}
+		if !s.Prefer5GHzWiFi {
+			t.Error("Prefer5GHzWiFi should default to true")
+		}
 
-		// This is actually handled correctly by Go's JSON decoder
-		t.Log("Migration from old format works correctly (new fields get zero values)")
+		t.Log("Migration from old format works correctly")
 	})
 
 	t.Run("BUG: no version field", func(t *testing.T) {

@@ -191,6 +191,9 @@ func TestSettingsValidate(t *testing.T) {
 		if err := s.Validate(); err != nil {
 			t.Errorf("DefaultSettings().Validate() error = %v, want nil", err)
 		}
+		if !s.GetPrefer5GHzWiFi() {
+			t.Error("DefaultSettings() should prefer 5 GHz WiFi")
+		}
 	})
 
 	t.Run("invalid remote name", func(t *testing.T) {
@@ -326,6 +329,9 @@ func TestHelperMethods(t *testing.T) {
 		}
 		if json["remote_path"] != s.RemotePath {
 			t.Error("ToJSON did not include remote_path")
+		}
+		if json["prefer_5ghz_wifi"] != s.Prefer5GHzWiFi {
+			t.Error("ToJSON did not include prefer_5ghz_wifi")
 		}
 	})
 }

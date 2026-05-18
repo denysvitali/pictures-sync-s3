@@ -92,7 +92,7 @@ func TestHandleWiFiNetworks_NoPasswordExposure(t *testing.T) {
 func containsPassword(body, password string) bool {
 	return len(password) > 0 && len(body) > 0 &&
 		(body[0:1] == password[0:1] || body[len(body)-1:] == password[len(password)-1:] ||
-		 stringContains(body, password))
+			stringContains(body, password))
 }
 
 func stringContains(s, substr string) bool {
@@ -124,6 +124,8 @@ func (m *testWiFiManager) RemoveNetwork(ssid string) error {
 func (m *testWiFiManager) ReorderNetworks(orderedSSIDs []string) error {
 	return nil
 }
+
+func (m *testWiFiManager) SetPrefer5GHzNetworks(prefer bool) {}
 
 func (m *testWiFiManager) ScanNetworks() ([]wifimanager.ScanResult, error) {
 	return nil, nil

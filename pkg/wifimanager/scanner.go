@@ -72,6 +72,7 @@ func (m *Manager) ScanNetworks() ([]ScanResult, error) {
 	totalAPsFound := 0
 	hiddenCount := 0
 	skippedCount := 0
+	prefer5GHz := m.getPrefer5GHzNetworks()
 
 	for intfIndex, intf := range interfaces {
 		log.Printf("=== Processing interface %d/%d: %s ===", intfIndex+1, len(interfaces), intf.Name)
@@ -86,7 +87,7 @@ func (m *Manager) ScanNetworks() ([]ScanResult, error) {
 		totalAPsFound += len(accessPoints)
 
 		// Process access points
-		processed, hidden, skipped := processAccessPoints(accessPoints, networksMap)
+		processed, hidden, skipped := processAccessPoints(accessPoints, networksMap, prefer5GHz)
 		hiddenCount += hidden
 		skippedCount += skipped
 
@@ -174,7 +175,7 @@ func readAccessPointsWithFallback(cl scanClient, intf *wifi.Interface) ([]*wifi.
 
 // processAccessPoints processes a list of access points and adds unique ones to the map
 // Returns: number processed, number hidden, number skipped as duplicates
-func processAccessPoints(accessPoints []*wifi.BSS, networksMap map[string]ScanResult) (int, int, int) {
+func processAccessPoints(accessPoints []*wifi.BSS, networksMap map[string]ScanResult, prefer5GHz bool) (int, int, int) {
 	processed := 0
 	hiddenCount := 0
 	skippedCount := 0
@@ -204,9 +205,14 @@ func processAccessPoints(accessPoints []*wifi.BSS, networksMap map[string]ScanRe
 		// Check for duplicate SSIDs
 		key := ap.SSID
 		if existing, exists := networksMap[key]; exists {
-			log.Printf("    → DUPLICATE SSID '%s' (keeping first, BSSID was %s)",
-				ap.SSID, ap.BSSID.String())
-			_ = existing // Keep the first one found
+			if prefer5GHz && shouldReplaceDuplicateSSID(existing, result) {
+				networksMap[key] = result
+				log.Printf("    → DUPLICATE SSID '%s' (using preferred frequency %dMHz over %dMHz)",
+					ap.SSID, result.Frequency, existing.Frequency)
+			} else {
+				log.Printf("    → DUPLICATE SSID '%s' (keeping existing frequency %dMHz, BSSID was %s)",
+					ap.SSID, existing.Frequency, ap.BSSID.String())
+			}
 			skippedCount++
 		} else {
 			networksMap[key] = result
@@ -216,6 +222,22 @@ func processAccessPoints(accessPoints []*wifi.BSS, networksMap map[string]ScanRe
 	}
 
 	return processed, hiddenCount, skippedCount
+}
+
+func shouldReplaceDuplicateSSID(existing, candidate ScanResult) bool {
+	existing5GHz := is5GHzFrequency(existing.Frequency)
+	candidate5GHz := is5GHzFrequency(candidate.Frequency)
+	if existing5GHz != candidate5GHz {
+		return candidate5GHz
+	}
+	if existing5GHz && candidate5GHz {
+		return candidate.Signal > existing.Signal
+	}
+	return false
+}
+
+func is5GHzFrequency(frequency int) bool {
+	return frequency >= 5000 && frequency < 6000
 }
 
 // GetCurrentConnection returns the currently connected network with signal strength

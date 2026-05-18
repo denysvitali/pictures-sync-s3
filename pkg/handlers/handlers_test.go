@@ -66,6 +66,7 @@ func (m *mockWiFiManager) GetNetworks() []wifimanager.Network              { ret
 func (m *mockWiFiManager) AddNetwork(ssid, password string) error          { return nil }
 func (m *mockWiFiManager) RemoveNetwork(ssid string) error                 { return nil }
 func (m *mockWiFiManager) ReorderNetworks(ssids []string) error            { return nil }
+func (m *mockWiFiManager) SetPrefer5GHzNetworks(prefer bool)               {}
 func (m *mockWiFiManager) ScanNetworks() ([]wifimanager.ScanResult, error) { return nil, nil }
 func (m *mockWiFiManager) ListNetworks() ([]wifimanager.Network, error)    { return nil, nil }
 func (m *mockWiFiManager) GetCurrentConnection() (*wifimanager.ConnectionInfo, error) {

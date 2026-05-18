@@ -18,20 +18,23 @@ type WiFiManager interface {
 	AddNetwork(ssid, password string) error
 	RemoveNetwork(ssid string) error
 	ReorderNetworks(orderedSSIDs []string) error
+	SetPrefer5GHzNetworks(prefer bool)
 	ScanNetworks() ([]ScanResult, error)
 	GetCurrentConnection() (*ConnectionInfo, error)
 }
 
 // Manager manages WiFi configuration
 type Manager struct {
-	mu       sync.RWMutex
-	networks []Network
+	mu                 sync.RWMutex
+	networks           []Network
+	prefer5GHzNetworks bool
 }
 
 // NewManager creates a new WiFi manager
 func NewManager() (*Manager, error) {
 	m := &Manager{
-		networks: make([]Network, 0),
+		networks:           make([]Network, 0),
+		prefer5GHzNetworks: true,
 	}
 
 	// Load existing configuration
@@ -57,6 +60,19 @@ func (m *Manager) GetNetworks() []Network {
 	networks := make([]Network, len(m.networks))
 	copy(networks, m.networks)
 	return networks
+}
+
+// SetPrefer5GHzNetworks sets whether scans should prefer 5 GHz APs for duplicate SSIDs.
+func (m *Manager) SetPrefer5GHzNetworks(prefer bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.prefer5GHzNetworks = prefer
+}
+
+func (m *Manager) getPrefer5GHzNetworks() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.prefer5GHzNetworks
 }
 
 // AddNetwork adds a new WiFi network
