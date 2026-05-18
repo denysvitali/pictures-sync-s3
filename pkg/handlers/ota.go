@@ -20,14 +20,15 @@ import (
 const goZeroPseudoVersion = "v0.0.0-00010101000000-000000000000"
 
 type otaReleaseCandidate struct {
-	TagName     string    `json:"tag_name"`
-	Name        string    `json:"name"`
-	PublishedAt time.Time `json:"published_at"`
-	AssetName   string    `json:"asset_name"`
-	AssetSize   int64     `json:"asset_size"`
-	AssetURL    string    `json:"asset_url"`
-	HTMLURL     string    `json:"html_url"`
-	Installed   bool      `json:"installed"`
+	TagName         string    `json:"tag_name"`
+	Name            string    `json:"name"`
+	PublishedAt     time.Time `json:"published_at"`
+	TargetCommitish string    `json:"target_commitish,omitempty"`
+	AssetName       string    `json:"asset_name"`
+	AssetSize       int64     `json:"asset_size"`
+	AssetURL        string    `json:"asset_url"`
+	HTMLURL         string    `json:"html_url"`
+	Installed       bool      `json:"installed"`
 }
 
 type otaInstallHistoryItem struct {
@@ -113,15 +114,29 @@ func (ctx *Context) HandleOTAStatus(w http.ResponseWriter, r *http.Request) {
 		for _, candidate := range releases {
 			asset := candidate.Assets[0]
 			option := otaReleaseCandidate{
-				TagName:     candidate.TagName,
-				Name:        candidate.Name,
-				PublishedAt: candidate.PublishedAt,
-				AssetName:   asset.Name,
-				AssetSize:   asset.Size,
-				AssetURL:    asset.BrowserDownloadURL,
-				HTMLURL:     candidate.HTMLURL,
+				TagName:         candidate.TagName,
+				Name:            candidate.Name,
+				PublishedAt:     candidate.PublishedAt,
+				TargetCommitish: candidate.TargetCommitish,
+				AssetName:       asset.Name,
+				AssetSize:       asset.Size,
+				AssetURL:        asset.BrowserDownloadURL,
+				HTMLURL:         candidate.HTMLURL,
 			}
-			if sameReleaseVersion(option.TagName, current.Version) {
+			releaseCommit := candidate.TargetCommitish
+			if !response.UpdateAvailable && shouldResolveReleaseTagCommit(
+				current.Version,
+				current.Commit,
+				installedAt,
+				option.TagName,
+				releaseCommit,
+				option.PublishedAt,
+			) {
+				if tagCommit, err := ctx.OTAMgr.ReleaseTagCommit(r.Context(), option.TagName); err == nil {
+					releaseCommit = tagCommit
+				}
+			}
+			if isReleaseInstalled(current.Version, current.Commit, option.TagName, releaseCommit) {
 				option.Installed = true
 			}
 			if response.LatestVersion == "" {
@@ -130,8 +145,10 @@ func (ctx *Context) HandleOTAStatus(w http.ResponseWriter, r *http.Request) {
 			if response.UpdateAvailable == false {
 				response.UpdateAvailable = isReleaseUpdateAvailable(
 					current.Version,
+					current.Commit,
 					installedAt,
 					option.TagName,
+					releaseCommit,
 					option.PublishedAt,
 				)
 			}
@@ -179,8 +196,8 @@ func parseBuildDate(buildDate string) time.Time {
 	return parsed
 }
 
-func isReleaseUpdateAvailable(currentVersion string, installedAt time.Time, releaseTag string, publishedAt time.Time) bool {
-	if sameReleaseVersion(releaseTag, currentVersion) {
+func isReleaseUpdateAvailable(currentVersion, currentCommit string, installedAt time.Time, releaseTag, releaseCommit string, publishedAt time.Time) bool {
+	if isReleaseInstalled(currentVersion, currentCommit, releaseTag, releaseCommit) {
 		return false
 	}
 	if installedAt.IsZero() {
@@ -191,6 +208,69 @@ func isReleaseUpdateAvailable(currentVersion string, installedAt time.Time, rele
 
 func sameReleaseVersion(a, b string) bool {
 	return strings.TrimSpace(a) == strings.TrimSpace(b)
+}
+
+func isReleaseInstalled(currentVersion, currentCommit, releaseTag, releaseCommit string) bool {
+	if sameReleaseVersion(releaseTag, currentVersion) {
+		return true
+	}
+	return sameCommit(currentBuildCommit(currentVersion, currentCommit), releaseCommit)
+}
+
+func shouldResolveReleaseTagCommit(currentVersion, currentCommit string, installedAt time.Time, releaseTag, releaseCommit string, publishedAt time.Time) bool {
+	if isReleaseInstalled(currentVersion, currentCommit, releaseTag, releaseCommit) {
+		return false
+	}
+	if currentBuildCommit(currentVersion, currentCommit) == "" {
+		return false
+	}
+	if normalizeCommitish(releaseCommit) != "" {
+		return false
+	}
+	if installedAt.IsZero() {
+		return strings.TrimSpace(releaseTag) != ""
+	}
+	return publishedAt.After(installedAt)
+}
+
+func currentBuildCommit(currentVersion, currentCommit string) string {
+	if commit := commitFromVersion(currentVersion); commit != "" {
+		return commit
+	}
+	return normalizeCommitish(currentCommit)
+}
+
+func commitFromVersion(value string) string {
+	value = strings.TrimSpace(value)
+	if strings.HasPrefix(value, "master-") {
+		return normalizeCommitish(strings.TrimPrefix(value, "master-"))
+	}
+	return normalizeCommitish(value)
+}
+
+func sameCommit(a, b string) bool {
+	a = normalizeCommitish(a)
+	b = normalizeCommitish(b)
+	if a == "" || b == "" {
+		return false
+	}
+	if len(a) < len(b) {
+		a, b = b, a
+	}
+	return strings.HasPrefix(a, b)
+}
+
+func normalizeCommitish(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if len(value) < 7 || len(value) > 40 {
+		return ""
+	}
+	for _, char := range value {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
+			return ""
+		}
+	}
+	return value
 }
 
 func collectKnownVersions(otaManager *ota.Manager, currentVersion string) []string {

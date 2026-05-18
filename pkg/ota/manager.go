@@ -163,13 +163,14 @@ type InstallHistoryEntry struct {
 }
 
 type Release struct {
-	TagName     string    `json:"tag_name"`
-	Name        string    `json:"name"`
-	Draft       bool      `json:"draft"`
-	Prerelease  bool      `json:"prerelease"`
-	PublishedAt time.Time `json:"published_at"`
-	Assets      []Asset   `json:"assets"`
-	HTMLURL     string    `json:"html_url"`
+	TagName         string    `json:"tag_name"`
+	TargetCommitish string    `json:"target_commitish"`
+	Name            string    `json:"name"`
+	Draft           bool      `json:"draft"`
+	Prerelease      bool      `json:"prerelease"`
+	PublishedAt     time.Time `json:"published_at"`
+	Assets          []Asset   `json:"assets"`
+	HTMLURL         string    `json:"html_url"`
 }
 
 type Asset struct {
@@ -536,17 +537,81 @@ func (m *Manager) AvailableReleases(ctx context.Context) ([]Release, error) {
 	return filtered, nil
 }
 
+func (m *Manager) ReleaseTagCommit(ctx context.Context, tag string) (string, error) {
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return "", nil
+	}
+
+	apiURL := strings.TrimRight(m.apiURL(), "/")
+	reqURL := fmt.Sprintf("%s/repos/%s/%s/git/ref/tags/%s", apiURL, url.PathEscape(m.owner()), url.PathEscape(m.repo()), url.PathEscape(tag))
+	obj, err := m.fetchGitObject(ctx, reqURL)
+	if err != nil {
+		return "", err
+	}
+
+	for range 5 {
+		switch obj.Type {
+		case "commit":
+			return obj.SHA, nil
+		case "tag":
+			if strings.TrimSpace(obj.URL) == "" {
+				return "", errors.New("tag object URL is empty")
+			}
+			obj, err = m.fetchGitObject(ctx, obj.URL)
+			if err != nil {
+				return "", err
+			}
+		default:
+			return "", fmt.Errorf("tag %q points to unsupported object type %q", tag, obj.Type)
+		}
+	}
+
+	return "", fmt.Errorf("tag %q resolves through too many nested tag objects", tag)
+}
+
+type gitObject struct {
+	SHA  string `json:"sha"`
+	Type string `json:"type"`
+	URL  string `json:"url"`
+}
+
+type gitObjectResponse struct {
+	Object gitObject `json:"object"`
+}
+
+func (m *Manager) fetchGitObject(ctx context.Context, reqURL string) (gitObject, error) {
+	req, err := m.newGitHubRequest(ctx, reqURL)
+	if err != nil {
+		return gitObject{}, err
+	}
+
+	resp, err := m.client().Do(req)
+	if err != nil {
+		return gitObject{}, fmt.Errorf("fetch GitHub object: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return gitObject{}, fmt.Errorf("fetch GitHub object: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+
+	var ref gitObjectResponse
+	if err := json.NewDecoder(resp.Body).Decode(&ref); err != nil {
+		return gitObject{}, fmt.Errorf("decode GitHub object: %w", err)
+	}
+	if ref.Object.SHA == "" {
+		return gitObject{}, errors.New("decode GitHub object: object is missing")
+	}
+	return ref.Object, nil
+}
+
 func (m *Manager) fetchReleases(ctx context.Context) ([]Release, error) {
 	apiURL := strings.TrimRight(m.apiURL(), "/")
 	reqURL := fmt.Sprintf("%s/repos/%s/%s/releases?per_page=50", apiURL, url.PathEscape(m.owner()), url.PathEscape(m.repo()))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	req, err := m.newGitHubRequest(ctx, reqURL)
 	if err != nil {
 		return nil, err
-	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "pictures-sync-s3-ota")
-	if token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN")); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
 	resp, err := m.client().Do(req)
@@ -564,6 +629,19 @@ func (m *Manager) fetchReleases(ctx context.Context) ([]Release, error) {
 		return nil, fmt.Errorf("decode GitHub releases: %w", err)
 	}
 	return releases, nil
+}
+
+func (m *Manager) newGitHubRequest(ctx context.Context, reqURL string) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "pictures-sync-s3-ota")
+	if token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN")); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	return req, nil
 }
 
 func (m *Manager) set(status Status) {

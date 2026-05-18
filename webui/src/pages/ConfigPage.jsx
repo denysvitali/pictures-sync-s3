@@ -817,10 +817,10 @@ function OtaSection() {
       )})`
       return {
         value: release.tag_name,
-        label: release.tag_name === status?.current_version ? `${label} (installed)` : label,
+        label: release.installed ? `${label} (installed)` : label,
       }
     })
-  }, [releases, status?.current_version])
+  }, [releases])
 
   const fetchStatus = useCallback(async ({ background = false } = {}) => {
     if (!background) setLoading(true)
