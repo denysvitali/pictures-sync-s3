@@ -1,15 +1,18 @@
 package daemoncontrol
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/denysvitali/pictures-sync-s3/pkg/events"
 	"github.com/denysvitali/pictures-sync-s3/pkg/sdcardbrowser"
 	"github.com/denysvitali/pictures-sync-s3/pkg/sdmonitor"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
@@ -26,6 +29,12 @@ const (
 	CommandSDCardFiles     = "sdcard_files"
 	CommandSDCardPreview   = "sdcard_preview"
 	CommandSDCardThumbnail = "sdcard_thumbnail"
+	CommandSubscribe       = "subscribe"
+
+	// EnvelopeKindState carries a full CurrentState snapshot.
+	EnvelopeKindState = "state"
+	// EnvelopeKindEvent carries a single Event.
+	EnvelopeKindEvent = "event"
 
 	CodeNoSDCardMounted   = "no_sd_card_mounted"
 	CodeSyncAlreadyActive = "sync_already_active"
@@ -36,6 +45,11 @@ const (
 	requestTimeout       = 5 * time.Second
 	formatRequestTimeout = 2*time.Minute + 5*time.Second
 	socketEnv            = "PICTURES_SYNC_DAEMON_SOCKET"
+
+	// subscribeWriteTimeout caps how long a single envelope write can block
+	// before the streaming handler tears down the connection. It also doubles
+	// as the per-iteration keepalive deadline ceiling.
+	subscribeWriteTimeout = 30 * time.Second
 )
 
 type Request struct {
@@ -50,6 +64,15 @@ type Response struct {
 	Code    string          `json:"code,omitempty"`
 	Message string          `json:"message"`
 	Data    json.RawMessage `json:"data,omitempty"`
+}
+
+// Envelope is a tagged push message used for the subscribe stream. Exactly
+// one of State or Event will be populated depending on Kind. Future kinds may
+// be added without breaking older clients (they should ignore unknown kinds).
+type Envelope struct {
+	Kind  string               `json:"kind"`
+	State *state.CurrentState  `json:"state,omitempty"`
+	Event *events.Event        `json:"event,omitempty"`
 }
 
 type CommandError struct {
@@ -75,6 +98,14 @@ type SDCardFilesHandler func(context.Context, string) Response
 type SDCardPreviewHandler func(context.Context, string) Response
 type SDCardThumbnailHandler func(context.Context, string) Response
 
+// SubscribeHandler streams Envelopes to the given out channel until ctx is
+// cancelled. Implementations should send an initial state snapshot on connect
+// and then forward subsequent state updates and events as they happen. The
+// channel writer (the server-side dispatcher) takes care of serialising
+// envelopes to the socket — handlers must not close out themselves; returning
+// from the handler signals completion.
+type SubscribeHandler func(ctx context.Context, out chan<- Envelope)
+
 type Handlers struct {
 	ManualSync      ManualSyncHandler
 	CancelSync      CancelSyncHandler
@@ -86,6 +117,7 @@ type Handlers struct {
 	SDCardFiles     SDCardFilesHandler
 	SDCardPreview   SDCardPreviewHandler
 	SDCardThumbnail SDCardThumbnailHandler
+	Subscribe       SubscribeHandler
 }
 
 func SocketPath() string {
@@ -177,6 +209,12 @@ func handleConn(ctx context.Context, conn net.Conn, handlers Handlers) {
 	if req.Command == CommandFormatSDCard {
 		_ = conn.SetDeadline(time.Now().Add(formatRequestTimeout))
 	}
+	if req.Command == CommandSubscribe {
+		// Streaming subscriptions are long-lived; clear the per-request
+		// deadline. handleSubscribe enforces a per-write deadline instead so
+		// dead connections still get torn down promptly.
+		_ = conn.SetDeadline(time.Time{})
+	}
 
 	switch req.Command {
 	case CommandManualSync:
@@ -199,8 +237,77 @@ func handleConn(ctx context.Context, conn net.Conn, handlers Handlers) {
 		_ = json.NewEncoder(conn).Encode(callPath(ctx, handlers.SDCardPreview, req.Path))
 	case CommandSDCardThumbnail:
 		_ = json.NewEncoder(conn).Encode(callPath(ctx, handlers.SDCardThumbnail, req.Path))
+	case CommandSubscribe:
+		handleSubscribe(ctx, conn, handlers.Subscribe)
 	default:
 		_ = json.NewEncoder(conn).Encode(Error(CodeInternalError, "unknown daemon control command"))
+	}
+}
+
+// handleSubscribe runs the streaming subscribe loop for one client conn. It
+// hands a buffered envelope channel to the registered SubscribeHandler (which
+// owns producing snapshots and updates) and serialises each envelope to the
+// socket as newline-delimited JSON. The function returns when ctx is cancelled,
+// the handler returns, or a write fails.
+func handleSubscribe(ctx context.Context, conn net.Conn, handler SubscribeHandler) {
+	if handler == nil {
+		_ = json.NewEncoder(conn).Encode(Error(CodeUnavailable, "subscribe is not available"))
+		return
+	}
+
+	subCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// Buffered so the producer can keep pushing while we serialise. The
+	// SubscribeHandler is expected to drop on full channel rather than block.
+	envelopes := make(chan Envelope, 64)
+
+	go func() {
+		defer close(envelopes)
+		handler(subCtx, envelopes)
+	}()
+
+	// Tear down the subscription as soon as the client closes the socket so
+	// the handler goroutine and its state.Manager/events.Manager subscriptions
+	// don't leak. A short read with a non-zero buffer returns EOF (or any
+	// error) when the peer hangs up; we treat any read result as a signal to
+	// stop.
+	go func() {
+		buf := make([]byte, 1)
+		for {
+			_, err := conn.Read(buf)
+			if err != nil {
+				cancel()
+				return
+			}
+			// Drain any unexpected client bytes - subscribe is one-way after
+			// the initial request - but keep the loop alive until EOF/err.
+		}
+	}()
+
+	// json.Encoder appends a trailing newline after each value, giving us
+	// newline-delimited JSON for free. Wrap in bufio.Writer so encoding stays
+	// efficient for back-to-back envelopes; flush after each write so clients
+	// see updates immediately.
+	writer := bufio.NewWriter(conn)
+	enc := json.NewEncoder(writer)
+
+	for {
+		select {
+		case <-subCtx.Done():
+			return
+		case env, ok := <-envelopes:
+			if !ok {
+				return
+			}
+			_ = conn.SetWriteDeadline(time.Now().Add(subscribeWriteTimeout))
+			if err := enc.Encode(env); err != nil {
+				return
+			}
+			if err := writer.Flush(); err != nil {
+				return
+			}
+		}
 	}
 }
 
@@ -309,6 +416,72 @@ func sendCommandData(ctx context.Context, req Request, out interface{}) error {
 		return &CommandError{Code: CodeInternalError, Message: fmt.Sprintf("decode daemon response: %v", err)}
 	}
 	return nil
+}
+
+// Subscribe opens a streaming connection to the daemon control socket and
+// returns a channel that emits Envelopes as they arrive. The channel is
+// closed when ctx is cancelled, the connection drops, or the daemon ends
+// the stream. Callers are responsible for reconnect logic — this method
+// performs a single dial and does not retry on failure.
+func Subscribe(ctx context.Context) (<-chan Envelope, error) {
+	var dialer net.Dialer
+	dialCtx, cancelDial := context.WithTimeout(ctx, requestTimeout)
+	defer cancelDial()
+	conn, err := dialer.DialContext(dialCtx, "unix", SocketPath())
+	if err != nil {
+		return nil, &CommandError{
+			Code:    CodeUnavailable,
+			Message: fmt.Sprintf("pictures-sync daemon control socket is unavailable: %v", err),
+		}
+	}
+
+	// Send the subscribe request with a short write deadline; afterwards we
+	// rely on ctx and natural read EOF for tear-down.
+	_ = conn.SetWriteDeadline(time.Now().Add(requestTimeout))
+	if err := json.NewEncoder(conn).Encode(Request{Command: CommandSubscribe}); err != nil {
+		conn.Close()
+		return nil, &CommandError{Code: CodeUnavailable, Message: fmt.Sprintf("send daemon subscribe: %v", err)}
+	}
+	_ = conn.SetWriteDeadline(time.Time{})
+	_ = conn.SetReadDeadline(time.Time{})
+
+	out := make(chan Envelope, 16)
+
+	go func() {
+		defer close(out)
+		defer conn.Close()
+
+		// Close the conn when ctx is cancelled so the blocking decode returns.
+		ctxDone := make(chan struct{})
+		go func() {
+			select {
+			case <-ctx.Done():
+				_ = conn.Close()
+			case <-ctxDone:
+			}
+		}()
+		defer close(ctxDone)
+
+		dec := json.NewDecoder(bufio.NewReader(conn))
+		for {
+			var env Envelope
+			if err := dec.Decode(&env); err != nil {
+				if errors.Is(err, io.EOF) || ctx.Err() != nil {
+					return
+				}
+				// Any other decode error also terminates the stream; the
+				// caller should reconnect.
+				return
+			}
+			select {
+			case out <- env:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	return out, nil
 }
 
 func sendRequest(ctx context.Context, req Request) (Response, error) {
