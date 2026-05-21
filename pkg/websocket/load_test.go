@@ -392,12 +392,19 @@ func LoadTestWebSocket(t *testing.T, concurrency, messagesPerConn int) {
 		}(i)
 	}
 
-	// Send state updates while connections are active
+	// Send state updates while connections are active. The goroutine must
+	// terminate before the test returns, otherwise leaked SetStatus calls
+	// race with the next test's SetStateDir on the package-level StateFile.
+	stopUpdates := make(chan struct{})
+	updatesDone := make(chan struct{})
 	go func() {
+		defer close(updatesDone)
 		ticker := time.NewTicker(100 * time.Millisecond)
 		defer ticker.Stop()
 		for i := 0; i < messagesPerConn*2; i++ {
 			select {
+			case <-stopUpdates:
+				return
 			case <-ticker.C:
 				stateMgr.SetStatus(state.StatusSyncing)
 			}
@@ -405,6 +412,8 @@ func LoadTestWebSocket(t *testing.T, concurrency, messagesPerConn int) {
 	}()
 
 	wg.Wait()
+	close(stopUpdates)
+	<-updatesDone
 	duration := time.Since(start)
 
 	success := successCount.Load()
