@@ -189,6 +189,23 @@ func (m *Manager) saveState() error {
 	return atomicWrite(StateFile, data, 0644)
 }
 
+// saveStateSnapshot persists a pre-captured CurrentState snapshot to disk.
+// It does NOT read m.currentState, so callers must (and do) invoke it WITHOUT
+// holding m.mu. Concurrent calls serialize through m.saveMu so the ordering of
+// on-disk writes follows the order callers entered saveStateSnapshot, which in
+// turn follows the in-memory commit order because each caller captured its
+// snapshot under m.mu before contending for saveMu.
+func (m *Manager) saveStateSnapshot(s CurrentState) error {
+	data, err := utils.MarshalJSONIndent(s)
+	if err != nil {
+		return err
+	}
+
+	m.saveMu.Lock()
+	defer m.saveMu.Unlock()
+	return atomicWrite(StateFile, data, 0644)
+}
+
 // loadState reads state from disk
 func (m *Manager) loadState() error {
 	return utils.LoadJSON(StateFile, &m.currentState, nil)
@@ -202,6 +219,20 @@ func (m *Manager) saveHistory() error {
 		return err
 	}
 
+	return atomicWrite(HistoryFile, data, 0644)
+}
+
+// saveHistorySnapshot persists a pre-captured history slice to disk. Like
+// saveStateSnapshot it does not touch m.history and serializes through
+// m.saveMu so concurrent writers cannot interleave their on-disk writes.
+func (m *Manager) saveHistorySnapshot(h []SyncRecord) error {
+	data, err := utils.MarshalJSONIndent(h)
+	if err != nil {
+		return err
+	}
+
+	m.saveMu.Lock()
+	defer m.saveMu.Unlock()
 	return atomicWrite(HistoryFile, data, 0644)
 }
 

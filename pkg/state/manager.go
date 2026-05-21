@@ -14,9 +14,18 @@ import (
 // nanosecond (e.g. tests starting many syncs concurrently).
 var recordIDCounter uint64
 
-// Manager manages persistent state for the photo sync system
+// Manager manages persistent state for the photo sync system.
+//
+// Locking discipline:
+//   - mu guards in-memory state (currentState, history, lastProgressSave).
+//   - saveMu serializes disk persistence. It is ALWAYS acquired AFTER releasing
+//     mu, never while mu is held, so the fsync inside atomicWrite cannot stall
+//     readers/writers contending for mu. Concurrent mutators first commit to
+//     memory under mu, then queue at saveMu in commit order, so on-disk writes
+//     match the order of in-memory commits.
 type Manager struct {
 	mu                sync.RWMutex
+	saveMu            sync.Mutex
 	currentState      CurrentState
 	history           []SyncRecord
 	notifier          *notifier
@@ -144,19 +153,21 @@ func (m *Manager) GetState() CurrentState {
 	return cloneState(m.currentState)
 }
 
-// mutate runs fn under the write lock, persists, and broadcasts a deep copy
-// of the resulting state to listeners. It consolidates the lock/save/notify
-// boilerplate previously duplicated across the simple setters.
+// mutate runs fn under the write lock, snapshots the resulting state, releases
+// the lock, then persists and broadcasts. Persistence happens OUTSIDE m.mu so
+// the fsync in atomicWrite cannot stall concurrent readers. saveStateSnapshot
+// serializes through m.saveMu so writers reach disk in commit order. A failing
+// disk write is logged but not returned to the caller: the in-memory mutation
+// has already succeeded, so the API contract is preserved.
 func (m *Manager) mutate(fn func(*CurrentState)) error {
 	m.mu.Lock()
 	fn(&m.currentState)
-	if err := m.saveLocked(); err != nil {
-		m.mu.Unlock()
-		return err
-	}
 	stateCopy := cloneState(m.currentState)
 	m.mu.Unlock()
 
+	if err := m.saveStateSnapshot(stateCopy); err != nil {
+		log.Printf("state: failed to persist state after mutation: %v", err)
+	}
 	m.notifyListenersAsync(stateCopy)
 	return nil
 }
@@ -255,18 +266,16 @@ func (m *Manager) StartSync(cardID string, totalFiles, totalBytes int64) (*SyncR
 	m.currentState.Status = StatusSyncing
 	m.currentState.Error = ""
 
-	if err := m.saveLocked(); err != nil {
-		m.mu.Unlock()
-		return nil, err
-	}
-
 	stateCopy := cloneState(m.currentState)
-	m.mu.Unlock()
-
-	m.notifyListenersAsync(stateCopy)
 	// Return a copy of the record so callers cannot mutate the record the
 	// manager continues to update under its lock.
 	recCopy := *record
+	m.mu.Unlock()
+
+	if err := m.saveStateSnapshot(stateCopy); err != nil {
+		log.Printf("state: failed to persist state after StartSync: %v", err)
+	}
+	m.notifyListenersAsync(stateCopy)
 	return &recCopy, nil
 }
 
@@ -290,19 +299,24 @@ func (m *Manager) UpdateSyncProgress(filesSynced, bytesSynced int64, currentFile
 	m.currentState.CurrentSync.ETA = eta
 	m.currentState.CurrentSync.ProgressPhase = progressPhase(currentFile, transferSpeed)
 
-	// Throttle disk writes - only save every progressSaveDelay seconds
+	// Throttle disk writes - only save every progressSaveDelay seconds. We
+	// decide whether to save and update lastProgressSave while holding m.mu
+	// (so concurrent updaters see a consistent throttle window), but the
+	// actual atomicWrite/fsync runs after the lock is released to keep
+	// readers off the disk-write critical path.
 	shouldSave := time.Since(m.lastProgressSave) >= m.progressSaveDelay
 	if shouldSave {
 		m.lastProgressSave = time.Now()
-		if err := m.saveLocked(); err != nil {
-			m.mu.Unlock()
-			return err
-		}
 	}
 
 	stateCopy := cloneState(m.currentState)
 	m.mu.Unlock()
 
+	if shouldSave {
+		if err := m.saveStateSnapshot(stateCopy); err != nil {
+			log.Printf("state: failed to persist sync progress: %v", err)
+		}
+	}
 	m.notifyListenersAsync(stateCopy)
 	return nil
 }
@@ -342,19 +356,21 @@ func (m *Manager) FinishSync(success bool, err error) error {
 	m.currentState.LastSync = m.currentState.CurrentSync
 	m.currentState.CurrentSync = nil
 
-	// Save state and history
-	if saveErr := m.saveLocked(); saveErr != nil {
-		m.mu.Unlock()
-		return saveErr
-	}
-	if saveErr := m.saveHistory(); saveErr != nil {
-		m.mu.Unlock()
-		return saveErr
-	}
-
+	// Snapshot both state and history under the lock, then release before
+	// writing to disk. The snapshot of history is a fresh slice so subsequent
+	// appends to m.history (e.g. from another FinishSync) cannot race with
+	// the marshal step inside saveHistorySnapshot.
 	stateCopy := cloneState(m.currentState)
+	historyCopy := make([]SyncRecord, len(m.history))
+	copy(historyCopy, m.history)
 	m.mu.Unlock()
 
+	if saveErr := m.saveStateSnapshot(stateCopy); saveErr != nil {
+		log.Printf("state: failed to persist state after FinishSync: %v", saveErr)
+	}
+	if saveErr := m.saveHistorySnapshot(historyCopy); saveErr != nil {
+		log.Printf("state: failed to persist history after FinishSync: %v", saveErr)
+	}
 	m.notifyListenersAsync(stateCopy)
 	return nil
 }
@@ -396,6 +412,20 @@ func (m *Manager) FindLastSyncByCardID(cardID string) *SyncRecord {
 	}
 
 	return nil
+}
+
+// Replace overwrites the in-memory current state with the provided snapshot
+// and notifies subscribers. Unlike the other mutators it does NOT persist to
+// disk — it's intended for processes (e.g. the web UI) that consume state
+// pushed from another authoritative owner over IPC and need a way to feed
+// the local cache.
+func (m *Manager) Replace(snapshot CurrentState) {
+	clone := cloneState(snapshot)
+	m.mu.Lock()
+	m.currentState = clone
+	m.mu.Unlock()
+
+	m.notifyListenersAsync(cloneState(clone))
 }
 
 // Reload reads the latest state from disk and notifies listeners
