@@ -236,6 +236,7 @@ func (s *Service) Run() error {
 			SDCardFiles:     s.handleSDCardFilesCommand,
 			SDCardPreview:   s.handleSDCardPreviewCommand,
 			SDCardThumbnail: s.handleSDCardThumbnailCommand,
+			Subscribe:       s.handleSubscribeCommand,
 		}); err != nil {
 			log.Printf("Daemon control server stopped: %v", err)
 		}
@@ -611,6 +612,69 @@ func (s *Service) handleSDCardThumbnailCommand(ctx context.Context, requestedPat
 	return daemoncontrol.OKData("sdcard thumbnail", result)
 }
 
+// handleSubscribeCommand implements the streaming subscribe handler. It
+// pushes the current state snapshot to the client immediately on connect,
+// then forwards every subsequent state update and event until ctx is
+// cancelled (client disconnect, daemon shutdown, etc.). The control-socket
+// dispatcher serialises envelopes to the wire; this goroutine just needs to
+// keep producing them.
+func (s *Service) handleSubscribeCommand(ctx context.Context, out chan<- daemoncontrol.Envelope) {
+	stateUpdates := s.stateMgr.Subscribe()
+	eventUpdates := s.eventMgr.Subscribe()
+	defer s.stateMgr.Unsubscribe(stateUpdates)
+	defer s.eventMgr.Unsubscribe(eventUpdates)
+
+	// Initial snapshot so the client immediately has a coherent view without
+	// waiting for the next mutation.
+	initial := s.stateMgr.GetState()
+	if !sendEnvelope(ctx, out, daemoncontrol.Envelope{
+		Kind:  daemoncontrol.EnvelopeKindState,
+		State: &initial,
+	}) {
+		return
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case st, ok := <-stateUpdates:
+			if !ok {
+				return
+			}
+			snap := st
+			if !sendEnvelope(ctx, out, daemoncontrol.Envelope{
+				Kind:  daemoncontrol.EnvelopeKindState,
+				State: &snap,
+			}) {
+				return
+			}
+		case ev, ok := <-eventUpdates:
+			if !ok {
+				return
+			}
+			snap := ev
+			if !sendEnvelope(ctx, out, daemoncontrol.Envelope{
+				Kind:  daemoncontrol.EnvelopeKindEvent,
+				Event: &snap,
+			}) {
+				return
+			}
+		}
+	}
+}
+
+// sendEnvelope writes a single envelope to out, respecting ctx cancellation.
+// Returns false if ctx is done so the caller can unwind cleanly.
+func sendEnvelope(ctx context.Context, out chan<- daemoncontrol.Envelope, env daemoncontrol.Envelope) bool {
+	select {
+	case out <- env:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
 // Shutdown gracefully shuts down the daemon
 func (s *Service) Shutdown() {
 	log.Println("Shutting down daemon...")
@@ -629,6 +693,10 @@ func (s *Service) Shutdown() {
 
 	if s.sigHandler != nil {
 		s.sigHandler.Stop()
+	}
+
+	if s.stateMgr != nil {
+		s.stateMgr.Close()
 	}
 
 	log.Println("Daemon shutdown complete")
