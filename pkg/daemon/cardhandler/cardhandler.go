@@ -243,7 +243,13 @@ func (h *Handler) processSyncOperation(event sdmonitor.Event) {
 		return
 	}
 
-	// Wait a moment before starting sync
+	// Flip status to Syncing immediately so the UI reflects the user's action
+	// without waiting for the pre-sync filesystem-stabilization delay below.
+	// StartSync (invoked from performSync) will subsequently set Syncing again
+	// once the SyncRecord is created; this early transition is purely for UX.
+	h.stateMgr.SetStatus(state.StatusSyncing)
+
+	// Wait a moment before starting sync to let the filesystem fully stabilize.
 	time.Sleep(preSyncDelay)
 
 	// Verify card is still mounted before starting sync
