@@ -531,6 +531,7 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager, otaManag
 		}
 		if err := conn.ReadJSON(&authMsg); err != nil {
 			log.Printf("WebSocket auth failed: failed to read auth message from %s: %v", r.RemoteAddr, err)
+			_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			conn.WriteJSON(map[string]any{
 				"type":  "error",
 				"error": "Authentication required",
@@ -541,6 +542,7 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager, otaManag
 		// Validate token type and atomically delete to prevent concurrent reuse
 		if authMsg.Type != "auth" || !ValidateAndDeleteWSToken(authMsg.Token) {
 			log.Printf("WebSocket auth failed: invalid token from %s", r.RemoteAddr)
+			_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			conn.WriteJSON(map[string]any{
 				"type":  "error",
 				"error": "Invalid or expired token",
@@ -554,6 +556,7 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager, otaManag
 		log.Printf("WebSocket authenticated successfully from %s", r.RemoteAddr)
 
 		// Send auth success message
+		_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 		if err := conn.WriteJSON(map[string]any{
 			"type": "auth_success",
 		}); err != nil {
@@ -578,13 +581,15 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager, otaManag
 			defer otaMgr.Unsubscribe(otaUpdates)
 		}
 
-		// Send initial state (reload from disk first to get latest from pictures-sync service)
-		stateMgr.Reload()
+		// Send initial state. The stateMgr cache is kept up to date by the
+		// daemon subscribe stream (see cmd/webui/main.go), so we no longer
+		// need to reload from disk here.
 		status := stateMgr.GetState()
 		initialMessage := map[string]any{
 			"type": "state",
 			"data": status,
 		}
+		_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 		if err := conn.WriteJSON(initialMessage); err != nil {
 			return
 		}
@@ -610,9 +615,11 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager, otaManag
 			}
 		}()
 
-		// Send updates and periodically reload state from disk
-		ticker := time.NewTicker(2 * time.Second)
-		defer ticker.Stop()
+		// State and event updates are pushed in real time from the local
+		// caches (populated by the daemon subscribe stream in the webui
+		// process). No more 2-second disk-polling ticker — that path read
+		// state.json every 2s on every connected browser and racked up
+		// pointless I/O against the SD card.
 
 		// Ping ticker for connection health
 		pingTicker := time.NewTicker(30 * time.Second)
@@ -620,6 +627,12 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager, otaManag
 
 		// Set initial read deadline
 		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+
+		// writeDeadline is applied to every WriteJSON below. A 10s ceiling
+		// matches the existing ping deadline and prevents a slow / dead
+		// browser from wedging this goroutine (and pinning the per-IP rate
+		// limiter slot) forever.
+		const writeDeadline = 10 * time.Second
 
 		for {
 			select {
@@ -633,6 +646,7 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager, otaManag
 					"type": "state",
 					"data": state,
 				}
+				_ = conn.SetWriteDeadline(time.Now().Add(writeDeadline))
 				if err := conn.WriteJSON(message); err != nil {
 					return
 				}
@@ -646,6 +660,7 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager, otaManag
 					"type": "event",
 					"data": event,
 				}
+				_ = conn.SetWriteDeadline(time.Now().Add(writeDeadline))
 				if err := conn.WriteJSON(message); err != nil {
 					return
 				}
@@ -660,6 +675,7 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager, otaManag
 					"type": "ota_status",
 					"data": otaStatus,
 				}
+				_ = conn.SetWriteDeadline(time.Now().Add(writeDeadline))
 				if err := conn.WriteJSON(message); err != nil {
 					return
 				}
@@ -674,24 +690,10 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager, otaManag
 					pongMsg := map[string]any{
 						"type": "pong",
 					}
+					_ = conn.SetWriteDeadline(time.Now().Add(writeDeadline))
 					if err := conn.WriteJSON(pongMsg); err != nil {
 						return
 					}
-				}
-			case <-ticker.C:
-				// Reload state from disk (in case pictures-sync service updated it)
-				if err := stateMgr.Reload(); err != nil {
-					log.Printf("Failed to reload state: %v", err)
-				}
-
-				// Send updated state
-				status := stateMgr.GetState()
-				message := map[string]any{
-					"type": "state",
-					"data": status,
-				}
-				if err := conn.WriteJSON(message); err != nil {
-					return
 				}
 			case <-pingTicker.C:
 				// Send WebSocket-level ping frame

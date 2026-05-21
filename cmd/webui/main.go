@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/auth"
+	"github.com/denysvitali/pictures-sync-s3/pkg/daemoncontrol"
 	"github.com/denysvitali/pictures-sync-s3/pkg/events"
 	"github.com/denysvitali/pictures-sync-s3/pkg/handlers"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ntpsync"
@@ -176,14 +177,24 @@ func main() {
 	// Start WebSocket rate limiter cleanup goroutine
 	go websocket.StartRateLimiterCleanup(shutdownCtx)
 
-	// Initialize event manager
+	// Initialize event manager. In the webui process this only acts as a
+	// local pub/sub cache: every event it emits originates from the daemon's
+	// subscribe stream (see startDaemonSubscription below), and nothing in
+	// this process publishes directly.
 	eventMgr := events.NewManager()
 
-	// Initialize state manager
+	// Initialize state manager. As with eventMgr above, this is a cache
+	// populated by the daemon stream; the webui process never persists state
+	// itself.
 	stateMgr, err := state.NewManager()
 	if err != nil {
 		log.Fatalf("Failed to create state manager: %v", err)
 	}
+
+	// Spawn the long-lived subscription consumer that keeps stateMgr/eventMgr
+	// in sync with the daemon over the control socket. Reconnects with
+	// exponential backoff on failure.
+	go startDaemonSubscription(shutdownCtx, stateMgr, eventMgr)
 
 	// Load settings
 	appSettings, err := settings.Load()
@@ -372,6 +383,79 @@ func main() {
 
 	if err := serveWithShutdown(shutdownCtx, server, server.ListenAndServe); err != nil {
 		log.Fatalf("Failed to start HTTP server: %v", err)
+	}
+}
+
+// startDaemonSubscription maintains a streaming subscription to the
+// pictures-sync daemon over the control socket and pushes received state
+// snapshots / events into the local stateMgr and eventMgr caches. The
+// WebSocket layer subscribes to those caches, so this becomes the single
+// source for real-time UI updates — no more 2-second disk polling.
+//
+// On any disconnection (daemon restart, socket gone, decode error) the loop
+// reconnects with exponential backoff starting at 500ms and capped at 10s.
+// Backoff is reset to the base value after a successful subscribe.
+func startDaemonSubscription(ctx context.Context, stateMgr *state.Manager, eventMgr *events.Manager) {
+	const (
+		baseBackoff = 500 * time.Millisecond
+		maxBackoff  = 10 * time.Second
+	)
+
+	backoff := baseBackoff
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+
+		envelopes, err := daemoncontrol.Subscribe(ctx)
+		if err != nil {
+			log.Printf("daemon subscribe failed (will retry in %s): %v", backoff, err)
+			if !sleepCtx(ctx, backoff) {
+				return
+			}
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+			continue
+		}
+
+		log.Println("daemon subscribe: connected, streaming state and events")
+		backoff = baseBackoff
+
+		for env := range envelopes {
+			switch env.Kind {
+			case daemoncontrol.EnvelopeKindState:
+				if env.State != nil {
+					stateMgr.Replace(*env.State)
+				}
+			case daemoncontrol.EnvelopeKindEvent:
+				if env.Event != nil {
+					eventMgr.Republish(*env.Event)
+				}
+			}
+		}
+
+		if ctx.Err() != nil {
+			return
+		}
+		log.Println("daemon subscribe: stream closed, reconnecting")
+		if !sleepCtx(ctx, backoff) {
+			return
+		}
+	}
+}
+
+// sleepCtx sleeps for d but returns early if ctx is cancelled. Returns false
+// when ctx is cancelled so the caller knows to exit.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
 	}
 }
 

@@ -127,6 +127,18 @@ func (m *Manager) Emit(eventType EventType, message string, data map[string]inte
 		Data:      data,
 	}
 
+	m.publish(event)
+}
+
+// Republish forwards an already-constructed Event (preserving Timestamp) to
+// all subscribers. Used when proxying events received from another process
+// (e.g. the daemon -> webui control-socket stream) so subscribers see the
+// original event metadata instead of a freshly-stamped one.
+func (m *Manager) Republish(event Event) {
+	m.publish(event)
+}
+
+func (m *Manager) publish(event Event) {
 	m.mu.RLock()
 	// Create a copy of listeners to avoid race conditions
 	listenersCopy := make([]*subscriber, len(m.listeners))
