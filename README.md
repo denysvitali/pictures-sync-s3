@@ -156,9 +156,6 @@ Supporting packages:
        "github.com/denysvitali/pictures-sync-s3/cmd/provision-ap"
      ],
      "PackageConfig": {
-       "github.com/gokrazy/gokrazy/cmd/dhcp": {
-         "DontStart": true
-       },
        "github.com/gokrazy/wifi": {
          "DontStart": true
        },
@@ -255,6 +252,7 @@ on boot.
 ### First-Time Setup
 
 1. **WiFi Configuration** (if not using Ethernet):
+   - Ethernet uses Gokrazy's built-in DHCP client on boot. Wi-Fi startup is gated by `cmd/wifi-init`: it waits briefly for carrier on `eth0` and only starts `github.com/gokrazy/wifi` when Ethernet has no carrier.
    - On first boot with no configured networks, the device starts a provisioning hotspot:
      - SSID: `PhotoBackup-Setup`
      - Password: `photo-backup-setup`

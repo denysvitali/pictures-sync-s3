@@ -127,9 +127,6 @@ cat > "$INSTANCE_DIR/config.json" <<EOF
 $(emit_packages_json '    ')
   ],
   "PackageConfig": {
-    "github.com/gokrazy/gokrazy/cmd/dhcp": {
-      "DontStart": true
-    },
     "github.com/gokrazy/wifi": {
       "DontStart": true
     },
