@@ -10,15 +10,19 @@ import (
 	"strings"
 	"time"
 
+	"github.com/denysvitali/pictures-sync-s3/pkg/netiface"
 	"github.com/mdlayher/genetlink"
 	"github.com/mdlayher/netlink"
 	"golang.org/x/sys/unix"
 )
 
 const (
-	defaultInterface = "wlan0"
-	defaultTimeout   = 15 * time.Second
-	defaultCountry   = "US"
+	defaultInterface       = "wlan0"
+	defaultTimeout         = 15 * time.Second
+	defaultCountry         = "US"
+	defaultEthernetIface   = "eth0"
+	defaultEthernetTimeout = 10 * time.Second
+	defaultWiFiCommand     = "/user/wifi"
 )
 
 type kernelModule struct {
@@ -38,6 +42,19 @@ func main() {
 	iface := getenv("WIFI_INIT_INTERFACE", defaultInterface)
 	timeout := getenvDuration("WIFI_INIT_TIMEOUT", defaultTimeout)
 	country := strings.ToUpper(getenv("WIFI_COUNTRY", defaultCountry))
+	ethernetFirst := getenvBool("WIFI_INIT_ETHERNET_FIRST", true)
+	ethernetIface := getenv("WIFI_INIT_ETHERNET_INTERFACE", defaultEthernetIface)
+	ethernetTimeout := getenvDuration("WIFI_INIT_ETHERNET_TIMEOUT", defaultEthernetTimeout)
+	wifiCommand := getenv("WIFI_INIT_WIFI_COMMAND", defaultWiFiCommand)
+
+	if ethernetFirst {
+		log.Printf("wifi-init: waiting up to %s for Ethernet carrier on %s", ethernetTimeout, ethernetIface)
+		if waitForEthernetCarrier(ethernetIface, ethernetTimeout) {
+			log.Printf("wifi-init: Ethernet carrier detected on %s; leaving Wi-Fi disabled", ethernetIface)
+			return
+		}
+		log.Printf("wifi-init: no Ethernet carrier detected on %s; enabling Wi-Fi", ethernetIface)
+	}
 
 	for _, module := range moduleOrder {
 		if err := loadModule(module.name); err != nil {
@@ -64,6 +81,36 @@ func main() {
 		log.Printf("wifi-init: failed to disable power save on %s: %v", iface, err)
 	} else {
 		log.Printf("wifi-init: disabled power save on %s", iface)
+	}
+
+	if strings.TrimSpace(wifiCommand) == "" {
+		log.Printf("wifi-init: WIFI_INIT_WIFI_COMMAND is empty; not starting Wi-Fi client")
+		return
+	}
+	log.Printf("wifi-init: starting Wi-Fi client: %s", wifiCommand)
+	if err := unix.Exec(wifiCommand, []string{filepath.Base(wifiCommand)}, os.Environ()); err != nil {
+		log.Fatalf("start Wi-Fi client %s: %v", wifiCommand, err)
+	}
+}
+
+func waitForEthernetCarrier(name string, timeout time.Duration) bool {
+	if timeout < 0 {
+		timeout = 0
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		carrier, err := netiface.HasCarrier(name)
+		if err != nil {
+			log.Printf("wifi-init: failed to read Ethernet carrier for %s: %v", name, err)
+			return false
+		}
+		if carrier {
+			return true
+		}
+		if timeout == 0 || time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(250 * time.Millisecond)
 	}
 }
 
@@ -250,4 +297,19 @@ func getenvDuration(key string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return duration
+}
+
+func getenvBool(key string, fallback bool) bool {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	switch strings.ToLower(raw) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
 }

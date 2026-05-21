@@ -130,6 +130,9 @@ $(emit_packages_json '    ')
     "github.com/gokrazy/gokrazy/cmd/dhcp": {
       "DontStart": true
     },
+    "github.com/gokrazy/wifi": {
+      "DontStart": true
+    },
     "github.com/denysvitali/pictures-sync-s3/cmd/pictures-sync": {
       "GoBuildFlags": [
         "-trimpath",

@@ -133,6 +133,9 @@ $(emit_packages_json '    ')
     "github.com/gokrazy/gokrazy/cmd/dhcp": {
       "DontStart": true
     },
+    "github.com/gokrazy/wifi": {
+      "DontStart": true
+    },
     "github.com/gokrazy/breakglass": {
       "CommandLineFlags": [
         "-authorized_keys=/perm/breakglass/authorized_keys"

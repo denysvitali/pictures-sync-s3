@@ -23,41 +23,49 @@ const (
 	defaultStartupWait     = 90 * time.Second
 	defaultInterfaceWait   = 30 * time.Second
 	defaultConfigPollDelay = 5 * time.Second
+	defaultEthernetIface   = "eth0"
+	defaultEthernetWait    = 10 * time.Second
 )
 
 // Config contains all runtime settings for provisioning hotspot mode.
 type Config struct {
-	Interface        string
-	SSID             string
-	PSK              string
-	APIP             net.IP
-	Netmask          net.IPMask
-	DHCPStart        net.IP
-	DHCPEnd          net.IP
-	HostapdPath      string
-	ConfigDir        string
-	CountryCode      string
-	ClientConfigPath string
-	AppConfigPath    string
-	StartupWait      time.Duration
-	InterfaceWait    time.Duration
-	ConfigPollDelay  time.Duration
+	Interface         string
+	SSID              string
+	PSK               string
+	APIP              net.IP
+	Netmask           net.IPMask
+	DHCPStart         net.IP
+	DHCPEnd           net.IP
+	HostapdPath       string
+	ConfigDir         string
+	CountryCode       string
+	ClientConfigPath  string
+	AppConfigPath     string
+	StartupWait       time.Duration
+	InterfaceWait     time.Duration
+	ConfigPollDelay   time.Duration
+	EthernetFirst     bool
+	EthernetInterface string
+	EthernetWait      time.Duration
 }
 
 // ConfigFromEnv builds a Config from environment variables with safe defaults.
 func ConfigFromEnv() (Config, error) {
 	cfg := Config{
-		Interface:        getenv("PROVISION_AP_INTERFACE", defaultInterface),
-		SSID:             getenv("SETUP_WIFI_SSID", defaultSSID),
-		PSK:              getenv("SETUP_WIFI_PSK", defaultPSK),
-		HostapdPath:      getenv("HOSTAPD_PATH", defaultHostapdPath),
-		ConfigDir:        getenv("PROVISION_AP_CONFIG_DIR", defaultConfigDir),
-		CountryCode:      strings.ToUpper(getenv("WIFI_COUNTRY", getenv("PROVISION_AP_COUNTRY", defaultCountryCode))),
-		ClientConfigPath: getenv("WIFI_CONFIG_PATH", "/perm/wifi.json"),
-		AppConfigPath:    getenv("EXTRA_WIFI_CONFIG_PATH", "/perm/extra-wifi.json"),
-		StartupWait:      getenvDuration("PROVISION_AP_STARTUP_WAIT", defaultStartupWait),
-		InterfaceWait:    getenvDuration("PROVISION_AP_INTERFACE_WAIT", defaultInterfaceWait),
-		ConfigPollDelay:  getenvDuration("PROVISION_AP_CONFIG_POLL", defaultConfigPollDelay),
+		Interface:         getenv("PROVISION_AP_INTERFACE", defaultInterface),
+		SSID:              getenv("SETUP_WIFI_SSID", defaultSSID),
+		PSK:               getenv("SETUP_WIFI_PSK", defaultPSK),
+		HostapdPath:       getenv("HOSTAPD_PATH", defaultHostapdPath),
+		ConfigDir:         getenv("PROVISION_AP_CONFIG_DIR", defaultConfigDir),
+		CountryCode:       strings.ToUpper(getenv("WIFI_COUNTRY", getenv("PROVISION_AP_COUNTRY", defaultCountryCode))),
+		ClientConfigPath:  getenv("WIFI_CONFIG_PATH", "/perm/wifi.json"),
+		AppConfigPath:     getenv("EXTRA_WIFI_CONFIG_PATH", "/perm/extra-wifi.json"),
+		StartupWait:       getenvDuration("PROVISION_AP_STARTUP_WAIT", defaultStartupWait),
+		InterfaceWait:     getenvDuration("PROVISION_AP_INTERFACE_WAIT", defaultInterfaceWait),
+		ConfigPollDelay:   getenvDuration("PROVISION_AP_CONFIG_POLL", defaultConfigPollDelay),
+		EthernetFirst:     getenvBool("PROVISION_AP_ETHERNET_FIRST", true),
+		EthernetInterface: getenv("PROVISION_AP_ETHERNET_INTERFACE", defaultEthernetIface),
+		EthernetWait:      getenvDuration("PROVISION_AP_ETHERNET_WAIT", defaultEthernetWait),
 	}
 
 	apIP := net.ParseIP(getenv("PROVISION_AP_IP", defaultAPIP)).To4()
@@ -134,6 +142,12 @@ func (c Config) Validate() error {
 	if c.ConfigPollDelay <= 0 {
 		return fmt.Errorf("config poll delay must be positive")
 	}
+	if c.EthernetFirst && strings.TrimSpace(c.EthernetInterface) == "" {
+		return fmt.Errorf("ethernet interface cannot be empty when ethernet-first mode is enabled")
+	}
+	if c.EthernetWait < 0 {
+		return fmt.Errorf("ethernet wait must not be negative")
+	}
 	return nil
 }
 
@@ -156,6 +170,21 @@ func getenvDuration(key string, fallback time.Duration) time.Duration {
 		return time.Duration(seconds) * time.Second
 	}
 	return fallback
+}
+
+func getenvBool(key string, fallback bool) bool {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	switch strings.ToLower(raw) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
 }
 
 func validateSSID(ssid string) error {

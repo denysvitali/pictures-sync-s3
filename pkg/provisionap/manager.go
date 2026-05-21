@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/denysvitali/pictures-sync-s3/pkg/netiface"
 	"github.com/denysvitali/pictures-sync-s3/pkg/netwatchdog"
 	"github.com/mdlayher/wifi"
 )
@@ -25,6 +26,7 @@ type Manager struct {
 	Runner     ProcessRunner
 	Configurer InterfaceConfigurer
 	Connected  func(Config) bool
+	Carrier    func(string) (bool, error)
 	Reboot     func() error
 }
 
@@ -35,6 +37,7 @@ func NewManager(cfg Config) *Manager {
 		Runner:     execRunner{},
 		Configurer: linuxInterfaceConfigurer{},
 		Connected:  hasUsableConnectivity,
+		Carrier:    netiface.HasCarrier,
 		Reboot:     rebootSystem,
 	}
 }
@@ -53,8 +56,25 @@ func (m *Manager) Run(ctx context.Context) error {
 	if m.Connected == nil {
 		m.Connected = hasUsableConnectivity
 	}
+	if m.Carrier == nil {
+		m.Carrier = netiface.HasCarrier
+	}
 	if m.Reboot == nil {
 		m.Reboot = rebootSystem
+	}
+
+	if m.Config.EthernetFirst {
+		log.Printf("provision-ap: waiting up to %s for Ethernet carrier on %s", m.Config.EthernetWait, m.Config.EthernetInterface)
+		if waitForEthernetCarrier(ctx, m.Config, m.Carrier) {
+			log.Printf("provision-ap: Ethernet carrier detected on %s; setup hotspot disabled while Ethernet remains connected", m.Config.EthernetInterface)
+			if waitForEthernetCarrierLoss(ctx, m.Config, m.Carrier) {
+				log.Printf("provision-ap: Ethernet carrier was lost; evaluating Wi-Fi fallback")
+			} else {
+				return nil
+			}
+		} else {
+			log.Printf("provision-ap: no Ethernet carrier detected on %s; evaluating Wi-Fi fallback", m.Config.EthernetInterface)
+		}
 	}
 
 	initialSnapshot, err := readWiFiConfigSnapshot(m.Config.ClientConfigPath, m.Config.AppConfigPath)
@@ -152,6 +172,66 @@ func (m *Manager) Run(ctx context.Context) error {
 				cancelServers()
 				wg.Wait()
 				return m.Reboot()
+			}
+		}
+	}
+}
+
+func waitForEthernetCarrier(ctx context.Context, cfg Config, carrier func(string) (bool, error)) bool {
+	if cfg.EthernetWait <= 0 {
+		ok, err := carrier(cfg.EthernetInterface)
+		if err != nil {
+			log.Printf("provision-ap: Ethernet carrier check failed for %s: %v", cfg.EthernetInterface, err)
+			return false
+		}
+		return ok
+	}
+
+	deadline := time.NewTimer(cfg.EthernetWait)
+	defer deadline.Stop()
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		ok, err := carrier(cfg.EthernetInterface)
+		if err != nil {
+			log.Printf("provision-ap: Ethernet carrier check failed for %s: %v", cfg.EthernetInterface, err)
+			return false
+		}
+		if ok {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-deadline.C:
+			ok, err := carrier(cfg.EthernetInterface)
+			if err != nil {
+				log.Printf("provision-ap: Ethernet carrier check failed for %s: %v", cfg.EthernetInterface, err)
+				return false
+			}
+			return ok
+		case <-ticker.C:
+		}
+	}
+}
+
+func waitForEthernetCarrierLoss(ctx context.Context, cfg Config, carrier func(string) (bool, error)) bool {
+	ticker := time.NewTicker(cfg.ConfigPollDelay)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-ticker.C:
+			ok, err := carrier(cfg.EthernetInterface)
+			if err != nil {
+				log.Printf("provision-ap: Ethernet carrier check failed for %s: %v", cfg.EthernetInterface, err)
+				return true
+			}
+			if !ok {
+				return true
 			}
 		}
 	}
