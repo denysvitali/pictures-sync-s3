@@ -225,6 +225,25 @@ jobs:
           fi
           echo "mke2fs_binary=$mke2fs_binary" >> "$GITHUB_OUTPUT"
 
+      - name: Compute release tag
+        id: release-tag
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == "refs/heads/master" ]]; then
+            calver="v$(date -u +'%Y.%-m.%-d.%H%M')"
+            echo "tag=${calver}" >> "$GITHUB_OUTPUT"
+            echo "name=Photo Sync OTA ${calver}" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "name=Photo Sync OTA ${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            echo "name=" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build flashable Gokrazy image
         id: build
         env:
@@ -238,6 +257,7 @@ jobs:
           EXFAT_MKFS_BINARY: ${{ steps.exfatprogs.outputs.exfat_mkfs_binary }}
           MKE2FS_BINARY: ${{ steps.e2fsprogs.outputs.mke2fs_binary }}
           GOKRAZY_MODULE_REPLACE: /tmp/gokrazy
+          TAG_NAME: ${{ steps.release-tag.outputs.tag }}
         run: |
           make ota
 
@@ -253,6 +273,7 @@ jobs:
           EXFAT_MKFS_BINARY: ${{ steps.exfatprogs.outputs.exfat_mkfs_binary }}
           MKE2FS_BINARY: ${{ steps.e2fsprogs.outputs.mke2fs_binary }}
           GOKRAZY_MODULE_REPLACE: /tmp/gokrazy
+          TAG_NAME: ${{ steps.release-tag.outputs.tag }}
         run: |
           make ota
 
@@ -287,21 +308,6 @@ jobs:
             ${{ steps.build-root.outputs.image_path }}
             ${{ steps.compress-root.outputs.compressed_path }}
           if-no-files-found: error
-
-      - name: Compute release tag
-        id: release-tag
-        shell: bash
-        run: |
-          if [[ "${GITHUB_REF}" == "refs/heads/master" ]]; then
-            calver="v$(date -u +'%Y.%-m.%-d.%H%M')"
-            echo "tag=${calver}" >> "$GITHUB_OUTPUT"
-            echo "name=Photo Sync OTA ${calver}" >> "$GITHUB_OUTPUT"
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-            echo "name=Photo Sync OTA ${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: Publish OTA release
         if: github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/')
