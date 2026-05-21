@@ -984,12 +984,15 @@ func TestStressTestWithMonitoring(t *testing.T) {
 	c, _ := createTestController()
 
 	initialGoroutines := countGoroutines()
-	peakGoroutines := initialGoroutines
+	var peakGoroutines atomic.Int32
+	peakGoroutines.Store(int32(initialGoroutines))
 	var goroutineCount int32 = int32(initialGoroutines)
 
 	// Monitor goroutines
 	stopMonitor := make(chan struct{})
+	monitorDone := make(chan struct{})
 	go func() {
+		defer close(monitorDone)
 		ticker := time.NewTicker(100 * time.Millisecond)
 		defer ticker.Stop()
 		for {
@@ -999,8 +1002,11 @@ func TestStressTestWithMonitoring(t *testing.T) {
 			case <-ticker.C:
 				current := int32(countGoroutines())
 				atomic.StoreInt32(&goroutineCount, current)
-				if int(current) > peakGoroutines {
-					peakGoroutines = int(current)
+				for {
+					peak := peakGoroutines.Load()
+					if current <= peak || peakGoroutines.CompareAndSwap(peak, current) {
+						break
+					}
 				}
 			}
 		}
@@ -1032,6 +1038,7 @@ func TestStressTestWithMonitoring(t *testing.T) {
 
 	c.Stop()
 	close(stopMonitor)
+	<-monitorDone
 
 	// Cleanup wait
 	time.Sleep(500 * time.Millisecond)
@@ -1043,7 +1050,7 @@ func TestStressTestWithMonitoring(t *testing.T) {
 	t.Logf("Stress test results:")
 	t.Logf("  State changes: %d", changeCount)
 	t.Logf("  Initial goroutines: %d", initialGoroutines)
-	t.Logf("  Peak goroutines: %d", peakGoroutines)
+	t.Logf("  Peak goroutines: %d", peakGoroutines.Load())
 	t.Logf("  Final goroutines: %d", finalGoroutines)
 	t.Logf("  Leaked goroutines: %d", finalGoroutines-initialGoroutines)
 
@@ -1052,9 +1059,10 @@ func TestStressTestWithMonitoring(t *testing.T) {
 			finalGoroutines-initialGoroutines)
 	}
 
-	if peakGoroutines-initialGoroutines > 100 {
+	peak := int(peakGoroutines.Load())
+	if peak-initialGoroutines > 100 {
 		t.Errorf("GOROUTINE EXPLOSION: Peak reached %d goroutines (%d above baseline)",
-			peakGoroutines, peakGoroutines-initialGoroutines)
+			peak, peak-initialGoroutines)
 	}
 }
 

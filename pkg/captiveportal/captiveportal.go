@@ -65,6 +65,7 @@ const (
 
 // Authenticator handles captive portal authentication
 type Authenticator struct {
+	mu             sync.Mutex
 	lastSSID       string
 	lastAuthTime   time.Time
 	getCurrentSSID func() (string, error)
@@ -128,6 +129,8 @@ func (a *Authenticator) run() {
 
 // checkAndAuthenticate checks current network and authenticates if needed
 func (a *Authenticator) checkAndAuthenticate() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	ssid, err := a.getCurrentSSID()
 	if err != nil {
 		// Not connected to any network, just return silently
@@ -452,7 +455,9 @@ func getLocalIPAndMAC() (string, string, error) {
 // This is useful for testing or when manual re-authentication is needed
 func (a *Authenticator) ClearAuthenticationState() {
 	log.Printf("[CaptivePortal] Clearing authentication state (manual trigger)")
+	a.mu.Lock()
 	a.lastAuthTime = time.Time{}
+	a.mu.Unlock()
 	log.Printf("[CaptivePortal] Authentication state cleared, next check will trigger authentication")
 }
 
@@ -471,6 +476,8 @@ func (a *Authenticator) Authenticate() {
 // GetAuthenticationStatus returns the current authentication status
 // This provides visibility into the authenticator's state for monitoring and debugging
 func (a *Authenticator) GetAuthenticationStatus() map[string]interface{} {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	authenticated := !a.lastAuthTime.IsZero()
 
 	status := map[string]interface{}{
