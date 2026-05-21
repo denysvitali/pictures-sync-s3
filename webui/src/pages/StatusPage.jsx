@@ -222,7 +222,7 @@ function SystemStatusCard({ status }) {
               aria-label={getProgressLabel(status.current_sync)}
             >
               <div
-                className="h-full bg-brand-500 rounded-full transition-all duration-500"
+                className="h-full bg-brand-500 rounded-full transition-all duration-150"
                 style={{ width: `${getProgressPercent(status.current_sync)}%` }}
               />
             </div>
@@ -684,6 +684,7 @@ export default function StatusPage() {
   const [redetectLoading, setRedetectLoading] = useState(false)
   const [error, setError] = useState(null)
   const [formatModal, setFormatModal] = useState({ open: false, devicePath: '' })
+  const [wsConnected, setWsConnected] = useState(false)
   const consecutiveErrorsRef = useRef(0)
   const timerRef = useRef(null)
   const wsReconnectRef = useRef(null)
@@ -772,6 +773,7 @@ export default function StatusPage() {
         socket.onopen = () => {
           reconnectAttempts = 0
           socket.send(JSON.stringify({ type: 'auth', token: tokenData.ws_token }))
+          if (!cancelled) setWsConnected(true)
         }
         socket.onmessage = (event) => {
           let message = null
@@ -790,9 +792,13 @@ export default function StatusPage() {
             refreshDevices(Boolean(message.data.sdcard_mounted))
           }
         }
-        socket.onclose = scheduleReconnect
+        socket.onclose = () => {
+          if (!cancelled) setWsConnected(false)
+          scheduleReconnect()
+        }
         socket.onerror = () => socket?.close()
       } catch {
+        if (!cancelled) setWsConnected(false)
         scheduleReconnect()
       }
     }
@@ -803,27 +809,31 @@ export default function StatusPage() {
       cancelled = true
       if (wsReconnectRef.current) window.clearTimeout(wsReconnectRef.current)
       if (socket) socket.close()
+      setWsConnected(false)
     }
   }, [deviceUrl])
 
-  // Auto-refresh while syncing or cancelling, with exponential backoff on errors
+  // Fallback polling: only while the WebSocket is disconnected, so the page
+  // still updates if the realtime stream is unreachable (e.g. proxy issue).
+  // The WebSocket pushes live state updates when connected, so no polling is
+  // needed in that case.
   useEffect(() => {
-    if (!status || (status.status !== 'syncing' && status.status !== 'cancelling')) return
+    if (!deviceUrl || wsConnected) return undefined
 
     const scheduleNext = () => {
       const errors = consecutiveErrorsRef.current
-      const delay = errors === 0 ? 3000 : Math.min(3000 * Math.pow(2, errors - 1), 30000)
-      timerRef.current = setTimeout(async () => {
+      const delay = errors === 0 ? 5000 : Math.min(5000 * Math.pow(2, errors - 1), 30000)
+      timerRef.current = window.setTimeout(async () => {
         await fetchData(true)
-        if (consecutiveErrorsRef.current < 5) {
-          scheduleNext()
-        }
+        scheduleNext()
       }, delay)
     }
 
     scheduleNext()
-    return () => clearTimeout(timerRef.current)
-  }, [status?.status, fetchData])
+    return () => {
+      if (timerRef.current) window.clearTimeout(timerRef.current)
+    }
+  }, [deviceUrl, wsConnected, fetchData])
 
   const handleStartSync = async () => {
     setActionLoading(true)
