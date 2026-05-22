@@ -124,7 +124,9 @@ func (m *Manager) Sync(sourcePath, cardID string, totalFiles int, totalBytes int
 // retry runs op with the project's standard backoff policy: a fixed 5s delay
 // for the first initialRetries attempts, then exponential backoff capped at
 // 120s, up to maxAttempts total. The op is only retried when isRetryable
-// returns true. Context cancellation aborts immediately.
+// returns true. Context cancellation aborts immediately and the returned
+// error wraps ctx.Err() so callers can use errors.Is(err, context.Canceled)
+// (or context.DeadlineExceeded) to detect the cause.
 func retry(ctx context.Context, op func(attempt int) error, isRetryable func(error) bool, label string) error {
 	const maxAttempts = 10
 	const initialRetries = 3
@@ -134,7 +136,7 @@ func retry(ctx context.Context, op func(attempt int) error, isRetryable func(err
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("sync cancelled")
+			return fmt.Errorf("sync cancelled: %w", ctx.Err())
 		default:
 		}
 
@@ -166,7 +168,7 @@ func retry(ctx context.Context, op func(attempt int) error, isRetryable func(err
 		select {
 		case <-time.After(delay):
 		case <-ctx.Done():
-			return fmt.Errorf("sync cancelled during retry wait")
+			return fmt.Errorf("sync cancelled during retry wait: %w", ctx.Err())
 		}
 	}
 
