@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -31,7 +32,9 @@ func (ctx *Context) HandleFileCards(w http.ResponseWriter, r *http.Request) {
 
 	cards, err := ctx.SyncMgr.ListCardIDs()
 	if err != nil {
-		JSONResponse(w, map[string]interface{}{
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"error": fmt.Sprintf("Failed to list cards: %v", err),
 		})
 		return
@@ -72,7 +75,9 @@ func (ctx *Context) HandleFilesPaginated(w http.ResponseWriter, r *http.Request)
 	result, err := ctx.SyncMgr.ListFilesPaginated(path, page, pageSize)
 	if err != nil {
 		log.Printf("[Gallery] list cloud failed path=%q page=%d page_size=%d duration=%s error=%v", path, page, pageSize, time.Since(start), err)
-		JSONResponse(w, map[string]interface{}{
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"error": fmt.Sprintf("Failed to list files: %v", err),
 		})
 		return
@@ -174,7 +179,9 @@ func (ctx *Context) HandleFiles(w http.ResponseWriter, r *http.Request) {
 	files, err := ctx.SyncMgr.ListFiles(path)
 	if err != nil {
 		log.Printf("[Gallery] Error listing files: %v", err)
-		JSONResponse(w, map[string]interface{}{
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"error": fmt.Sprintf("Failed to list files: %v", err),
 		})
 		return
@@ -207,16 +214,48 @@ func (ctx *Context) HandleFileView(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Set content type header
+	// Stage headers but defer flushing until the first byte is actually
+	// received from the upstream. Otherwise an early failure inside GetFile
+	// leaves the client with an implicit 200 and a plain-text error tail.
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Cache-Control", "public, max-age=3600")
+	deferred := &deferredHeaderWriter{w: w, status: http.StatusOK}
 
-	// Stream the file from remote
-	if err := ctx.SyncMgr.GetFile(filePath, w); err != nil {
+	if err := ctx.SyncMgr.GetFile(filePath, deferred); err != nil {
 		log.Printf("Failed to get file %s: %v", filePath, err)
-		http.Error(w, fmt.Sprintf("failed to retrieve file: %v", err), http.StatusInternalServerError)
+		if deferred.wrote {
+			// Headers already flushed; we cannot send a different status.
+			// Log and abort — the client will see a truncated body.
+			return
+		}
+		// Reset the staged content-type so http.Error's text/plain is honored.
+		w.Header().Del("Content-Type")
+		w.Header().Del("Cache-Control")
+		http.Error(w, fmt.Sprintf("failed to retrieve file: %v", err), http.StatusBadGateway)
 		return
 	}
+
+	// Empty upstream content still needs a valid status to be emitted.
+	if !deferred.wrote {
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+// deferredHeaderWriter postpones the implicit WriteHeader(200) until the first
+// byte is written. This lets the handler issue an error status if the upstream
+// streaming source fails before producing any output.
+type deferredHeaderWriter struct {
+	w      http.ResponseWriter
+	status int
+	wrote  bool
+}
+
+func (d *deferredHeaderWriter) Write(p []byte) (int, error) {
+	if !d.wrote {
+		d.wrote = true
+		d.w.WriteHeader(d.status)
+	}
+	return d.w.Write(p)
 }
 
 // HandleFileLink returns a temporary cloud-provider URL for a remote file.
@@ -318,7 +357,9 @@ func (ctx *Context) HandleSDCardFiles(w http.ResponseWriter, r *http.Request) {
 	result, err := ctx.daemonClient().RequestSDCardFiles(requestCtx, requestedPath)
 	if err != nil {
 		log.Printf("[Gallery] list sdcard failed path=%q duration=%s error=%v", requestedPath, time.Since(start), err)
-		JSONResponse(w, map[string]interface{}{
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(daemonHTTPStatus(err))
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"error": daemonErrorMessage(err),
 		})
 		return

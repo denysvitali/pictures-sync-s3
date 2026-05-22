@@ -26,12 +26,16 @@ import (
 
 // mockSyncManager implements syncmanager.Manager interface for testing
 type mockSyncManager struct {
-	isRunning    bool
-	cancelCalled bool
-	syncError    error
-	files        []syncmanager.FileInfo
-	cardIDs      []syncmanager.FileInfo
-	publicLink   string
+	isRunning      bool
+	cancelCalled   bool
+	syncError      error
+	files          []syncmanager.FileInfo
+	cardIDs        []syncmanager.FileInfo
+	publicLink     string
+	listFilesErr   error
+	listCardIDsErr error
+	listPagedErr   error
+	getFileFn      func(path string, w io.Writer) error
 }
 
 func (m *mockSyncManager) IsRunning() bool { return m.isRunning }
@@ -44,12 +48,28 @@ func (m *mockSyncManager) SetGooglePhotos(bool, string)   {}
 func (m *mockSyncManager) ListRemotes() ([]string, error) { return []string{"local"}, nil }
 func (m *mockSyncManager) TestConnection() error          { return nil }
 func (m *mockSyncManager) ListFiles(path string) ([]syncmanager.FileInfo, error) {
+	if m.listFilesErr != nil {
+		return nil, m.listFilesErr
+	}
 	return m.files, nil
 }
-func (m *mockSyncManager) ListCardIDs() ([]syncmanager.FileInfo, error) { return m.cardIDs, nil }
-func (m *mockSyncManager) GetFile(path string, w io.Writer) error       { return nil }
-func (m *mockSyncManager) GetPublicLink(path string) (string, error)    { return m.publicLink, nil }
+func (m *mockSyncManager) ListCardIDs() ([]syncmanager.FileInfo, error) {
+	if m.listCardIDsErr != nil {
+		return nil, m.listCardIDsErr
+	}
+	return m.cardIDs, nil
+}
+func (m *mockSyncManager) GetFile(path string, w io.Writer) error {
+	if m.getFileFn != nil {
+		return m.getFileFn(path, w)
+	}
+	return nil
+}
+func (m *mockSyncManager) GetPublicLink(path string) (string, error) { return m.publicLink, nil }
 func (m *mockSyncManager) ListFilesPaginated(path string, page, pageSize int) (*syncmanager.FileListResult, error) {
+	if m.listPagedErr != nil {
+		return nil, m.listPagedErr
+	}
 	return &syncmanager.FileListResult{
 		Files:      m.files,
 		Page:       page,
@@ -871,8 +891,11 @@ func TestHandleSDCardFiles_NoCard(t *testing.T) {
 
 	ctx.HandleSDCardFiles(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", w.Code)
+	// No SD card mounted is a client-side condition (bad request), not a 200
+	// success. The handler used to return 200 with {"error":...}, masking the
+	// failure from HTTP-level monitoring; assert the corrected status here.
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected status 400, got %d", w.Code)
 	}
 
 	var response map[string]interface{}
