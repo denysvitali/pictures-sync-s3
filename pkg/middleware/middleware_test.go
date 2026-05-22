@@ -256,6 +256,53 @@ func TestRecovery_NoError(t *testing.T) {
 	}
 }
 
+// TestRecovery_ReRaisesErrAbortHandler verifies http.ErrAbortHandler panics
+// propagate out of Recovery so the http.Server can abort the connection.
+func TestRecovery_ReRaisesErrAbortHandler(t *testing.T) {
+	handler := Recovery(func(w http.ResponseWriter, r *http.Request) error {
+		panic(http.ErrAbortHandler)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	w := httptest.NewRecorder()
+
+	defer func() {
+		rec := recover()
+		if rec == nil {
+			t.Fatal("Expected Recovery to re-raise http.ErrAbortHandler, but no panic occurred")
+		}
+		if rec != http.ErrAbortHandler {
+			t.Errorf("Expected recovered value to be http.ErrAbortHandler, got %v", rec)
+		}
+	}()
+
+	_ = handler(w, req)
+}
+
+// TestRecovery_NoDoubleWriteAfterPartialResponse ensures Recovery does not
+// emit a superfluous 500 header or append a JSON error body when the wrapped
+// handler has already written part of the response before panicking.
+func TestRecovery_NoDoubleWriteAfterPartialResponse(t *testing.T) {
+	handler := Recovery(func(w http.ResponseWriter, r *http.Request) error {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("partial-body"))
+		panic("boom after write")
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	w := httptest.NewRecorder()
+
+	_ = handler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status to remain 200 (first WriteHeader wins), got %d", w.Code)
+	}
+	body := w.Body.String()
+	if body != "partial-body" {
+		t.Errorf("Expected body to be exactly %q (no appended error JSON), got %q", "partial-body", body)
+	}
+}
+
 // BenchmarkGetClientIP measures IP extraction performance
 func BenchmarkGetClientIP(b *testing.B) {
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
