@@ -48,15 +48,17 @@ var (
 	mmcDevicePattern = "/dev/mmcblk[1-9]p1"
 )
 
-// findStorageDevice finds available USB storage devices
-func findStorageDevice() string {
+// findStorageDevice finds available USB storage devices that are not mounted
+// at a location other than ourMountPoint. ourMountPoint should be the
+// monitor's configured mount path; pass "" to treat any mount as "elsewhere".
+func findStorageDevice(ourMountPoint string) string {
 	// Check /dev/sd* devices (USB card readers on Raspberry Pi)
-	if dev := findDeviceByPattern(sdDevicePattern); dev != "" {
+	if dev := findDeviceByPattern(sdDevicePattern, ourMountPoint); dev != "" {
 		return dev
 	}
 
 	// Also check /dev/mmcblk* for SD card readers (but exclude mmcblk0 which is the Pi's boot SD)
-	if dev := findDeviceByPattern(mmcDevicePattern); dev != "" {
+	if dev := findDeviceByPattern(mmcDevicePattern, ourMountPoint); dev != "" {
 		return dev
 	}
 
@@ -64,7 +66,7 @@ func findStorageDevice() string {
 }
 
 // findDeviceByPattern searches for devices matching a glob pattern
-func findDeviceByPattern(pattern string) string {
+func findDeviceByPattern(pattern, ourMountPoint string) string {
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
 		log.Printf("Error globbing %s: %v", pattern, err)
@@ -73,7 +75,7 @@ func findDeviceByPattern(pattern string) string {
 
 	// Return first available device that isn't mounted elsewhere
 	for _, dev := range matches {
-		if !isDeviceMountedElsewhere(dev) {
+		if !isDeviceMountedElsewhere(dev, ourMountPoint) {
 			return dev
 		}
 		log.Printf("Device %s is mounted elsewhere, skipping", dev)
@@ -82,9 +84,10 @@ func findDeviceByPattern(pattern string) string {
 	return ""
 }
 
-// isDeviceMountedElsewhere checks if device is mounted somewhere other than our mount point
-// This is a simpler version without the Monitor's cache
-func isDeviceMountedElsewhere(device string) bool {
+// isDeviceMountedElsewhere checks if device is mounted somewhere other than our mount point.
+// ourMountPoint is compared against the mount path in /proc/mounts to determine "elsewhere".
+// If ourMountPoint is empty, any existing mount is treated as elsewhere.
+func isDeviceMountedElsewhere(device, ourMountPoint string) bool {
 	data, err := os.ReadFile("/proc/mounts")
 	if err != nil {
 		return false
@@ -92,7 +95,6 @@ func isDeviceMountedElsewhere(device string) bool {
 
 	// Check if device appears in mounts at a location other than our mount point
 	lines := strings.Split(string(data), "\n")
-	ourMountPoint := "/perm/pictures-sync/mounts/sdcard"
 
 	for _, line := range lines {
 		if strings.HasPrefix(line, device+" ") {
@@ -101,7 +103,7 @@ func isDeviceMountedElsewhere(device string) bool {
 			if len(parts) >= 2 {
 				mountPoint := parts[1]
 				// If it's mounted at our location, it's not "elsewhere"
-				if mountPoint == ourMountPoint {
+				if ourMountPoint != "" && mountPoint == ourMountPoint {
 					return false
 				}
 				// Mounted somewhere else

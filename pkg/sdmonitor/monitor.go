@@ -180,7 +180,7 @@ func (m *Monitor) checkDevices() {
 	}
 
 	// Look for USB storage devices
-	device := findStorageDevice()
+	device := findStorageDevice(m.mountPath)
 
 	m.mu.RLock()
 	currentDevice := m.lastDevice

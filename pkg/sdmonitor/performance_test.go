@@ -183,7 +183,7 @@ func BenchmarkFindStorageDevice(b *testing.B) {
 	// It won't find actual devices in test environment, but measures the search time
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = findStorageDevice()
+		_ = findStorageDevice("")
 	}
 }
 
