@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"crypto/subtle"
 	"log"
 	"net/http"
 	"net/url"
@@ -10,6 +9,14 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/middleware"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ratelimit"
 )
+
+// maxBasicAuthFieldLen bounds the size of username/password values accepted
+// from the Authorization header before we attempt to compare them. The
+// constant-time compare hashes its inputs (which is O(n) over the input
+// length), so without a cap a malicious client could send a multi-megabyte
+// Authorization header to amplify CPU work. 1 KiB is far more than any
+// legitimate gokrazy basic-auth credential and well below any DoS threshold.
+const maxBasicAuthFieldLen = 1024
 
 type PasswordProvider interface {
 	CurrentPassword() string
@@ -173,11 +180,22 @@ func BasicAuthMiddlewareWithProvider(passwordProvider PasswordProvider, limiter 
 				authPassword = passwordProvider.CurrentPassword()
 			}
 
-			// Use constant-time comparison to prevent timing attacks
-			usernameMatch := subtle.ConstantTimeCompare([]byte(username), []byte("gokrazy")) == 1
-			passwordMatch := subtle.ConstantTimeCompare([]byte(password), []byte(authPassword)) == 1
+			// SECURITY: cap field sizes before doing any constant-time
+			// comparison. The compare hashes its inputs, which is O(n)
+			// over the input length; without a cap an attacker could
+			// amplify CPU work with a multi-MB Authorization header.
+			oversize := len(username) > maxBasicAuthFieldLen || len(password) > maxBasicAuthFieldLen
 
-			if !ok || !usernameMatch || !passwordMatch {
+			// Use length-safe constant-time comparison to prevent
+			// timing attacks. crypto/subtle.ConstantTimeCompare returns
+			// 0 immediately when slice lengths differ, leaking the
+			// secret's length; constantTimeEqualString hashes both
+			// inputs first so the compare always runs over a fixed-size
+			// buffer regardless of input length.
+			usernameMatch := constantTimeEqualString(username, "gokrazy")
+			passwordMatch := constantTimeEqualString(password, authPassword)
+
+			if !ok || oversize || !usernameMatch || !passwordMatch {
 				w.Header().Set("WWW-Authenticate", `Basic realm="Photo Backup Station"`)
 
 				// Record failed authentication attempt if rate limiter is enabled

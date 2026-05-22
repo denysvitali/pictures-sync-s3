@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"crypto/subtle"
 	"errors"
 	"fmt"
 	"os"
@@ -105,8 +104,11 @@ func CurrentGokrazyPassword(fallback string) string {
 }
 
 func (m *PasswordManager) ChangePassword(currentPassword, newPassword string) error {
+	// SECURITY: use length-safe constant-time comparison. Plain
+	// subtle.ConstantTimeCompare returns 0 immediately when slice
+	// lengths differ, leaking the stored password's length via timing.
 	m.mu.RLock()
-	matches := subtle.ConstantTimeCompare([]byte(currentPassword), []byte(m.password)) == 1
+	matches := constantTimeEqualString(currentPassword, m.password)
 	m.mu.RUnlock()
 	if !matches {
 		return ErrCurrentPasswordInvalid
