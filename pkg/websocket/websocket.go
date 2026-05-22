@@ -95,6 +95,12 @@ func StartRateLimiterCleanup(ctx context.Context) {
 // are evicted before new tokens are accepted.
 const maxWSTokens = 1000
 
+// maxIncomingMessageBytes caps the size of any single WebSocket frame the
+// server is willing to read from a client. Bounds memory usage against a
+// hostile client sending oversized messages (especially before auth, when
+// the connection is still anonymous).
+const maxIncomingMessageBytes = 64 * 1024
+
 var (
 	wsTokens            = make(map[string]time.Time) // WebSocket auth tokens with expiry
 	wsTokenMutex        sync.RWMutex
@@ -521,6 +527,13 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager, otaManag
 		}
 		defer conn.Close()
 
+		// Bound the maximum incoming WebSocket message size. Without this,
+		// gorilla/websocket imposes no limit and an unauthenticated client
+		// can stream arbitrarily large JSON into ReadJSON below, exhausting
+		// memory. 64 KiB is comfortably above the ~80-byte auth handshake
+		// and any plausible client ping payload.
+		conn.SetReadLimit(maxIncomingMessageBytes)
+
 		// Set a deadline for receiving the auth token.
 		conn.SetReadDeadline(time.Now().Add(getAuthReadTimeout()))
 
@@ -601,9 +614,17 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager, otaManag
 			return nil
 		})
 
-		// Start a goroutine to read client messages (for ping/pong)
+		// Start a goroutine to read client messages (for ping/pong).
+		// done signals the reader to exit even when it is blocked on a
+		// channel send to clientMessages — closing conn alone is not enough
+		// because a goroutine parked on `clientMessages <- msg` is not woken
+		// by the underlying socket closing.
 		clientMessages := make(chan map[string]any, 10)
+		done := make(chan struct{})
+		var readerWG sync.WaitGroup
+		readerWG.Add(1)
 		go func() {
+			defer readerWG.Done()
 			defer close(clientMessages)
 			for {
 				var msg map[string]any
@@ -611,9 +632,22 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager, otaManag
 					// Connection closed or error reading
 					return
 				}
-				clientMessages <- msg
+				select {
+				case clientMessages <- msg:
+				case <-done:
+					return
+				}
 			}
 		}()
+		// Ensure the reader goroutine has a chance to observe both the
+		// closed connection and the done signal, and that we don't leak
+		// it past HandleWebSocket's return. Defers run LIFO, so close(done)
+		// runs first (unblocking a reader parked on the channel send), then
+		// we close the connection to unblock a reader parked in ReadJSON,
+		// and finally we wait for the goroutine to actually exit.
+		defer readerWG.Wait()
+		defer conn.Close()
+		defer close(done)
 
 		// State and event updates are pushed in real time from the local
 		// caches (populated by the daemon subscribe stream in the webui
