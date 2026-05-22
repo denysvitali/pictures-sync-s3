@@ -468,14 +468,16 @@ func (m *Manager) run(ctx context.Context, releaseTag string) {
 		return
 	}
 
-	status := m.Status()
-	status.State = "installed"
-	status.Phase = "installed"
-	status.Message = "OTA image installed; reboot requested"
-	status.FinishedAt = time.Now()
-	status.ProgressPercent = 100
-	m.set(status)
-	m.recordInstallHistory(m.historyFromStatus(status))
+	var snapshot Status
+	m.mutateStatus(func(status *Status) {
+		status.State = "installed"
+		status.Phase = "installed"
+		status.Message = "OTA image installed; reboot requested"
+		status.FinishedAt = time.Now()
+		status.ProgressPercent = 100
+		snapshot = *status
+	})
+	m.recordInstallHistory(m.historyFromStatus(snapshot))
 }
 
 // resolveExpectedSHA256 looks for a SHA256 sidecar accompanying the release
@@ -670,6 +672,22 @@ func (m *Manager) set(status Status) {
 	publishStatus(status, subscribers)
 }
 
+// mutateStatus applies fn to the current status under m.mu and publishes the
+// result atomically. It exists to close a read-modify-write race in the
+// download/install progress callbacks: with separate Status() + set() calls,
+// two concurrent callbacks (e.g. download-progress and install-progress, or
+// the installer's own progress goroutines) could clobber each other's updates
+// and emit a stale snapshot to WebSocket subscribers.
+func (m *Manager) mutateStatus(fn func(*Status)) {
+	m.mu.Lock()
+	fn(&m.status)
+	status := m.status
+	subscribers := m.subscribersSnapshotLocked()
+	m.mu.Unlock()
+
+	publishStatus(status, subscribers)
+}
+
 func (m *Manager) subscribersSnapshotLocked() []*statusSubscriber {
 	subscribers := make([]*statusSubscriber, len(m.subscribers))
 	copy(subscribers, m.subscribers)
@@ -683,52 +701,54 @@ func publishStatus(status Status, subscribers []*statusSubscriber) {
 }
 
 func (m *Manager) updateInstallProgress(progress InstallProgress) {
-	status := m.Status()
-	status.State = "installing"
-	status.Phase = progress.Phase
-	status.Message = progress.Message
-	if progress.ProgressPercent > status.ProgressPercent {
-		status.ProgressPercent = progress.ProgressPercent
-	}
-	m.set(status)
+	m.mutateStatus(func(status *Status) {
+		status.State = "installing"
+		status.Phase = progress.Phase
+		status.Message = progress.Message
+		if progress.ProgressPercent > status.ProgressPercent {
+			status.ProgressPercent = progress.ProgressPercent
+		}
+	})
 }
 
 func (m *Manager) updateDownloadProgress(progress downloadProgress) {
-	status := m.Status()
-	status.DownloadedBytes = progress.downloaded
-	status.TotalBytes = progress.total
-	status.DownloadSpeedBps = progress.speedBps
-	if progress.total > 0 {
-		downloadPercent := (float64(progress.downloaded) / float64(progress.total)) * 75
-		status.ProgressPercent = minFloat64(85, maxFloat64(status.ProgressPercent, 10+downloadPercent))
-	}
-	if status.Phase == "" || status.Phase == "downloading" {
-		status.Phase = "flashing"
-		status.Message = "Downloading and flashing OTA image"
-		status.State = "installing"
-	}
-	m.set(status)
+	m.mutateStatus(func(status *Status) {
+		status.DownloadedBytes = progress.downloaded
+		status.TotalBytes = progress.total
+		status.DownloadSpeedBps = progress.speedBps
+		if progress.total > 0 {
+			downloadPercent := (float64(progress.downloaded) / float64(progress.total)) * 75
+			status.ProgressPercent = minFloat64(85, maxFloat64(status.ProgressPercent, 10+downloadPercent))
+		}
+		if status.Phase == "" || status.Phase == "downloading" {
+			status.Phase = "flashing"
+			status.Message = "Downloading and flashing OTA image"
+			status.State = "installing"
+		}
+	})
 }
 
 func (m *Manager) fail(err error) {
-	status := m.Status()
-	status.State = "failed"
-	status.Phase = "failed"
-	status.Error = err.Error()
-	status.Message = "OTA installation failed"
-	// Surface verification failures distinctly so the UI (and operators)
-	// can tell a corrupted download apart from an install-time error.
-	if IsHashMismatch(err) {
-		status.Phase = "verification_failed"
-		status.Message = "OTA image rejected: SHA256 mismatch"
-	}
-	if IsSizeMismatch(err) {
-		status.Phase = "verification_failed"
-		status.Message = "OTA image rejected: size mismatch (truncated download)"
-	}
-	status.FinishedAt = time.Now()
-	m.set(status)
-	m.recordInstallHistory(m.historyFromStatus(status))
+	var snapshot Status
+	m.mutateStatus(func(status *Status) {
+		status.State = "failed"
+		status.Phase = "failed"
+		status.Error = err.Error()
+		status.Message = "OTA installation failed"
+		// Surface verification failures distinctly so the UI (and operators)
+		// can tell a corrupted download apart from an install-time error.
+		if IsHashMismatch(err) {
+			status.Phase = "verification_failed"
+			status.Message = "OTA image rejected: SHA256 mismatch"
+		}
+		if IsSizeMismatch(err) {
+			status.Phase = "verification_failed"
+			status.Message = "OTA image rejected: size mismatch (truncated download)"
+		}
+		status.FinishedAt = time.Now()
+		snapshot = *status
+	})
+	m.recordInstallHistory(m.historyFromStatus(snapshot))
 }
 
 func reportInstallProgress(progress InstallProgressFunc, phase, message string, progressPercent float64) {
