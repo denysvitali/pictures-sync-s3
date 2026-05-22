@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"crypto/subtle"
 	"errors"
 	"fmt"
 	"os"
@@ -105,10 +104,18 @@ func CurrentGokrazyPassword(fallback string) string {
 }
 
 func (m *PasswordManager) ChangePassword(currentPassword, newPassword string) error {
-	m.mu.RLock()
-	matches := subtle.ConstantTimeCompare([]byte(currentPassword), []byte(m.password)) == 1
-	m.mu.RUnlock()
-	if !matches {
+	// SECURITY: hold the write lock for the full verify+write+update
+	// sequence. The previous implementation released the read lock
+	// between verification and the on-disk write, so two concurrent
+	// callers could both observe the same "current" password, both pass
+	// verification, and then race on writePasswordFile / m.password
+	// assignment. Holding the write lock serializes change attempts and
+	// ensures the in-memory copy and the on-disk file never disagree
+	// (the lock is released only after both succeed).
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !constantTimeEqualString(currentPassword, m.password) {
 		return ErrCurrentPasswordInvalid
 	}
 	if err := ValidateGokrazyPassword(newPassword); err != nil {
@@ -118,9 +125,7 @@ func (m *PasswordManager) ChangePassword(currentPassword, newPassword string) er
 		return err
 	}
 
-	m.mu.Lock()
 	m.password = newPassword
-	m.mu.Unlock()
 	return nil
 }
 
