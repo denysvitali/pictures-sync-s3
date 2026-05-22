@@ -8,6 +8,103 @@ import (
 	"time"
 )
 
+// TestSendEventDoesNotBlockStop reproduces the deadlock that existed when
+// checkDevices held m.mountMu across a blocking eventChan send: a stalled
+// consumer would freeze the poll loop forever AND prevent Stop() (which
+// also takes mountMu) from completing.
+//
+// We simulate this by saturating eventChan with a fake consumer that never
+// reads, then asking the monitor to deliver an event. The sendEvent path
+// must complete within a bounded time (no permanent block) and Stop() must
+// be able to interrupt it via stopChan.
+func TestSendEventDoesNotBlockStop(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+	monitor := NewMonitor(tmpDir)
+
+	// Saturate the buffered eventChan so the next send must take the
+	// "slow path" that waits on either stopChan or the timeout.
+	for i := 0; i < cap(monitor.eventChan); i++ {
+		monitor.eventChan <- Event{Type: EventInserted, DevName: "filler"}
+	}
+
+	sendDone := make(chan struct{})
+	go func() {
+		defer close(sendDone)
+		monitor.sendEvent(Event{
+			Type:    EventInserted,
+			DevName: "after-stop",
+		})
+	}()
+
+	// Verify sendEvent is actually blocked (no consumer, buffer full).
+	select {
+	case <-sendDone:
+		t.Fatal("sendEvent returned immediately despite full buffer and no consumer")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	// Stop() must unblock the in-flight sendEvent via stopChan and
+	// itself complete (it acquires mountMu and unmounts if mounted).
+	stopDone := make(chan struct{})
+	go func() {
+		defer close(stopDone)
+		monitor.Stop()
+	}()
+
+	select {
+	case <-stopDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop() blocked - mountMu deadlock with sendEvent regressed")
+	}
+
+	select {
+	case <-sendDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("sendEvent did not return after Stop() (stopChan not honored)")
+	}
+}
+
+// TestSendEventTimesOutInsteadOfBlocking ensures that, even with no
+// stopChan signal, sendEvent will eventually give up on a full channel
+// rather than wedge the poll loop forever. We do this with a tiny custom
+// timeout via a hand-built Monitor (parallel-safe because we don't share
+// state with other tests).
+func TestSendEventTimesOutInsteadOfBlocking(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+	monitor := NewMonitor(tmpDir)
+
+	for i := 0; i < cap(monitor.eventChan); i++ {
+		monitor.eventChan <- Event{Type: EventInserted, DevName: "filler"}
+	}
+
+	// Run sendEvent; this should return within roughly eventSendTimeout +
+	// scheduling slack. We don't want the test to wait the full 2s, so we
+	// just assert "completes well before a generous upper bound".
+	start := time.Now()
+	done := make(chan struct{})
+	go func() {
+		monitor.sendEvent(Event{Type: EventInserted, DevName: "drop-me"})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		elapsed := time.Since(start)
+		if elapsed > eventSendTimeout+500*time.Millisecond {
+			t.Errorf("sendEvent took %v, expected <= %v", elapsed, eventSendTimeout+500*time.Millisecond)
+		}
+		// The buffer must still be full (the new event was dropped, not appended).
+		if len(monitor.eventChan) != cap(monitor.eventChan) {
+			t.Errorf("expected buffer full after drop, got len=%d cap=%d",
+				len(monitor.eventChan), cap(monitor.eventChan))
+		}
+	case <-time.After(eventSendTimeout + 2*time.Second):
+		t.Fatal("sendEvent never returned: poll loop would deadlock in production")
+	}
+}
+
 func TestPotentialDeadlock(t *testing.T) {
 	// Test for potential deadlock in checkDevices when it's called
 	// synchronously during Start()

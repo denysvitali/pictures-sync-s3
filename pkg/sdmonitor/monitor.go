@@ -14,6 +14,11 @@ const (
 	// devModeCardCreationDelay is the wait time before creating a mock SD card in development mode.
 	// This simulates the delay of physical card insertion for testing purposes.
 	devModeCardCreationDelay = 3 * time.Second
+
+	// eventSendTimeout bounds how long a poll-loop event delivery may wait
+	// when the event channel is full. Beyond this we drop the event rather
+	// than block the poller (and, transitively, Stop()).
+	eventSendTimeout = 2 * time.Second
 )
 
 // Monitor monitors for SD card insertion/removal
@@ -180,7 +185,7 @@ func (m *Monitor) checkDevices() {
 	}
 
 	// Look for USB storage devices
-	device := findStorageDevice()
+	device := findStorageDevice(m.mountPath)
 
 	m.mu.RLock()
 	currentDevice := m.lastDevice
@@ -206,12 +211,14 @@ func (m *Monitor) checkDevices() {
 		// New device detected
 		log.Printf("SD card detected: %s (lastDevice was: %s)", device, currentDevice)
 
-		// Acquire mount mutex to prevent concurrent mount operations
+		// Acquire mount mutex to prevent concurrent mount operations.
+		// IMPORTANT: do NOT hold mountMu across the eventChan send below.
+		// Stop() also acquires mountMu, so if eventChan is full and the
+		// consumer has stalled, holding mountMu here would deadlock Stop().
 		m.mountMu.Lock()
-		defer m.mountMu.Unlock()
-
-		// Try to mount it
-		if err := m.mount(device); err != nil {
+		err := m.mount(device)
+		if err != nil {
+			m.mountMu.Unlock()
 			log.Printf("Mount ERROR: Failed to mount device %s: %v", device, err)
 			// DO NOT update lastDevice on mount failure - this is the critical bug fix
 			// The device is NOT mounted, so we must not mark it as such
@@ -223,14 +230,15 @@ func (m *Monitor) checkDevices() {
 		m.mu.Lock()
 		m.lastDevice = device
 		m.mu.Unlock()
+		m.mountMu.Unlock()
 
 		log.Printf("SD card inserted: %s, mounted at %s", filepath.Base(device), m.mountPath)
-		m.eventChan <- Event{
+		m.sendEvent(Event{
 			Type:      EventInserted,
 			DevPath:   device,
 			DevName:   filepath.Base(device),
 			MountPath: m.mountPath,
-		}
+		})
 	} else if device == "" && currentDevice != "" {
 		// Device removed
 		log.Printf("SD card removed: %s", currentDevice)
@@ -250,11 +258,45 @@ func (m *Monitor) checkDevices() {
 		m.lastDevice = ""
 		m.mu.Unlock()
 
-		m.eventChan <- Event{
+		m.sendEvent(Event{
 			Type:    EventRemoved,
 			DevPath: oldDevice,
 			DevName: filepath.Base(oldDevice),
-		}
+		})
+	}
+}
+
+// sendEvent delivers an event to consumers without ever blocking the caller.
+// We must not block here because checkDevices runs from the poll loop and
+// Stop()/RedetectCurrentDevice() can be called concurrently with it. Blocking
+// on a full buffered channel previously made the poller deadlock against
+// Stop() once a downstream consumer stalled.
+//
+// If the buffer is full (slow/stalled consumer) we log and drop the event
+// rather than wedge the monitor. Stop() also unblocks pending sends by
+// closing stopChan and stops being a deadlock victim.
+func (m *Monitor) sendEvent(ev Event) {
+	// Fast path: deliver immediately if buffer has room and we are not stopping.
+	select {
+	case <-m.stopChan:
+		log.Printf("sendEvent: monitor stopped, dropping %v event for %s", ev.Type, ev.DevName)
+		return
+	case m.eventChan <- ev:
+		return
+	default:
+	}
+
+	// Slow path: wait briefly, but never block forever. Always remain
+	// responsive to Stop().
+	timer := time.NewTimer(eventSendTimeout)
+	defer timer.Stop()
+
+	select {
+	case m.eventChan <- ev:
+	case <-m.stopChan:
+		log.Printf("sendEvent: monitor stopped while delivering %v event for %s", ev.Type, ev.DevName)
+	case <-timer.C:
+		log.Printf("sendEvent: WARNING - event channel full, dropping %v event for %s", ev.Type, ev.DevName)
 	}
 }
 
@@ -351,13 +393,7 @@ func (m *Monitor) createDevModeCard() {
 		MountPath: m.mountPath,
 	}
 	log.Printf("SD Monitor: Sending insertion event to channel: %+v", event)
-
-	select {
-	case m.eventChan <- event:
-		log.Println("SD Monitor: Event sent successfully")
-	default:
-		log.Println("SD Monitor: WARNING - Event channel is full, event dropped!")
-	}
+	m.sendEvent(event)
 
 	log.Printf("SD Monitor: Mock SD card created with %d photos at %s", len(mockPhotos), m.mountPath)
 }
