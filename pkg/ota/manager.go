@@ -416,6 +416,23 @@ func (m *Manager) run(ctx context.Context, releaseTag string) {
 		_ = staged.Close()
 	}()
 
+	// Size verification runs even when no SHA256 sidecar is published. A
+	// truncated HTTP body (proxy/CDN cutoff, server EOF without error) would
+	// otherwise be flashed as if it were complete and brick the device. Prefer
+	// the GitHub release asset size (signed by the release manifest) over the
+	// Content-Length header, but fall back to Content-Length when the API did
+	// not report a size.
+	expectedSize := asset.Size
+	sizeSource := "github asset size"
+	if expectedSize <= 0 && resp.ContentLength > 0 {
+		expectedSize = resp.ContentLength
+		sizeSource = "Content-Length"
+	}
+	if err := staged.VerifyExpectedSize(expectedSize, sizeSource); err != nil {
+		m.fail(err)
+		return
+	}
+
 	if expectedHash != "" {
 		source := "github-sidecar"
 		if sidecarURL != "" {
@@ -704,6 +721,10 @@ func (m *Manager) fail(err error) {
 	if IsHashMismatch(err) {
 		status.Phase = "verification_failed"
 		status.Message = "OTA image rejected: SHA256 mismatch"
+	}
+	if IsSizeMismatch(err) {
+		status.Phase = "verification_failed"
+		status.Message = "OTA image rejected: size mismatch (truncated download)"
 	}
 	status.FinishedAt = time.Now()
 	m.set(status)

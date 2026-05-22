@@ -46,6 +46,41 @@ func IsHashMismatch(err error) bool {
 	return errors.As(err, &mismatch)
 }
 
+// SizeMismatchError signals that the number of bytes received does not match
+// the size advertised by the release manifest (or HTTP Content-Length). It is
+// raised even when no SHA256 sidecar is published, so a truncated download
+// never reaches the gokrazy updater.
+type SizeMismatchError struct {
+	Expected int64
+	Got      int64
+	Source   string // e.g. "github asset size" or "Content-Length"
+}
+
+func (e *SizeMismatchError) Error() string {
+	if e.Source != "" {
+		return fmt.Sprintf("OTA image size mismatch (source=%s): expected %d bytes, got %d", e.Source, e.Expected, e.Got)
+	}
+	return fmt.Sprintf("OTA image size mismatch: expected %d bytes, got %d", e.Expected, e.Got)
+}
+
+// IsSizeMismatch reports whether err is (or wraps) a SizeMismatchError.
+func IsSizeMismatch(err error) bool {
+	var mismatch *SizeMismatchError
+	return errors.As(err, &mismatch)
+}
+
+// VerifyExpectedSize compares the number of bytes staged against the expected
+// size. A non-positive expected value is treated as "unknown" and accepted.
+func (s *StagedImage) VerifyExpectedSize(expected int64, source string) error {
+	if expected <= 0 {
+		return nil
+	}
+	if s.Bytes != expected {
+		return &SizeMismatchError{Expected: expected, Got: s.Bytes, Source: source}
+	}
+	return nil
+}
+
 // StagedImage is the result of downloading and verifying an OTA image before
 // applying it. Callers must call Close to remove the staged file and its
 // manifest once they are done (success or failure).
