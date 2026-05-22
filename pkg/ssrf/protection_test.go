@@ -118,6 +118,27 @@ func TestValidateHostname(t *testing.T) {
 			shouldErr: true,
 			errReason: "internal domain access not allowed",
 		},
+		{
+			name:      "localhost with trailing dot blocked",
+			hostname:  "localhost.",
+			clientIP:  "192.0.2.1",
+			shouldErr: true,
+			errReason: "localhost access not allowed",
+		},
+		{
+			name:      "uppercase LOCALHOST trailing-dot blocked",
+			hostname:  "LOCALHOST.",
+			clientIP:  "192.0.2.1",
+			shouldErr: true,
+			errReason: "localhost access not allowed",
+		},
+		{
+			name:      "metadata.google.internal trailing dot blocked",
+			hostname:  "metadata.google.internal.",
+			clientIP:  "192.0.2.1",
+			shouldErr: true,
+			errReason: "cloud metadata endpoint access not allowed",
+		},
 	}
 
 	for _, tt := range tests {
@@ -227,6 +248,41 @@ func TestValidateIP(t *testing.T) {
 			clientIP:  "192.0.2.1",
 			shouldErr: true,
 			errReason: "loopback address not allowed",
+		},
+		{
+			name:      "0.0.0.0/8 non-zero blocked (0.1.2.3 routes to loopback on Linux)",
+			ipStr:     "0.1.2.3",
+			clientIP:  "192.0.2.1",
+			shouldErr: true,
+			errReason: "0.0.0.0/8",
+		},
+		{
+			name:      "0.0.0.0/8 high blocked",
+			ipStr:     "0.255.255.255",
+			clientIP:  "192.0.2.1",
+			shouldErr: true,
+			errReason: "0.0.0.0/8",
+		},
+		{
+			name:      "IPv4-mapped IPv6 loopback blocked",
+			ipStr:     "::ffff:127.0.0.1",
+			clientIP:  "192.0.2.1",
+			shouldErr: true,
+			errReason: "loopback address not allowed",
+		},
+		{
+			name:      "IPv4-mapped IPv6 private blocked",
+			ipStr:     "::ffff:10.0.0.1",
+			clientIP:  "192.0.2.1",
+			shouldErr: true,
+			errReason: "private IP address not allowed",
+		},
+		{
+			name:      "IPv4-mapped IPv6 AWS metadata blocked",
+			ipStr:     "::ffff:169.254.169.254",
+			clientIP:  "192.0.2.1",
+			shouldErr: true,
+			errReason: "link-local address not allowed",
 		},
 	}
 

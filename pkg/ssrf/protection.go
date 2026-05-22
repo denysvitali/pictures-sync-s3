@@ -178,11 +178,17 @@ func validateHostnameFormat(hostname string) error {
 // checkDangerousHostnames blocks known dangerous hostnames
 func checkDangerousHostnames(hostname string) error {
 	hostname = strings.ToLower(strings.TrimSpace(hostname))
+	// Strip a single trailing dot (fully-qualified DNS form) so that
+	// "localhost." and "metadata.google.internal." are treated the
+	// same as their non-rooted counterparts.
+	hostname = strings.TrimSuffix(hostname, ".")
 
 	// Block localhost variants
 	localhostVariants := []string{
 		"localhost",
 		"localhost.localdomain",
+		"ip6-localhost",
+		"ip6-loopback",
 	}
 	for _, variant := range localhostVariants {
 		if hostname == variant {
@@ -269,6 +275,17 @@ func validateIP(ip net.IP, target string) error {
 	if ip.IsUnspecified() {
 		return &ValidationError{
 			Reason: "unspecified address not allowed",
+			Target: target,
+		}
+	}
+
+	// Block the entire "this network" range 0.0.0.0/8 — many Linux
+	// kernels route any 0.0.0.0/8 destination to localhost, so an
+	// attacker who can pick an arbitrary IP (e.g. 0.1.2.3) can reach
+	// loopback services even though IsUnspecified() only flags 0.0.0.0.
+	if ip4 := ip.To4(); ip4 != nil && ip4[0] == 0 {
+		return &ValidationError{
+			Reason: "0.0.0.0/8 (this-network) address not allowed",
 			Target: target,
 		}
 	}
