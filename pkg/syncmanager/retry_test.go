@@ -131,6 +131,59 @@ func TestRetryCancelDuringBackoff(t *testing.T) {
 	}
 }
 
+// TestRetryFirstExponentialDelayIsLongerThanInitial regression-tests a subtle
+// off-by-one in the backoff schedule. retry() doubles `backoff` AFTER using it
+// for the current attempt, so the value of `backoff` at the START of the first
+// exponential attempt is what gets waited. Previously `backoff` was initialised
+// to 5s, identical to initialDelay, which made attempt #4 wait 5s (same as
+// attempts 1-3) and "exponential backoff" effectively start at attempt #5.
+//
+// The test runs through the initialRetries (3 x 5s fixed) and then measures
+// the wait before the 4th-attempt retry. With the fix that wait is >= 9s; with
+// the bug present it would be ~5s.
+func TestRetryFirstExponentialDelayIsLongerThanInitial(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping multi-attempt timing test in -short mode")
+	}
+
+	// Use 4 failures so retry() enters the exponential branch on attempt 4.
+	op := &fakeOp{script: []fakeOpOutcome{
+		{err: errors.New("transient1")},
+		{err: errors.New("transient2")},
+		{err: errors.New("transient3")},
+		{err: errors.New("transient4")},
+		{err: nil}, // 5th attempt succeeds
+	}}
+
+	// We cancel just AFTER attempt 4 has been issued so retry() returns
+	// during the backoff wait that follows attempt 4. The duration of that
+	// wait minus the cancel-delay reveals whether the first exponential
+	// step was 5s (buggy) or 10s (fixed). Easier: just measure total
+	// elapsed and verify it exceeds the buggy schedule.
+	//
+	// Total time before attempt 5: 5 + 5 + 5 + firstExpDelay
+	// Buggy: 5 + 5 + 5 + 5  = 20s
+	// Fixed: 5 + 5 + 5 + 10 = 25s
+	start := time.Now()
+	err := retry(context.Background(), op.run, alwaysRetryable, "test")
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("expected success on attempt 5, got %v", err)
+	}
+	if got := atomic.LoadInt32(&op.attempts); got != 5 {
+		t.Fatalf("expected 5 attempts, got %d", got)
+	}
+	// Allow scheduler slack. Buggy schedule would land near 20s; fixed
+	// schedule lands near 25s. Anything >= 23s confirms the fix.
+	if elapsed < 23*time.Second {
+		t.Errorf("first exponential delay too short: total elapsed=%v, expected >= 23s (5+5+5+10)", elapsed)
+	}
+	if elapsed > 35*time.Second {
+		t.Errorf("retry took unexpectedly long (%v); expected ~25s", elapsed)
+	}
+}
+
 // TestRetryNonRetryableErrorReturnsImmediately ensures non-retryable errors
 // short-circuit the retry loop and the original error is returned (not the
 // "failed after N attempts" wrapper).

@@ -130,7 +130,15 @@ func (m *Manager) Sync(sourcePath, cardID string, totalFiles int, totalBytes int
 func retry(ctx context.Context, op func(attempt int) error, isRetryable func(error) bool, label string) error {
 	const maxAttempts = 10
 	const initialRetries = 3
-	backoff := 5 * time.Second
+	const initialDelay = 5 * time.Second
+	const maxBackoff = 120 * time.Second
+	// backoff is the delay used for the FIRST exponential attempt
+	// (attempt = initialRetries+1). It is doubled AFTER each exponential use,
+	// so the sequence after the initial fixed-delay phase is 10s, 20s, 40s,
+	// 80s, 120s, 120s, ... Starting at 10s here (rather than 5s) ensures the
+	// first "exponential" delay is actually larger than the initial fixed
+	// delay; otherwise attempts 1..4 would all wait the same 5s.
+	backoff := 2 * initialDelay
 	var lastErr error
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
@@ -152,7 +160,7 @@ func retry(ctx context.Context, op func(attempt int) error, isRetryable func(err
 
 		var delay time.Duration
 		if attempt <= initialRetries {
-			delay = 5 * time.Second
+			delay = initialDelay
 			log.Printf("%s attempt %d/%d failed with retryable error: %v. Retrying in %v...",
 				label, attempt, maxAttempts, err, delay)
 		} else {
@@ -160,8 +168,8 @@ func retry(ctx context.Context, op func(attempt int) error, isRetryable func(err
 			log.Printf("%s attempt %d/%d failed with retryable error: %v. Retrying with exponential backoff in %v...",
 				label, attempt, maxAttempts, err, delay)
 			backoff *= 2
-			if backoff > 120*time.Second {
-				backoff = 120 * time.Second
+			if backoff > maxBackoff {
+				backoff = maxBackoff
 			}
 		}
 
