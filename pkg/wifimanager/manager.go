@@ -96,12 +96,23 @@ func (m *Manager) AddNetwork(ssid, password string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Snapshot existing networks so we can roll back if persistence fails.
+	// Without rollback, a failed save (disk full, /perm read-only, etc.)
+	// leaves the new credentials only in memory; GetNetworks() would return
+	// a PSK that was never persisted, masking the failure and risking that
+	// the secret is later treated as authoritative by callers.
+	previous := m.cloneNetworks()
+
 	// Check if network already exists
 	for i, net := range m.networks {
 		if net.SSID == ssid {
 			// Update password
 			m.networks[i].PSK = password
-			return m.save()
+			if err := m.save(); err != nil {
+				m.networks = previous
+				return err
+			}
+			return nil
 		}
 	}
 
@@ -112,7 +123,11 @@ func (m *Manager) AddNetwork(ssid, password string) error {
 	}
 	m.networks = append([]Network{network}, m.networks...)
 
-	return m.save()
+	if err := m.save(); err != nil {
+		m.networks = previous
+		return err
+	}
+	return nil
 }
 
 // RemoveNetwork removes a WiFi network by SSID
@@ -120,11 +135,17 @@ func (m *Manager) RemoveNetwork(ssid string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	previous := m.cloneNetworks()
+
 	// Find and remove network
 	for i, net := range m.networks {
 		if net.SSID == ssid {
 			m.networks = append(m.networks[:i], m.networks[i+1:]...)
-			return m.save()
+			if err := m.save(); err != nil {
+				m.networks = previous
+				return err
+			}
+			return nil
 		}
 	}
 
@@ -156,6 +177,20 @@ func (m *Manager) ReorderNetworks(orderedSSIDs []string) error {
 		newNetworks = append(newNetworks, net)
 	}
 
+	previous := m.networks
 	m.networks = newNetworks
-	return m.save()
+	if err := m.save(); err != nil {
+		m.networks = previous
+		return err
+	}
+	return nil
+}
+
+// cloneNetworks returns a deep copy of the configured networks. Callers must
+// hold m.mu. This is used to snapshot state before mutating m.networks so we
+// can roll back on persistence failures.
+func (m *Manager) cloneNetworks() []Network {
+	out := make([]Network, len(m.networks))
+	copy(out, m.networks)
+	return out
 }

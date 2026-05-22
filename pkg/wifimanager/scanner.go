@@ -197,7 +197,7 @@ func processAccessPoints(accessPoints []*wifi.BSS, networksMap map[string]ScanRe
 
 		result := ScanResult{
 			SSID:      ap.SSID,
-			Signal:    int(ap.Signal) / 100, // convert mBm to dBm
+			Signal:    convertSignalToDBM(ap.Signal, ap.SignalUnspecified),
 			Frequency: ap.Frequency,
 			Encrypted: encrypted,
 		}
@@ -238,6 +238,40 @@ func shouldReplaceDuplicateSSID(existing, candidate ScanResult) bool {
 
 func is5GHzFrequency(frequency int) bool {
 	return frequency >= 5000 && frequency < 6000
+}
+
+// convertSignalToDBM converts the WiFi BSS signal fields to a dBm integer.
+//
+// The mBm field is the preferred source (it is what nl80211 reports for
+// hardware that provides absolute signal). It is divided by 100 with
+// half-away-from-zero rounding so that, e.g., -7250 mBm becomes -73 dBm
+// instead of -72 dBm (Go's int division truncates toward zero, which biases
+// negative signals toward the closer-to-zero value and makes weak APs look
+// artificially stronger).
+//
+// When the driver does not populate mBm (signalMBm == 0), the percent-based
+// SignalUnspecified field is mapped onto a plausible dBm range: 0% -> -100,
+// 100% -> -40. Returning a literal 0 dBm in that case would falsely advertise
+// the AP as essentially line-of-sight in the UI.
+func convertSignalToDBM(signalMBm int32, signalPercent uint32) int {
+	if signalMBm != 0 {
+		// Round half away from zero so that negative mBm values round to the
+		// more negative (worse) integer dBm, matching how `iw` reports signal.
+		if signalMBm < 0 {
+			return int((signalMBm - 50) / 100)
+		}
+		return int((signalMBm + 50) / 100)
+	}
+	if signalPercent == 0 {
+		return 0
+	}
+	// Map 0..100% onto -100..-40 dBm. This matches the convention used by
+	// NetworkManager and Windows when only a percent value is available.
+	pct := signalPercent
+	if pct > 100 {
+		pct = 100
+	}
+	return -100 + int(pct)*60/100
 }
 
 // GetCurrentConnection returns the currently connected network with signal strength

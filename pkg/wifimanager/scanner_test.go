@@ -133,6 +133,43 @@ func TestProcessAccessPointsPrefers5GHzDuplicateSSID(t *testing.T) {
 	}
 }
 
+func TestConvertSignalToDBM(t *testing.T) {
+	tests := []struct {
+		name          string
+		signalMBm     int32
+		signalPercent uint32
+		want          int
+	}{
+		// mBm precision: prior implementation used int(mBm)/100 which truncates
+		// toward zero, biasing negative dBm values toward stronger-than-reality.
+		{name: "exact dBm negative", signalMBm: -6500, want: -65},
+		{name: "rounds half away from zero negative", signalMBm: -7250, want: -73},
+		{name: "rounds half away from zero negative just below half", signalMBm: -7249, want: -72},
+		{name: "rounds half away from zero positive", signalMBm: 7250, want: 73},
+		{name: "exact dBm positive", signalMBm: 4200, want: 42},
+
+		// When mBm is 0 the driver did not populate it; previously the code
+		// reported 0 dBm (an "excellent" signal) regardless of reality. Now
+		// we map percent onto a plausible dBm range.
+		{name: "no mBm, no percent reports 0", signalMBm: 0, signalPercent: 0, want: 0},
+		{name: "no mBm, 100 percent maps to -40", signalMBm: 0, signalPercent: 100, want: -40},
+		{name: "no mBm, 0 percent maps to -100", signalMBm: 0, signalPercent: 0, want: 0},
+		{name: "no mBm, 50 percent maps to -70", signalMBm: 0, signalPercent: 50, want: -70},
+		{name: "no mBm, percent clamps at 100", signalMBm: 0, signalPercent: 250, want: -40},
+		{name: "no mBm, 1 percent maps near -100", signalMBm: 0, signalPercent: 1, want: -100},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := convertSignalToDBM(tc.signalMBm, tc.signalPercent)
+			if got != tc.want {
+				t.Fatalf("convertSignalToDBM(%d, %d) = %d, want %d",
+					tc.signalMBm, tc.signalPercent, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestProcessAccessPointsKeepsFirstDuplicateSSIDWhen5GHzPreferenceDisabled(t *testing.T) {
 	networks := make(map[string]ScanResult)
 	aps := []*wifi.BSS{
