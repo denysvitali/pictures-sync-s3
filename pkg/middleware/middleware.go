@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"encoding/json"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -34,26 +35,73 @@ func WriteError(w http.ResponseWriter, statusCode int, message string, details m
 	}
 }
 
-// DecodeJSON decodes JSON request body with size limit validation
+// DecodeJSON decodes JSON request body with size limit validation. It drains
+// and closes the request body before returning so HTTP/1.1 keep-alive
+// connections can be reused even when callers forget to close r.Body.
 func DecodeJSON(r *http.Request, v interface{}, maxBytes int64) error {
+	if r.Body == nil {
+		return io.EOF
+	}
 	if maxBytes > 0 {
 		r.Body = http.MaxBytesReader(nil, r.Body, maxBytes)
 	}
+	defer func() {
+		// Drain any remaining bytes so the underlying connection can be
+		// reused, then close. Errors are ignored: the caller already has
+		// the decode result and there is no meaningful recovery here.
+		_, _ = io.Copy(io.Discard, r.Body)
+		_ = r.Body.Close()
+	}()
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields() // Strict parsing
 	return decoder.Decode(v)
 }
 
-// Recovery middleware recovers from panics and logs them
+// recoveryResponseWriter wraps http.ResponseWriter to track whether the
+// response has been written to, so panic recovery can avoid corrupting an
+// in-flight response by writing a second header/body.
+type recoveryResponseWriter struct {
+	http.ResponseWriter
+	wroteHeader bool
+}
+
+func (rw *recoveryResponseWriter) WriteHeader(code int) {
+	rw.wroteHeader = true
+	rw.ResponseWriter.WriteHeader(code)
+}
+
+func (rw *recoveryResponseWriter) Write(b []byte) (int, error) {
+	rw.wroteHeader = true
+	return rw.ResponseWriter.Write(b)
+}
+
+// Recovery middleware recovers from panics and logs them. It re-raises
+// http.ErrAbortHandler per net/http convention, and only writes a 500
+// response when the wrapped handler has not yet written to the response
+// (otherwise it would corrupt the in-flight body with a superfluous header).
 func Recovery(next HandlerFunc) HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) error {
+		rw := &recoveryResponseWriter{ResponseWriter: w}
 		defer func() {
-			if err := recover(); err != nil {
-				log.Printf("PANIC recovered: %v\n%s", err, debug.Stack())
-				WriteError(w, http.StatusInternalServerError, "Internal server error", nil)
+			rec := recover()
+			if rec == nil {
+				return
 			}
+			// http.ErrAbortHandler signals an intentional abort and must be
+			// re-panicked so the http.Server can terminate the connection.
+			if rec == http.ErrAbortHandler {
+				panic(rec)
+			}
+			log.Printf("PANIC recovered: %v\n%s", rec, debug.Stack())
+			if rw.wroteHeader {
+				// Headers/body already partially sent — writing again would
+				// emit a superfluous WriteHeader and append garbage JSON to
+				// the response body. Nothing safe to do but log.
+				return
+			}
+			WriteError(rw.ResponseWriter, http.StatusInternalServerError, "Internal server error", nil)
 		}()
-		return next(w, r)
+		return next(rw, r)
 	}
 }
 
