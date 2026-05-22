@@ -95,6 +95,12 @@ func StartRateLimiterCleanup(ctx context.Context) {
 // are evicted before new tokens are accepted.
 const maxWSTokens = 1000
 
+// maxIncomingMessageBytes caps the size of any single WebSocket frame the
+// server is willing to read from a client. Bounds memory usage against a
+// hostile client sending oversized messages (especially before auth, when
+// the connection is still anonymous).
+const maxIncomingMessageBytes = 64 * 1024
+
 var (
 	wsTokens            = make(map[string]time.Time) // WebSocket auth tokens with expiry
 	wsTokenMutex        sync.RWMutex
@@ -520,6 +526,13 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager, otaManag
 			return
 		}
 		defer conn.Close()
+
+		// Bound the maximum incoming WebSocket message size. Without this,
+		// gorilla/websocket imposes no limit and an unauthenticated client
+		// can stream arbitrarily large JSON into ReadJSON below, exhausting
+		// memory. 64 KiB is comfortably above the ~80-byte auth handshake
+		// and any plausible client ping payload.
+		conn.SetReadLimit(maxIncomingMessageBytes)
 
 		// Set a deadline for receiving the auth token.
 		conn.SetReadDeadline(time.Now().Add(getAuthReadTimeout()))

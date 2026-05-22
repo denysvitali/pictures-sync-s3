@@ -841,3 +841,45 @@ func TestWebSocketReaderGoroutineNoLeak(t *testing.T) {
 func runtimeNumGoroutine() int {
 	return runtimeNumGoroutineImpl()
 }
+
+// TestWebSocketReadLimitEnforced verifies HandleWebSocket caps the size of
+// incoming messages so an unauthenticated client can't make the server
+// buffer an unbounded JSON payload.
+func TestWebSocketReadLimitEnforced(t *testing.T) {
+	resetWebSocketTestState(t)
+
+	stateMgr, err := state.NewManager()
+	if err != nil {
+		t.Fatalf("Failed to create state manager: %v", err)
+	}
+	eventMgr := events.NewManager()
+
+	server := httptest.NewServer(HandleWebSocket(stateMgr, eventMgr))
+	defer server.Close()
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+
+	dialer, headers := createTestDialer()
+	conn, _, err := dialer.Dial(wsURL, headers)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer conn.Close()
+
+	// Build a JSON payload comfortably larger than maxIncomingMessageBytes.
+	oversized := strings.Repeat("A", maxIncomingMessageBytes+16*1024)
+	payload := map[string]interface{}{
+		"type":  "auth",
+		"token": oversized,
+	}
+	// Whether the write itself succeeds is implementation-detail; what we
+	// require is that the server tears the connection down rather than
+	// happily allocating the full payload.
+	_ = conn.WriteJSON(payload)
+
+	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	var resp map[string]interface{}
+	err = conn.ReadJSON(&resp)
+	if err == nil {
+		t.Fatalf("Expected connection to be closed after oversized message, got response: %v", resp)
+	}
+}
