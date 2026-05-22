@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"encoding/json"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -34,11 +35,23 @@ func WriteError(w http.ResponseWriter, statusCode int, message string, details m
 	}
 }
 
-// DecodeJSON decodes JSON request body with size limit validation
+// DecodeJSON decodes JSON request body with size limit validation. It drains
+// and closes the request body before returning so HTTP/1.1 keep-alive
+// connections can be reused even when callers forget to close r.Body.
 func DecodeJSON(r *http.Request, v interface{}, maxBytes int64) error {
+	if r.Body == nil {
+		return io.EOF
+	}
 	if maxBytes > 0 {
 		r.Body = http.MaxBytesReader(nil, r.Body, maxBytes)
 	}
+	defer func() {
+		// Drain any remaining bytes so the underlying connection can be
+		// reused, then close. Errors are ignored: the caller already has
+		// the decode result and there is no meaningful recovery here.
+		_, _ = io.Copy(io.Discard, r.Body)
+		_ = r.Body.Close()
+	}()
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields() // Strict parsing
 	return decoder.Decode(v)

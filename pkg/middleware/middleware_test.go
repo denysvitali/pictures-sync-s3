@@ -3,10 +3,24 @@ package middleware
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 )
+
+// closeTrackingBody wraps an io.Reader and records how many times Close is
+// invoked, so tests can assert that DecodeJSON closes the body.
+type closeTrackingBody struct {
+	io.Reader
+	closes atomic.Int32
+}
+
+func (c *closeTrackingBody) Close() error {
+	c.closes.Add(1)
+	return nil
+}
 
 func TestRecovery(t *testing.T) {
 	handler := Recovery(func(w http.ResponseWriter, r *http.Request) error {
@@ -253,6 +267,36 @@ func TestRecovery_NoError(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+}
+
+// TestDecodeJSON_ClosesBody verifies DecodeJSON closes the request body so
+// HTTP/1.1 keep-alive connections can be reused. Covers success, parse-error,
+// and size-limit-exceeded paths.
+func TestDecodeJSON_ClosesBody(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		maxBytes int64
+	}{
+		{name: "success", body: `{"key":"value"}`, maxBytes: 1024},
+		{name: "parse error", body: `{not json`, maxBytes: 1024},
+		{name: "too large", body: `{"key":"a very long value that exceeds the cap"}`, maxBytes: 10},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tracker := &closeTrackingBody{Reader: bytes.NewBufferString(tt.body)}
+			req := httptest.NewRequest(http.MethodPost, "/test", nil)
+			req.Body = tracker
+
+			var result map[string]string
+			_ = DecodeJSON(req, &result, tt.maxBytes)
+
+			if got := tracker.closes.Load(); got < 1 {
+				t.Errorf("Expected request body to be closed at least once, got %d closes", got)
+			}
+		})
 	}
 }
 
