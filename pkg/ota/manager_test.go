@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -132,6 +133,90 @@ func TestSubscribeReceivesStatusUpdates(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for OTA status update")
+	}
+}
+
+// TestConcurrentProgressUpdatesAreAtomic exercises the read-modify-write
+// progress callbacks from many goroutines at once. The download-progress and
+// install-progress callbacks share a Status struct: download writes
+// DownloadedBytes monotonically while install reads the whole Status,
+// updates ProgressPercent, and writes it back. With separate Status() + set()
+// calls the install callback's stale-snapshot writeback clobbered
+// DownloadedBytes updates that occurred between its read and its set,
+// regressing the value stored in Manager.status.
+func TestConcurrentProgressUpdatesAreAtomic(t *testing.T) {
+	manager := &Manager{status: Status{State: "idle"}}
+
+	const writers = 16
+	const iterations = 500
+
+	// Sample the manager's stored status while writers race. The downloader
+	// writes a strictly increasing counter; if a concurrent install-progress
+	// callback's RMW is not atomic, its writeback observes a stale snapshot
+	// and clobbers DownloadedBytes with the older value.
+	var (
+		regressions atomic.Int64
+		sampleStop  atomic.Bool
+		sampleDone  = make(chan struct{})
+	)
+	go func() {
+		defer close(sampleDone)
+		var last int64
+		for !sampleStop.Load() {
+			cur := manager.Status().DownloadedBytes
+			if cur < last {
+				regressions.Add(1)
+			} else {
+				last = cur
+			}
+		}
+		// Final check after writers settled.
+		cur := manager.Status().DownloadedBytes
+		if cur < last {
+			regressions.Add(1)
+		}
+	}()
+
+	// One dedicated downloader writes a strictly increasing counter.
+	doneDL := make(chan struct{})
+	go func() {
+		defer close(doneDL)
+		for i := 1; i <= iterations; i++ {
+			manager.updateDownloadProgress(downloadProgress{
+				downloaded: int64(i),
+				total:      int64(iterations),
+				speedBps:   float64(i),
+			})
+		}
+	}()
+
+	// Many install-progress writers race with the downloader.
+	doneIN := make(chan struct{}, writers)
+	for w := 0; w < writers; w++ {
+		go func(id int) {
+			defer func() { doneIN <- struct{}{} }()
+			for i := 0; i < iterations; i++ {
+				manager.updateInstallProgress(InstallProgress{
+					Phase:           "flashing",
+					Message:         "test",
+					ProgressPercent: float64(id),
+				})
+			}
+		}(w)
+	}
+
+	<-doneDL
+	for w := 0; w < writers; w++ {
+		<-doneIN
+	}
+	sampleStop.Store(true)
+	<-sampleDone
+
+	if r := regressions.Load(); r != 0 {
+		t.Fatalf("DownloadedBytes regressed %d times in Manager.status; install-progress RMW clobbered downloader writes", r)
+	}
+	if got := manager.Status().DownloadedBytes; got != int64(iterations) {
+		t.Fatalf("final DownloadedBytes = %d, want %d (writes were lost)", got, iterations)
 	}
 }
 

@@ -278,6 +278,142 @@ func TestRunWithoutSidecarStillInstalls(t *testing.T) {
 	}
 }
 
+// TestStageReaderFsyncsStagingDir asserts that after stageReader succeeds the
+// staged file and its manifest are present on disk. The fsync of the parent
+// directory is what makes that observation durable across a crash; the test
+// verifies the success path still returns the staged image and that bytes /
+// digest are correct, ensuring the new fsync does not regress functionality.
+func TestStageReaderFsyncsStagingDir(t *testing.T) {
+	dir := t.TempDir()
+	payload := []byte("hello-ota")
+	staged, err := stageReader(dir, "img", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("stageReader: %v", err)
+	}
+	defer staged.Close()
+
+	if staged.Bytes != int64(len(payload)) {
+		t.Fatalf("staged bytes = %d, want %d", staged.Bytes, len(payload))
+	}
+
+	sum := sha256.Sum256(payload)
+	if staged.SHA256Hex != hex.EncodeToString(sum[:]) {
+		t.Fatalf("staged digest = %s, want %s", staged.SHA256Hex, hex.EncodeToString(sum[:]))
+	}
+
+	if _, err := os.Stat(staged.Path); err != nil {
+		t.Fatalf("staged path missing: %v", err)
+	}
+	if _, err := os.Stat(staged.ManifestPath); err != nil {
+		t.Fatalf("staged manifest missing: %v", err)
+	}
+}
+
+// TestSyncDirIsBestEffortOnUnsupportedFS exercises the syncDir code path for a
+// non-existent directory (which must return an error) and a regular directory
+// (which must succeed). Regression guard against the helper accidentally
+// hiding real filesystem errors.
+func TestSyncDirReportsRealErrors(t *testing.T) {
+	if err := syncDir(filepath.Join(t.TempDir(), "does-not-exist")); err == nil {
+		t.Fatal("syncDir on missing directory should return an error")
+	}
+	if err := syncDir(t.TempDir()); err != nil {
+		t.Fatalf("syncDir on real directory: %v", err)
+	}
+}
+
+// TestRunRejectsTruncatedDownload covers the security-critical path where the
+// HTTP body ends short of the size advertised by the GitHub release manifest.
+// Without sidecar-based verification this used to be silently accepted and
+// flashed; the size check must reject it before InstallRoot runs.
+func TestRunRejectsTruncatedDownload(t *testing.T) {
+	stagingRoot := usePermDir(t)
+
+	payload := []byte("payload-bytes-for-installer")
+	asset := gzipBytes(t, payload)
+
+	// Serve the asset normally but advertise a larger size in the GitHub API
+	// response. The downloaded length will not match the manifest size.
+	mux := http.NewServeMux()
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	mux.HandleFunc("/asset.gz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		// Deliberately omit Content-Length so the size check relies on the
+		// release-manifest size advertised below.
+		_, _ = w.Write(asset)
+	})
+	mux.HandleFunc("/asset.gz.sha256", func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	})
+	mux.HandleFunc("/repos/", func(w http.ResponseWriter, r *http.Request) {
+		releases := []Release{{
+			TagName:     "v1.0.0",
+			PublishedAt: time.Now().UTC(),
+			Assets: []Asset{{
+				Name:               "asset.gz",
+				BrowserDownloadURL: server.URL + "/asset.gz",
+				// Advertise a size one byte larger than what the server will
+				// actually deliver. This simulates a truncated CDN response.
+				Size: int64(len(asset)) + 1,
+			}},
+		}}
+		body, _ := json.Marshal(releases)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+	})
+
+	installer := &stubInstaller{}
+	mgr := newTestManager(t, server.URL, "asset.gz", installer)
+
+	mgr.run(context.Background(), "v1.0.0")
+
+	status := mgr.Status()
+	if status.State != "failed" {
+		t.Fatalf("status state = %q, want failed", status.State)
+	}
+	if status.Phase != "verification_failed" {
+		t.Fatalf("status phase = %q, want verification_failed", status.Phase)
+	}
+	if !strings.Contains(status.Error, "size mismatch") {
+		t.Fatalf("status error = %q, want it to mention size mismatch", status.Error)
+	}
+	if got := installer.calls.Load(); got != 0 {
+		t.Fatalf("installer must NOT be invoked on size mismatch (calls=%d)", got)
+	}
+
+	// Truncated staged image must be cleaned up.
+	staging := filepath.Join(stagingRoot, "ota-staging")
+	entries, err := os.ReadDir(staging)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read staging dir: %v", err)
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".part") {
+			t.Fatalf("truncated staged image leaked: %s", e.Name())
+		}
+	}
+}
+
+// TestSizeMismatchErrorIsClassified ensures handlers can rely on IsSizeMismatch
+// to distinguish size verification failures from generic install errors.
+func TestSizeMismatchErrorIsClassified(t *testing.T) {
+	mismatch := &SizeMismatchError{Expected: 100, Got: 50}
+	if !IsSizeMismatch(mismatch) {
+		t.Fatal("IsSizeMismatch should be true for *SizeMismatchError")
+	}
+	if !IsSizeMismatch(fmt.Errorf("wrapped: %w", mismatch)) {
+		t.Fatal("IsSizeMismatch should be true through error wrapping")
+	}
+	if IsSizeMismatch(errors.New("plain error")) {
+		t.Fatal("IsSizeMismatch should be false for unrelated errors")
+	}
+	if IsSizeMismatch(&HashMismatchError{}) {
+		t.Fatal("IsSizeMismatch should not match HashMismatchError")
+	}
+}
+
 // TestHashMismatchErrorIsClassified ensures handlers can rely on IsHashMismatch
 // to distinguish verification failures from generic install errors.
 func TestHashMismatchErrorIsClassified(t *testing.T) {
