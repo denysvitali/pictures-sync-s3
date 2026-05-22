@@ -42,11 +42,102 @@ func NewManager(cfg Config) *Manager {
 	}
 }
 
+type waitOutcome int
+
+const (
+	waitContextDone waitOutcome = iota
+	waitConnected
+	waitTimedOut
+	waitEthernetUp
+	waitConnectionLost
+)
+
+type hotspotOutcome int
+
+const (
+	hotspotDone hotspotOutcome = iota
+	hotspotEthernetUp
+	hotspotReboot
+)
+
 // Run blocks until the hotspot is no longer needed or the context is canceled.
 func (m *Manager) Run(ctx context.Context) error {
 	if err := m.Config.Validate(); err != nil {
 		return err
 	}
+	m.setDefaults()
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil
+		}
+
+		if m.Config.EthernetFirst {
+			log.Printf("provision-ap: waiting up to %s for Ethernet carrier on %s", m.Config.EthernetWait, m.Config.EthernetInterface)
+			if waitForEthernetCarrier(ctx, m.Config, m.Carrier) {
+				log.Printf("provision-ap: Ethernet carrier detected on %s; setup hotspot disabled while Ethernet remains connected", m.Config.EthernetInterface)
+				if !waitForEthernetCarrierLoss(ctx, m.Config, m.Carrier) {
+					return nil
+				}
+				log.Printf("provision-ap: Ethernet carrier was lost; re-evaluating")
+				continue
+			}
+			log.Printf("provision-ap: no Ethernet carrier detected on %s; evaluating Wi-Fi fallback", m.Config.EthernetInterface)
+		}
+
+		initialSnapshot, err := readWiFiConfigSnapshot(m.Config.ClientConfigPath, m.Config.AppConfigPath)
+		if err != nil {
+			log.Printf("provision-ap: Wi-Fi config check warning: %v", err)
+		}
+
+		if initialSnapshot.HasNetworks {
+			log.Printf("provision-ap: Wi-Fi config exists; waiting %s for client connection", m.Config.StartupWait)
+			switch waitForConnectionOrEthernet(ctx, m.Config, m.Connected, m.Carrier) {
+			case waitContextDone:
+				return nil
+			case waitEthernetUp:
+				log.Printf("provision-ap: Ethernet carrier appeared on %s while waiting for Wi-Fi; deferring setup hotspot", m.Config.EthernetInterface)
+				continue
+			case waitConnected:
+				log.Printf("provision-ap: %s has usable client connectivity; monitoring for loss", m.Config.Interface)
+				switch waitForConnectionLossOrEthernet(ctx, m.Config, m.Connected, m.Carrier) {
+				case waitContextDone:
+					return nil
+				case waitEthernetUp:
+					log.Printf("provision-ap: Ethernet carrier appeared on %s; deferring setup hotspot", m.Config.EthernetInterface)
+					continue
+				case waitConnectionLost:
+					log.Printf("provision-ap: Wi-Fi client connectivity was lost; preparing fallback hotspot")
+				}
+			case waitTimedOut:
+				log.Printf("provision-ap: Wi-Fi client did not become reachable; preparing fallback hotspot")
+			}
+		} else {
+			log.Printf("provision-ap: no Wi-Fi config found; preparing setup hotspot")
+		}
+
+		if m.ethernetCarrierPresent() {
+			log.Printf("provision-ap: Ethernet carrier present on %s; aborting setup hotspot startup", m.Config.EthernetInterface)
+			continue
+		}
+
+		outcome, err := m.runHotspot(ctx, initialSnapshot)
+		if err != nil {
+			return err
+		}
+		switch outcome {
+		case hotspotEthernetUp:
+			log.Printf("provision-ap: Ethernet carrier appeared on %s; tearing down setup hotspot", m.Config.EthernetInterface)
+			continue
+		case hotspotReboot:
+			return m.Reboot()
+		case hotspotDone:
+			return nil
+		}
+	}
+}
+
+func (m *Manager) setDefaults() {
 	if m.Runner == nil {
 		m.Runner = execRunner{}
 	}
@@ -62,43 +153,23 @@ func (m *Manager) Run(ctx context.Context) error {
 	if m.Reboot == nil {
 		m.Reboot = rebootSystem
 	}
+}
 
-	if m.Config.EthernetFirst {
-		log.Printf("provision-ap: waiting up to %s for Ethernet carrier on %s", m.Config.EthernetWait, m.Config.EthernetInterface)
-		if waitForEthernetCarrier(ctx, m.Config, m.Carrier) {
-			log.Printf("provision-ap: Ethernet carrier detected on %s; setup hotspot disabled while Ethernet remains connected", m.Config.EthernetInterface)
-			if waitForEthernetCarrierLoss(ctx, m.Config, m.Carrier) {
-				log.Printf("provision-ap: Ethernet carrier was lost; evaluating Wi-Fi fallback")
-			} else {
-				return nil
-			}
-		} else {
-			log.Printf("provision-ap: no Ethernet carrier detected on %s; evaluating Wi-Fi fallback", m.Config.EthernetInterface)
-		}
+// ethernetCarrierPresent reports whether the Ethernet interface currently has
+// carrier. Returns false when EthernetFirst is disabled so the gate is a no-op.
+func (m *Manager) ethernetCarrierPresent() bool {
+	if !m.Config.EthernetFirst {
+		return false
 	}
-
-	initialSnapshot, err := readWiFiConfigSnapshot(m.Config.ClientConfigPath, m.Config.AppConfigPath)
+	ok, err := m.Carrier(m.Config.EthernetInterface)
 	if err != nil {
-		log.Printf("provision-ap: Wi-Fi config check warning: %v", err)
+		log.Printf("provision-ap: Ethernet carrier check failed for %s: %v", m.Config.EthernetInterface, err)
+		return false
 	}
-	initialHasConfig := initialSnapshot.HasNetworks
+	return ok
+}
 
-	if initialHasConfig {
-		log.Printf("provision-ap: Wi-Fi config exists; waiting %s for client connection", m.Config.StartupWait)
-		if waitForConnection(ctx, m.Config, m.Connected) {
-			log.Printf("provision-ap: %s has usable client connectivity; monitoring for loss", m.Config.Interface)
-			if waitForConnectionLoss(ctx, m.Config, m.Connected) {
-				log.Printf("provision-ap: Wi-Fi client connectivity was lost; starting fallback hotspot")
-			} else {
-				return nil
-			}
-		} else {
-			log.Printf("provision-ap: Wi-Fi client did not become reachable; starting fallback hotspot")
-		}
-	} else {
-		log.Printf("provision-ap: no Wi-Fi config found; starting setup hotspot")
-	}
-
+func (m *Manager) runHotspot(ctx context.Context, initialSnapshot wifiConfigSnapshot) (hotspotOutcome, error) {
 	if err := disableClientWiFiForAP(m.Config); err != nil {
 		log.Printf("provision-ap: client Wi-Fi disable warning: %v", err)
 	}
@@ -107,20 +178,20 @@ func (m *Manager) Run(ctx context.Context) error {
 	}
 
 	if err := waitForInterface(ctx, m.Config.Interface, m.Config.InterfaceWait); err != nil {
-		return fmt.Errorf("wait for AP interface: %w", err)
+		return hotspotDone, fmt.Errorf("wait for AP interface: %w", err)
 	}
 	if err := m.Configurer.Configure(m.Config.Interface, m.Config.APIP, m.Config.Netmask); err != nil {
-		return fmt.Errorf("configure AP interface: %w", err)
+		return hotspotDone, fmt.Errorf("configure AP interface: %w", err)
 	}
 
 	hostapdConfig, err := writeHostapdConfig(m.Config)
 	if err != nil {
-		return fmt.Errorf("write hostapd config: %w", err)
+		return hotspotDone, fmt.Errorf("write hostapd config: %w", err)
 	}
 
 	hostapd, err := m.Runner.Start(ctx, m.Config.HostapdPath, hostapdConfig)
 	if err != nil {
-		return fmt.Errorf("start hostapd: %w", err)
+		return hotspotDone, fmt.Errorf("start hostapd: %w", err)
 	}
 	defer hostapd.Stop()
 
@@ -145,23 +216,25 @@ func (m *Manager) Run(ctx context.Context) error {
 		errCh <- hostapd.Wait()
 	}()
 
-	ticker := time.NewTicker(m.Config.ConfigPollDelay)
-	defer ticker.Stop()
+	configTicker := time.NewTicker(m.Config.ConfigPollDelay)
+	defer configTicker.Stop()
+	ethernetTicker := time.NewTicker(m.Config.ConfigPollDelay)
+	defer ethernetTicker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			cancelServers()
 			wg.Wait()
-			return nil
+			return hotspotDone, nil
 		case err := <-errCh:
 			cancelServers()
 			wg.Wait()
 			if err != nil {
-				return err
+				return hotspotDone, err
 			}
-			return nil
-		case <-ticker.C:
+			return hotspotDone, nil
+		case <-configTicker.C:
 			snapshot, err := readWiFiConfigSnapshot(m.Config.ClientConfigPath, m.Config.AppConfigPath)
 			if err != nil {
 				log.Printf("provision-ap: Wi-Fi config check warning: %v", err)
@@ -171,7 +244,13 @@ func (m *Manager) Run(ctx context.Context) error {
 				log.Printf("provision-ap: Wi-Fi config changed; rebooting into client mode")
 				cancelServers()
 				wg.Wait()
-				return m.Reboot()
+				return hotspotReboot, nil
+			}
+		case <-ethernetTicker.C:
+			if m.ethernetCarrierPresent() {
+				cancelServers()
+				wg.Wait()
+				return hotspotEthernetUp, nil
 			}
 		}
 	}
@@ -237,40 +316,93 @@ func waitForEthernetCarrierLoss(ctx context.Context, cfg Config, carrier func(st
 	}
 }
 
-func waitForConnection(ctx context.Context, cfg Config, connected func(Config) bool) bool {
-	if cfg.StartupWait <= 0 {
-		return connected(cfg)
+// waitForConnectionOrEthernet waits for the Wi-Fi client to reach the network
+// while concurrently watching for the Ethernet carrier. Ethernet has priority:
+// if it appears at any time during the wait the function returns immediately so
+// the caller can suppress the setup hotspot.
+func waitForConnectionOrEthernet(ctx context.Context, cfg Config, connected func(Config) bool, carrier func(string) (bool, error)) waitOutcome {
+	ethernetPresent := func() bool {
+		if !cfg.EthernetFirst {
+			return false
+		}
+		ok, err := carrier(cfg.EthernetInterface)
+		if err != nil {
+			log.Printf("provision-ap: Ethernet carrier check failed for %s: %v", cfg.EthernetInterface, err)
+			return false
+		}
+		return ok
 	}
+
+	if ethernetPresent() {
+		return waitEthernetUp
+	}
+	if connected(cfg) {
+		return waitConnected
+	}
+	if cfg.StartupWait <= 0 {
+		return waitTimedOut
+	}
+
 	deadline := time.NewTimer(cfg.StartupWait)
 	defer deadline.Stop()
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
+	wifiTicker := time.NewTicker(5 * time.Second)
+	defer wifiTicker.Stop()
+	ethernetTicker := time.NewTicker(cfg.ConfigPollDelay)
+	defer ethernetTicker.Stop()
 
 	for {
-		if connected(cfg) {
-			return true
-		}
 		select {
 		case <-ctx.Done():
-			return false
+			return waitContextDone
 		case <-deadline.C:
-			return connected(cfg)
-		case <-ticker.C:
+			if ethernetPresent() {
+				return waitEthernetUp
+			}
+			if connected(cfg) {
+				return waitConnected
+			}
+			return waitTimedOut
+		case <-wifiTicker.C:
+			if connected(cfg) {
+				return waitConnected
+			}
+		case <-ethernetTicker.C:
+			if ethernetPresent() {
+				return waitEthernetUp
+			}
 		}
 	}
 }
 
-func waitForConnectionLoss(ctx context.Context, cfg Config, connected func(Config) bool) bool {
+// waitForConnectionLossOrEthernet polls the Wi-Fi connection and the Ethernet
+// carrier. It returns as soon as either Wi-Fi connectivity is lost or Ethernet
+// becomes available so the caller can react before starting the setup hotspot.
+func waitForConnectionLossOrEthernet(ctx context.Context, cfg Config, connected func(Config) bool, carrier func(string) (bool, error)) waitOutcome {
+	ethernetPresent := func() bool {
+		if !cfg.EthernetFirst {
+			return false
+		}
+		ok, err := carrier(cfg.EthernetInterface)
+		if err != nil {
+			log.Printf("provision-ap: Ethernet carrier check failed for %s: %v", cfg.EthernetInterface, err)
+			return false
+		}
+		return ok
+	}
+
 	ticker := time.NewTicker(cfg.ConfigPollDelay)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			return false
+			return waitContextDone
 		case <-ticker.C:
+			if ethernetPresent() {
+				return waitEthernetUp
+			}
 			if !connected(cfg) {
-				return true
+				return waitConnectionLost
 			}
 		}
 	}
