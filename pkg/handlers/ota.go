@@ -171,7 +171,13 @@ func (ctx *Context) HandleOTAInstall(w http.ResponseWriter, r *http.Request) {
 	}
 	var req otaInstallRequest
 	if r.Body != nil {
+		r.Body = http.MaxBytesReader(w, r.Body, maxOTAInstallBodyBytes)
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				httputil.Error(w, http.StatusRequestEntityTooLarge, "Request body too large")
+				return
+			}
 			httputil.BadRequest(w, "Invalid OTA install request")
 			return
 		}

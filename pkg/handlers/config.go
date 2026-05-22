@@ -21,6 +21,16 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/validation"
 )
 
+// Per-handler JSON request body size limits. These guard against unbounded
+// memory consumption from hostile or buggy clients posting huge JSON bodies
+// to endpoints that previously decoded directly from r.Body without a limit.
+const (
+	maxPasswordChangeBodyBytes = 4 * 1024  // current+new passwords plus JSON overhead
+	maxSettingsBodyBytes       = 64 * 1024 // settings payload incl. tailscale auth key
+	maxB2ConfigBodyBytes       = 16 * 1024
+	maxOTAInstallBodyBytes     = 4 * 1024
+)
+
 var (
 	tailscaleAuthKeyPath    = settings.TailscaleAuthKeyFile
 	tailscaleBinary         = "/user/tailscale"
@@ -240,7 +250,13 @@ func (ctx *Context) HandlePasswordChange(w http.ResponseWriter, r *http.Request)
 		CurrentPassword string `json:"current_password"`
 		NewPassword     string `json:"new_password"`
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxPasswordChangeBodyBytes)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
@@ -280,7 +296,13 @@ func (ctx *Context) HandleConfigB2(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req b2ConfigRequest
+	r.Body = http.MaxBytesReader(w, r.Body, maxB2ConfigBodyBytes)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
@@ -406,7 +428,13 @@ func (ctx *Context) HandleSettings(w http.ResponseWriter, r *http.Request) {
 			TailscaleAuthKey       *string  `json:"tailscale_auth_key"`
 		}
 
+		r.Body = http.MaxBytesReader(w, r.Body, maxSettingsBodyBytes)
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge)
+				return
+			}
 			http.Error(w, "Invalid JSON", http.StatusBadRequest)
 			return
 		}
