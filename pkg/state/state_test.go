@@ -543,6 +543,59 @@ func TestSubscribeUnsubscribe(t *testing.T) {
 	}
 }
 
+// TestCloseClosesSubscribers ensures that Manager.Close drains every
+// subscriber channel so consumers ranging over the channel (or blocked on a
+// bare receive) wake up instead of leaking goroutines.
+func TestCloseClosesSubscribers(t *testing.T) {
+	mgr := setupTestManager(t)
+
+	ch1 := mgr.Subscribe()
+	ch2 := mgr.Subscribe()
+
+	// A consumer that ranges over the channel — without the fix this goroutine
+	// would block forever after Close.
+	done := make(chan struct{})
+	go func() {
+		for range ch1 {
+		}
+		close(done)
+	}()
+
+	mgr.Close()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("subscriber goroutine did not exit after Close (channel never closed)")
+	}
+
+	// ch2 must also be closed; receive on a closed channel returns the zero
+	// value with ok=false.
+	select {
+	case _, ok := <-ch2:
+		if ok {
+			t.Fatal("expected ch2 to be closed after Manager.Close")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ch2 was not closed after Manager.Close")
+	}
+
+	// Subscribing after Close should return an already-closed channel so new
+	// consumers don't block.
+	post := mgr.Subscribe()
+	select {
+	case _, ok := <-post:
+		if ok {
+			t.Fatal("expected post-Close Subscribe channel to be already closed")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("post-Close Subscribe channel was not closed")
+	}
+
+	// Close must be idempotent.
+	mgr.Close()
+}
+
 // TestSetSDCard tests SD card management
 func TestSetSDCard(t *testing.T) {
 	mgr := setupTestManager(t)

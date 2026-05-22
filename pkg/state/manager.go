@@ -90,20 +90,40 @@ func (m *Manager) saveLocked() error {
 	return m.saveState()
 }
 
-// clearStaleSync removes any in-progress sync from a previous crash/restart
+// clearStaleSync removes any in-progress sync from a previous crash/restart.
+// If the in-memory current sync's ID already appears in history (because we
+// crashed *after* persisting history but *before* persisting state in
+// FinishSync, see saveSyncCompletion), we treat it as already-finished and
+// skip the re-append so history never contains duplicate IDs.
 func (m *Manager) clearStaleSync() error {
 	if m.currentState.CurrentSync == nil {
 		return nil
 	}
 
-	log.Printf("Clearing stale sync record from previous run: %s", m.currentState.CurrentSync.CardID)
+	id := m.currentState.CurrentSync.ID
+	alreadyInHistory := false
+	for i := range m.history {
+		if m.history[i].ID == id {
+			alreadyInHistory = true
+			break
+		}
+	}
 
-	// Move it to history as failed
-	m.currentState.CurrentSync.EndTime = time.Now()
-	m.currentState.CurrentSync.Status = "error"
-	m.currentState.CurrentSync.Error = "Service restarted during sync"
-	m.history = append(m.history, *m.currentState.CurrentSync)
-	m.currentState.LastSync = m.currentState.CurrentSync
+	if alreadyInHistory {
+		log.Printf("Dropping stale sync pointer for already-recorded ID %s (card %s)",
+			id, m.currentState.CurrentSync.CardID)
+		// LastSync may still be stale; prefer the canonical entry from history.
+		rec := m.history[len(m.history)-1]
+		m.currentState.LastSync = &rec
+	} else {
+		log.Printf("Clearing stale sync record from previous run: %s", m.currentState.CurrentSync.CardID)
+		// Move it to history as failed
+		m.currentState.CurrentSync.EndTime = time.Now()
+		m.currentState.CurrentSync.Status = "error"
+		m.currentState.CurrentSync.Error = "Service restarted during sync"
+		m.history = append(m.history, *m.currentState.CurrentSync)
+		m.currentState.LastSync = m.currentState.CurrentSync
+	}
 	m.currentState.CurrentSync = nil
 	m.currentState.Status = StatusIdle
 
@@ -365,11 +385,19 @@ func (m *Manager) FinishSync(success bool, err error) error {
 	copy(historyCopy, m.history)
 	m.mu.Unlock()
 
-	if saveErr := m.saveStateSnapshot(stateCopy); saveErr != nil {
-		log.Printf("state: failed to persist state after FinishSync: %v", saveErr)
-	}
+	// IMPORTANT: persist history BEFORE state. The state snapshot has already
+	// cleared CurrentSync, so if state were saved first and we crashed before
+	// the history write the finished SyncRecord would be lost (state shows the
+	// sync is done, history doesn't contain it). With history first, the
+	// worst-case crash window leaves state still pointing at the in-progress
+	// record while history already contains the finished entry —
+	// clearStaleSync handles that on next boot by dropping the duplicate
+	// pointer instead of re-appending.
 	if saveErr := m.saveHistorySnapshot(historyCopy); saveErr != nil {
 		log.Printf("state: failed to persist history after FinishSync: %v", saveErr)
+	}
+	if saveErr := m.saveStateSnapshot(stateCopy); saveErr != nil {
+		log.Printf("state: failed to persist state after FinishSync: %v", saveErr)
 	}
 	m.notifyListenersAsync(stateCopy)
 	return nil

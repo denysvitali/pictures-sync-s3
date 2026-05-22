@@ -129,12 +129,21 @@ func (n *notifier) broadcast(state CurrentState) {
 	}
 }
 
-// subscribe adds a new listener and returns a channel for state updates
+// subscribe adds a new listener and returns a channel for state updates. If
+// the notifier has already been closed the returned channel is closed
+// immediately so consumers ranging over it don't block forever.
 func (n *notifier) subscribe() chan CurrentState {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
 	sub := &subscriber{ch: make(chan CurrentState, subscriberBufferSize)}
+	select {
+	case <-n.stopped:
+		sub.closed = true
+		close(sub.ch)
+		return sub.ch
+	default:
+	}
 	n.listeners = append(n.listeners, sub)
 	return sub.ch
 }
@@ -181,13 +190,29 @@ func (n *notifier) notify(state CurrentState) {
 	}
 }
 
-// close stops the broadcaster goroutine and waits for it to exit. Subsequent
-// calls to notify will be silently dropped. Safe to call multiple times.
+// close stops the broadcaster goroutine, waits for it to exit, and closes
+// every subscriber channel so consumers blocked on a receive (or ranging over
+// the channel) wake up instead of leaking. Subsequent calls to notify will be
+// silently dropped. Safe to call multiple times.
 func (n *notifier) close() {
 	n.stopOnce.Do(func() {
 		close(n.stopped)
 	})
 	<-n.doneCh
+
+	// Take ownership of the listener list under the write lock so that any
+	// concurrent subscribe/unsubscribe sees the post-Close state. Closing each
+	// subscriber individually goes through subscriber.close, which is
+	// idempotent and races safely with concurrent send() calls (send becomes a
+	// no-op once closed is set).
+	n.mu.Lock()
+	subs := n.listeners
+	n.listeners = nil
+	n.mu.Unlock()
+
+	for _, s := range subs {
+		s.close()
+	}
 }
 
 // Subscribe returns a channel that receives state updates

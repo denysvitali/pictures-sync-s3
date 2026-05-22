@@ -1049,3 +1049,171 @@ func TestPowerFailureTestSummary(t *testing.T) {
 	t.Log("   - Validate configs before activating")
 	t.Log("")
 }
+
+// TestFinishSyncPersistsHistoryBeforeState verifies that FinishSync writes
+// history.json before state.json. If state were written first and we crashed
+// before the history write, the finished SyncRecord would be lost: state
+// shows the sync as done (CurrentSync = nil) and history doesn't contain it.
+func TestFinishSyncPersistsHistoryBeforeState(t *testing.T) {
+	saveStateFile := StateFile
+	saveHistoryFile := HistoryFile
+	t.Cleanup(func() {
+		StateFile = saveStateFile
+		HistoryFile = saveHistoryFile
+	})
+
+	tmpDir := t.TempDir()
+	StateFile = filepath.Join(tmpDir, "state.json")
+	HistoryFile = filepath.Join(tmpDir, "sync-history.json")
+
+	mgr := &Manager{
+		currentState:      CurrentState{Status: StatusIdle},
+		history:           make([]SyncRecord, 0),
+		notifier:          newNotifier(),
+		progressSaveDelay: 5 * time.Second,
+	}
+	t.Cleanup(mgr.Close)
+
+	if _, err := mgr.StartSync("card-finish-order", 1, 1); err != nil {
+		t.Fatalf("StartSync: %v", err)
+	}
+
+	// Ensure the state file written by StartSync exists with a distinguishable
+	// mtime before FinishSync runs, so the only path to a newer state.json is
+	// FinishSync's write.
+	preFinishState, err := os.Stat(StateFile)
+	if err != nil {
+		t.Fatalf("state file missing after StartSync: %v", err)
+	}
+	// Force the filesystem clock to advance — on some CI filesystems mtime
+	// resolution is coarse (1s). Sleeping briefly guarantees the FinishSync
+	// writes land on a later mtime.
+	time.Sleep(15 * time.Millisecond)
+
+	if err := mgr.FinishSync(true, nil); err != nil {
+		t.Fatalf("FinishSync: %v", err)
+	}
+
+	histInfo, err := os.Stat(HistoryFile)
+	if err != nil {
+		t.Fatalf("history file missing after FinishSync: %v", err)
+	}
+	stateInfo, err := os.Stat(StateFile)
+	if err != nil {
+		t.Fatalf("state file missing after FinishSync: %v", err)
+	}
+
+	if !stateInfo.ModTime().After(preFinishState.ModTime()) {
+		t.Fatalf("FinishSync did not update state.json mtime (pre=%v, post=%v)",
+			preFinishState.ModTime(), stateInfo.ModTime())
+	}
+
+	// History must be written first => its mtime is <= state's mtime.
+	if histInfo.ModTime().After(stateInfo.ModTime()) {
+		t.Fatalf("history.json was written AFTER state.json: hist=%v state=%v "+
+			"(FinishSync would lose the record on crash between writes)",
+			histInfo.ModTime(), stateInfo.ModTime())
+	}
+}
+
+// TestClearStaleSyncDedupesByID covers the inverse crash window: history was
+// persisted but state.json was not (because FinishSync now writes history
+// first). On the next boot the loaded state still points at an in-progress
+// SyncRecord whose ID is already in history; clearStaleSync must NOT
+// duplicate it.
+func TestClearStaleSyncDedupesByID(t *testing.T) {
+	id := "sync-dedupe-1"
+	finished := SyncRecord{
+		ID:        id,
+		CardID:    "card-1",
+		StartTime: time.Now().Add(-time.Minute),
+		EndTime:   time.Now(),
+		Status:    "success",
+	}
+	// Simulate: history already contains the finished record (durable),
+	// but state.json wasn't updated, so it still points at the same ID.
+	mgr := &Manager{
+		currentState: CurrentState{
+			Status: StatusSyncing,
+			CurrentSync: &SyncRecord{
+				ID:        id,
+				CardID:    "card-1",
+				StartTime: finished.StartTime,
+				Status:    "syncing",
+			},
+		},
+		history:           []SyncRecord{finished},
+		notifier:          newNotifier(),
+		progressSaveDelay: 5 * time.Second,
+	}
+	t.Cleanup(mgr.Close)
+
+	saveStateFile := StateFile
+	saveHistoryFile := HistoryFile
+	t.Cleanup(func() {
+		StateFile = saveStateFile
+		HistoryFile = saveHistoryFile
+	})
+	tmpDir := t.TempDir()
+	StateFile = filepath.Join(tmpDir, "state.json")
+	HistoryFile = filepath.Join(tmpDir, "sync-history.json")
+
+	if err := mgr.clearStaleSync(); err != nil {
+		t.Fatalf("clearStaleSync: %v", err)
+	}
+
+	if got := len(mgr.history); got != 1 {
+		t.Fatalf("history length = %d, want 1 (duplicate appended)", got)
+	}
+	if mgr.history[0].Status != "success" {
+		t.Fatalf("history entry overwritten: status = %q, want success",
+			mgr.history[0].Status)
+	}
+	if mgr.currentState.CurrentSync != nil {
+		t.Fatalf("CurrentSync was not cleared: %+v", mgr.currentState.CurrentSync)
+	}
+	if mgr.currentState.LastSync == nil || mgr.currentState.LastSync.ID != id {
+		t.Fatalf("LastSync not promoted from history: %+v", mgr.currentState.LastSync)
+	}
+}
+
+// TestClearStaleSyncAppendsWhenNotInHistory covers the original behaviour:
+// if the stale CurrentSync's ID is NOT already in history, it is appended as
+// a failed record.
+func TestClearStaleSyncAppendsWhenNotInHistory(t *testing.T) {
+	saveStateFile := StateFile
+	saveHistoryFile := HistoryFile
+	t.Cleanup(func() {
+		StateFile = saveStateFile
+		HistoryFile = saveHistoryFile
+	})
+	tmpDir := t.TempDir()
+	StateFile = filepath.Join(tmpDir, "state.json")
+	HistoryFile = filepath.Join(tmpDir, "sync-history.json")
+
+	mgr := &Manager{
+		currentState: CurrentState{
+			Status: StatusSyncing,
+			CurrentSync: &SyncRecord{
+				ID:        "sync-orphan-1",
+				CardID:    "card-2",
+				StartTime: time.Now().Add(-time.Minute),
+				Status:    "syncing",
+			},
+		},
+		history:           make([]SyncRecord, 0),
+		notifier:          newNotifier(),
+		progressSaveDelay: 5 * time.Second,
+	}
+	t.Cleanup(mgr.Close)
+
+	if err := mgr.clearStaleSync(); err != nil {
+		t.Fatalf("clearStaleSync: %v", err)
+	}
+	if got := len(mgr.history); got != 1 {
+		t.Fatalf("history length = %d, want 1", got)
+	}
+	if mgr.history[0].Status != "error" {
+		t.Fatalf("appended history status = %q, want error", mgr.history[0].Status)
+	}
+}
