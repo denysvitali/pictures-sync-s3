@@ -83,15 +83,23 @@ func (m *Manager) Sync(sourcePath, cardID string, totalFiles int, totalBytes int
 	// Start progress monitoring. We don't track "already synced bytes" — rclone
 	// handles incremental/resume sync internally via checksums.
 	done := make(chan struct{})
-	go m.monitorProgress(ctx, stats, totalFiles, totalBytes, 0, done)
+	monitorDone := make(chan struct{})
+	go func() {
+		defer close(monitorDone)
+		m.monitorProgress(ctx, stats, totalFiles, totalBytes, 0, done)
+	}()
 
 	// Perform sync operation with retry logic and exponential backoff
 	// This now includes filesystem creation which may fail due to network issues
 	log.Printf("Starting sync operation...")
 	err = m.syncWithRetry(ctx, srcFs, destPath)
 
-	// Stop progress monitoring
+	// Stop progress monitoring and wait for it to fully exit before returning.
+	// Without this wait, the goroutine can still be executing broadcastProgress /
+	// stateMgr.UpdateSyncProgress when Sync() returns, racing with the caller's
+	// post-sync state writes (and with subscribers tearing down their channels).
 	close(done)
+	<-monitorDone
 
 	if err != nil {
 		return err
