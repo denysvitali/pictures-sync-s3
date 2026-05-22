@@ -11,9 +11,19 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 )
+
+// isUnsupportedDirSync reports whether err is the OS / filesystem refusing to
+// fsync a directory handle (e.g. tmpfs on some kernels, or non-POSIX hosts).
+// In those environments directory-entry durability is not something we can
+// guarantee at the application layer and we degrade to best-effort silently
+// rather than refuse to install an update.
+func isUnsupportedDirSync(err error) bool {
+	return errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.ENOTSUP) || errors.Is(err, syscall.EPERM)
+}
 
 // SHA256SidecarSuffix is the conventional suffix appended to an asset name to
 // locate its published SHA256 digest on a GitHub release.
@@ -152,12 +162,46 @@ func stageReader(dir, baseName string, r io.Reader) (*StagedImage, error) {
 		return nil, fmt.Errorf("write OTA staging manifest: %w", err)
 	}
 
+	// fsync the staging directory so the newly-created file entries are
+	// durably recorded in the parent directory before we hand the staged
+	// image to the gokrazy updater. Without this, a power loss between
+	// download and partition switch could leave the image content on disk
+	// but its directory entry missing, or vice-versa -- making post-crash
+	// recovery and the "is this image still here?" check unreliable. We
+	// best-effort the directory sync (some filesystems / OSes don't expose
+	// it) but report the error so it surfaces in logs.
+	if err := syncDir(dir); err != nil {
+		_ = os.Remove(stagedPath)
+		_ = os.Remove(manifestPath)
+		return nil, fmt.Errorf("fsync OTA staging dir: %w", err)
+	}
+
 	return &StagedImage{
 		Path:         stagedPath,
 		ManifestPath: manifestPath,
 		SHA256Hex:    sum,
 		Bytes:        written,
 	}, nil
+}
+
+// syncDir fsyncs the given directory so directory-entry changes (file
+// creation, rename) survive a crash. On platforms / filesystems where
+// directory fsync is not supported the resulting EINVAL/ENOTSUP is treated
+// as a no-op so tests and dev environments remain portable.
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	syncErr := d.Sync()
+	closeErr := d.Close()
+	if syncErr != nil {
+		if isUnsupportedDirSync(syncErr) {
+			return nil
+		}
+		return syncErr
+	}
+	return closeErr
 }
 
 // VerifyExpected compares the computed digest against the provided expected

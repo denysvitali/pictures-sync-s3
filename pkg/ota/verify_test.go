@@ -278,6 +278,50 @@ func TestRunWithoutSidecarStillInstalls(t *testing.T) {
 	}
 }
 
+// TestStageReaderFsyncsStagingDir asserts that after stageReader succeeds the
+// staged file and its manifest are present on disk. The fsync of the parent
+// directory is what makes that observation durable across a crash; the test
+// verifies the success path still returns the staged image and that bytes /
+// digest are correct, ensuring the new fsync does not regress functionality.
+func TestStageReaderFsyncsStagingDir(t *testing.T) {
+	dir := t.TempDir()
+	payload := []byte("hello-ota")
+	staged, err := stageReader(dir, "img", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("stageReader: %v", err)
+	}
+	defer staged.Close()
+
+	if staged.Bytes != int64(len(payload)) {
+		t.Fatalf("staged bytes = %d, want %d", staged.Bytes, len(payload))
+	}
+
+	sum := sha256.Sum256(payload)
+	if staged.SHA256Hex != hex.EncodeToString(sum[:]) {
+		t.Fatalf("staged digest = %s, want %s", staged.SHA256Hex, hex.EncodeToString(sum[:]))
+	}
+
+	if _, err := os.Stat(staged.Path); err != nil {
+		t.Fatalf("staged path missing: %v", err)
+	}
+	if _, err := os.Stat(staged.ManifestPath); err != nil {
+		t.Fatalf("staged manifest missing: %v", err)
+	}
+}
+
+// TestSyncDirIsBestEffortOnUnsupportedFS exercises the syncDir code path for a
+// non-existent directory (which must return an error) and a regular directory
+// (which must succeed). Regression guard against the helper accidentally
+// hiding real filesystem errors.
+func TestSyncDirReportsRealErrors(t *testing.T) {
+	if err := syncDir(filepath.Join(t.TempDir(), "does-not-exist")); err == nil {
+		t.Fatal("syncDir on missing directory should return an error")
+	}
+	if err := syncDir(t.TempDir()); err != nil {
+		t.Fatalf("syncDir on real directory: %v", err)
+	}
+}
+
 // TestRunRejectsTruncatedDownload covers the security-critical path where the
 // HTTP body ends short of the size advertised by the GitHub release manifest.
 // Without sidecar-based verification this used to be silently accepted and
