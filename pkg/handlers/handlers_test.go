@@ -35,6 +35,7 @@ type mockSyncManager struct {
 	listFilesErr   error
 	listCardIDsErr error
 	listPagedErr   error
+	getFileFn      func(path string, w io.Writer) error
 }
 
 func (m *mockSyncManager) IsRunning() bool { return m.isRunning }
@@ -58,7 +59,12 @@ func (m *mockSyncManager) ListCardIDs() ([]syncmanager.FileInfo, error) {
 	}
 	return m.cardIDs, nil
 }
-func (m *mockSyncManager) GetFile(path string, w io.Writer) error    { return nil }
+func (m *mockSyncManager) GetFile(path string, w io.Writer) error {
+	if m.getFileFn != nil {
+		return m.getFileFn(path, w)
+	}
+	return nil
+}
 func (m *mockSyncManager) GetPublicLink(path string) (string, error) { return m.publicLink, nil }
 func (m *mockSyncManager) ListFilesPaginated(path string, page, pageSize int) (*syncmanager.FileListResult, error) {
 	if m.listPagedErr != nil {
