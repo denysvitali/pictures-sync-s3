@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +17,8 @@ import (
 	"github.com/gorilla/websocket"
 	"golang.org/x/time/rate"
 )
+
+func runtimeNumGoroutineImpl() int { return runtime.NumGoroutine() }
 
 // TestMain enables LAN/private-IP origin auto-trust for the websocket test
 // suite. Production default is false; many tests rely on origins like
@@ -745,4 +748,96 @@ func BenchmarkWebSocketThroughput(b *testing.B) {
 		conn.SetReadDeadline(time.Now().Add(1 * time.Second))
 		conn.ReadJSON(&resp)
 	}
+}
+
+// TestWebSocketReaderGoroutineNoLeak verifies the per-connection reader
+// goroutine exits cleanly even when a client is flooding the server with
+// messages at the moment the server-side handler returns. Before the fix,
+// a reader parked on `clientMessages <- msg` would never observe the
+// connection close and leaked for the lifetime of the process.
+func TestWebSocketReaderGoroutineNoLeak(t *testing.T) {
+	resetWebSocketTestState(t)
+
+	stateMgr, err := state.NewManager()
+	if err != nil {
+		t.Fatalf("Failed to create state manager: %v", err)
+	}
+	eventMgr := events.NewManager()
+
+	server := httptest.NewServer(HandleWebSocket(stateMgr, eventMgr))
+	defer server.Close()
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+
+	baseline := runtimeNumGoroutine()
+
+	const conns = 50
+	for i := 0; i < conns; i++ {
+		token := CreateWSToken()
+		dialer, headers := createTestDialer()
+		conn, _, err := dialer.Dial(wsURL, headers)
+		if err != nil {
+			t.Fatalf("Failed to connect: %v", err)
+		}
+
+		// Authenticate.
+		if err := conn.WriteJSON(map[string]interface{}{
+			"type":  "auth",
+			"token": token,
+		}); err != nil {
+			t.Fatalf("Failed to send auth: %v", err)
+		}
+
+		// Drain auth_success + initial state so the server-side reader has
+		// progressed past authentication.
+		var msg map[string]interface{}
+		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		if err := conn.ReadJSON(&msg); err != nil {
+			t.Fatalf("Failed to read auth_success: %v", err)
+		}
+		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		if err := conn.ReadJSON(&msg); err != nil {
+			t.Fatalf("Failed to read initial state: %v", err)
+		}
+
+		// Flood the server with client pings so the reader is repeatedly
+		// trying to deliver into clientMessages. We do NOT drain the
+		// corresponding pongs, so the main loop's WriteJSON path will
+		// eventually block (TCP send buffer fills), the consumer stops
+		// reading clientMessages, and a buggy reader parks on the send.
+		for j := 0; j < 64; j++ {
+			if err := conn.WriteJSON(map[string]interface{}{"type": "ping"}); err != nil {
+				break
+			}
+		}
+
+		// Close abruptly — this should cause the server-side handler to
+		// return and tear the reader goroutine down.
+		_ = conn.Close()
+	}
+
+	// Give the runtime a moment to reap exited goroutines.
+	deadline := time.Now().Add(5 * time.Second)
+	var leftover int
+	for time.Now().Before(deadline) {
+		leftover = runtimeNumGoroutine() - baseline
+		if leftover <= 5 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// Allow some slack for httptest server bookkeeping. With the fix the
+	// delta consistently reaps to near zero; without the fix the count
+	// scales linearly with `conns`.
+	const tolerance = 10
+	if leftover > tolerance {
+		t.Fatalf("reader goroutines leaked: baseline=%d delta=%d (expected ≤%d, %d connections)",
+			baseline, leftover, tolerance, conns)
+	}
+}
+
+// runtimeNumGoroutine is a thin indirection so the test reads naturally
+// without importing runtime in the file-level imports block.
+func runtimeNumGoroutine() int {
+	return runtimeNumGoroutineImpl()
 }

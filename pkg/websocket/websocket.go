@@ -601,9 +601,17 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager, otaManag
 			return nil
 		})
 
-		// Start a goroutine to read client messages (for ping/pong)
+		// Start a goroutine to read client messages (for ping/pong).
+		// done signals the reader to exit even when it is blocked on a
+		// channel send to clientMessages — closing conn alone is not enough
+		// because a goroutine parked on `clientMessages <- msg` is not woken
+		// by the underlying socket closing.
 		clientMessages := make(chan map[string]any, 10)
+		done := make(chan struct{})
+		var readerWG sync.WaitGroup
+		readerWG.Add(1)
 		go func() {
+			defer readerWG.Done()
 			defer close(clientMessages)
 			for {
 				var msg map[string]any
@@ -611,9 +619,22 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager, otaManag
 					// Connection closed or error reading
 					return
 				}
-				clientMessages <- msg
+				select {
+				case clientMessages <- msg:
+				case <-done:
+					return
+				}
 			}
 		}()
+		// Ensure the reader goroutine has a chance to observe both the
+		// closed connection and the done signal, and that we don't leak
+		// it past HandleWebSocket's return. Defers run LIFO, so close(done)
+		// runs first (unblocking a reader parked on the channel send), then
+		// we close the connection to unblock a reader parked in ReadJSON,
+		// and finally we wait for the goroutine to actually exit.
+		defer readerWG.Wait()
+		defer conn.Close()
+		defer close(done)
 
 		// State and event updates are pushed in real time from the local
 		// caches (populated by the daemon subscribe stream in the webui
