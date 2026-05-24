@@ -15,7 +15,7 @@ import (
 type GooglePhotosManager interface {
 	IsAuthenticated() bool
 	GetConnectionStatus() (*googlephotos.ConnectionStatus, error)
-	ExchangeCode(code, redirectURI string) (*googlephotos.OAuthToken, error)
+	ExchangeCode(code, redirectURI, codeVerifier string) (*googlephotos.OAuthToken, error)
 	Disconnect() error
 	ListAlbums() ([]*googlephotos.Album, error)
 	CreateAlbum(title string) (*googlephotos.Album, error)
@@ -39,8 +39,8 @@ func (ctx *Context) HandleGooglePhotosStatus(w http.ResponseWriter, r *http.Requ
 	ctx.EnsureGooglePhotosClient()
 	if ctx.GooglePhotosClient == nil {
 		JSONResponse(w, map[string]interface{}{
-			"connected":   false,
-			"configured":  false,
+			"connected":    false,
+			"configured":   false,
 			"albums_count": 0,
 		})
 		return
@@ -50,10 +50,10 @@ func (ctx *Context) HandleGooglePhotosStatus(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		log.Printf("[GooglePhotos] Failed to get connection status: %v", err)
 		JSONResponse(w, map[string]interface{}{
-			"connected":   false,
-			"configured":  ctx.GooglePhotosClient.IsAuthenticated(),
+			"connected":    false,
+			"configured":   ctx.GooglePhotosClient.IsAuthenticated(),
 			"albums_count": 0,
-			"error":       err.Error(),
+			"error":        err.Error(),
 		})
 		return
 	}
@@ -156,7 +156,7 @@ func (ctx *Context) HandleGooglePhotosAuthCallback(w http.ResponseWriter, r *htt
 		return
 	}
 
-	_, err := ctx.GooglePhotosClient.ExchangeCode(code, authState.RedirectURI)
+	_, err := ctx.GooglePhotosClient.ExchangeCode(code, authState.RedirectURI, authState.CodeVerifier)
 	if err != nil {
 		log.Printf("[GooglePhotos] Failed to exchange code: %v", err)
 		http.Error(w, fmt.Sprintf("failed to exchange code: %v", err), http.StatusInternalServerError)

@@ -27,7 +27,7 @@ type Client struct {
 func NewClient(clientID, clientSecret string, tokenStore *TokenStore) *Client {
 	return &Client{
 		clientID:     clientID,
-		clientSecret:   clientSecret,
+		clientSecret: clientSecret,
 		httpClient:   &http.Client{Timeout: 60 * time.Second},
 		tokenStore:   tokenStore,
 	}
@@ -43,11 +43,12 @@ func (c *Client) IsAuthenticated() bool {
 }
 
 // ExchangeCode exchanges an authorization code for tokens
-func (c *Client) ExchangeCode(code, redirectURI string) (*OAuthToken, error) {
+func (c *Client) ExchangeCode(code, redirectURI, codeVerifier string) (*OAuthToken, error) {
 	data := url.Values{
 		"client_id":     {c.clientID},
 		"client_secret": {c.clientSecret},
 		"code":          {code},
+		"code_verifier": {codeVerifier},
 		"grant_type":    {"authorization_code"},
 		"redirect_uri":  {redirectURI},
 	}
