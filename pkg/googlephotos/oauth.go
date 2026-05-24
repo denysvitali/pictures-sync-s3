@@ -13,7 +13,7 @@ import (
 const (
 	oauthAuthURL  = "https://accounts.google.com/o/oauth2/v2/auth"
 	oauthTokenURL = "https://oauth2.googleapis.com/token"
-	oauthScope    = "https://www.googleapis.com/auth/photoslibrary"
+	oauthScope    = "https://www.googleapis.com/auth/photoslibrary.readonly https://www.googleapis.com/auth/photoslibrary.appendonly"
 )
 
 // StateStore manages PKCE state tokens for the OAuth flow
