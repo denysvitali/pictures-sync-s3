@@ -14,6 +14,7 @@ import (
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/captiveportal"
 	"github.com/denysvitali/pictures-sync-s3/pkg/daemoncontrol"
+	"github.com/denysvitali/pictures-sync-s3/pkg/googlephotos"
 	"github.com/denysvitali/pictures-sync-s3/pkg/sdcardbrowser"
 	"github.com/denysvitali/pictures-sync-s3/pkg/sdmonitor"
 	"github.com/denysvitali/pictures-sync-s3/pkg/settings"
@@ -345,6 +346,80 @@ func setupTestContext(t *testing.T) (*Context, func()) {
 	}
 
 	return ctx, cleanup
+}
+
+// TestEnsureGooglePhotosClientLazyInit verifies the lazy initialization
+// behavior that was the root cause of the "client ID not configured" bug.
+func TestEnsureGooglePhotosClientLazyInit(t *testing.T) {
+	t.Run("no-op when client already exists", func(t *testing.T) {
+		ctx, cleanup := setupTestContext(t)
+		defer cleanup()
+
+		// Set up pre-existing client
+		ctx.GooglePhotosStateStore = googlephotos.NewStateStore()
+		ctx.AppSettings.SetGooglePhotosOAuth(true, "existing-id", "existing-secret")
+		ctx.EnsureGooglePhotosClient()
+		if ctx.GooglePhotosClient == nil {
+			t.Fatal("pre-condition failed: client should be initialized")
+		}
+		firstClient := ctx.GooglePhotosClient
+
+		// Call again - should not replace
+		ctx.EnsureGooglePhotosClient()
+		if ctx.GooglePhotosClient != firstClient {
+			t.Error("EnsureGooglePhotosClient replaced an existing client")
+		}
+	})
+
+	t.Run("no-op when state store is nil", func(t *testing.T) {
+		ctx, cleanup := setupTestContext(t)
+		defer cleanup()
+
+		ctx.GooglePhotosStateStore = nil
+		ctx.AppSettings.SetGooglePhotosOAuth(true, "id", "secret")
+		ctx.EnsureGooglePhotosClient()
+		if ctx.GooglePhotosClient != nil {
+			t.Error("expected nil client when state store is nil")
+		}
+	})
+
+	t.Run("no-op when credentials are empty", func(t *testing.T) {
+		ctx, cleanup := setupTestContext(t)
+		defer cleanup()
+
+		ctx.GooglePhotosStateStore = googlephotos.NewStateStore()
+		// Empty credentials
+		ctx.AppSettings.SetGooglePhotosOAuth(false, "", "")
+		ctx.EnsureGooglePhotosClient()
+		if ctx.GooglePhotosClient != nil {
+			t.Error("expected nil client when credentials are empty")
+		}
+	})
+
+	t.Run("creates client when credentials exist", func(t *testing.T) {
+		ctx, cleanup := setupTestContext(t)
+		defer cleanup()
+
+		ctx.GooglePhotosStateStore = googlephotos.NewStateStore()
+		ctx.AppSettings.SetGooglePhotosOAuth(true, "test-id", "test-secret")
+		ctx.EnsureGooglePhotosClient()
+		if ctx.GooglePhotosClient == nil {
+			t.Fatal("expected client to be initialized when credentials exist")
+		}
+	})
+
+	t.Run("creates sync manager when sync manager exists", func(t *testing.T) {
+		ctx, cleanup := setupTestContext(t)
+		defer cleanup()
+
+		ctx.GooglePhotosStateStore = googlephotos.NewStateStore()
+		ctx.AppSettings.SetGooglePhotosOAuth(true, "test-id", "test-secret")
+		// SyncMgr is already set by setupTestContext
+		ctx.EnsureGooglePhotosClient()
+		if ctx.GooglePhotosSyncMgr == nil {
+			t.Error("expected sync manager to be initialized when SyncMgr exists")
+		}
+	})
 }
 
 // TestHandleStatus_GET tests status endpoint

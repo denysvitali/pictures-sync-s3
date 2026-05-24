@@ -401,6 +401,162 @@ func formatErrors(errors []error) []string {
 	return result
 }
 
+// settingsRequest mirrors the JSON payload accepted by HandleSettings POST.
+// Every field is a pointer so that a missing key (nil) can be distinguished
+// from an explicit zero value. When adding a new setting, add the field here
+// AND register an updater in applySettingsRequest below.
+type settingsRequest struct {
+	RemoteName               *string  `json:"remote_name"`
+	RemotePath               *string  `json:"remote_path"`
+	ReformatThreshold        *float64 `json:"reformat_threshold"`
+	Transfers                *int     `json:"transfers"`
+	Checkers                 *int     `json:"checkers"`
+	GooglePhotosEnabled      *bool    `json:"google_photos_enabled"`
+	GooglePhotos             *bool    `json:"google_photos"`
+	GooglePhotosRemoteName   *string  `json:"google_photos_remote_name"`
+	GooglePhotosOAuthEnabled *bool    `json:"google_photos_oauth_enabled"`
+	GooglePhotosClientID     *string  `json:"google_photos_client_id"`
+	GooglePhotosClientSecret *string  `json:"google_photos_client_secret"`
+	Prefer5GHzWiFi           *bool    `json:"prefer_5ghz_wifi"`
+	TailscaleAuthKey         *string  `json:"tailscale_auth_key"`
+}
+
+type settingsBadRequestError struct{ msg string }
+
+func (e *settingsBadRequestError) Error() string { return e.msg }
+
+// fieldUpdater is a single dispatched update step.
+// The registry below is the authoritative list of updaters; adding a field to
+// settingsRequest without adding an entry here causes the field to be silently
+// ignored (the test TestHandleSettingsSavesAllFields catches this).
+type fieldUpdater struct {
+	name   string
+	update func(req *settingsRequest, ctx *Context) error
+}
+
+// settingsUpdaters is the ordered registry of all fields that can be mutated
+// via the settings API. Keep this list in sync with settingsRequest.
+var settingsUpdaters = []fieldUpdater{
+	{"remote", func(req *settingsRequest, ctx *Context) error {
+		if req.RemoteName == nil && req.RemotePath == nil {
+			return nil
+		}
+		remoteName := ctx.AppSettings.GetRemoteName()
+		remotePath := ctx.AppSettings.GetRemotePath()
+		if req.RemoteName != nil {
+			remoteName = *req.RemoteName
+		}
+		if req.RemotePath != nil {
+			remotePath = *req.RemotePath
+		}
+		if err := ctx.AppSettings.SetRemote(remoteName, remotePath); err != nil {
+			return err
+		}
+		ctx.SyncMgr.SetRemote(remoteName, remotePath)
+		return nil
+	}},
+	{"reformat_threshold", func(req *settingsRequest, ctx *Context) error {
+		if req.ReformatThreshold == nil {
+			return nil
+		}
+		return ctx.AppSettings.SetReformatThreshold(*req.ReformatThreshold)
+	}},
+	{"transfers", func(req *settingsRequest, ctx *Context) error {
+		if req.Transfers == nil {
+			return nil
+		}
+		return ctx.AppSettings.SetTransfers(*req.Transfers)
+	}},
+	{"checkers", func(req *settingsRequest, ctx *Context) error {
+		if req.Checkers == nil {
+			return nil
+		}
+		return ctx.AppSettings.SetCheckers(*req.Checkers)
+	}},
+	{"google_photos", func(req *settingsRequest, ctx *Context) error {
+		if req.GooglePhotosEnabled == nil && req.GooglePhotos == nil && req.GooglePhotosRemoteName == nil {
+			return nil
+		}
+		googlePhotosEnabled := ctx.AppSettings.GetGooglePhotosEnabled()
+		googlePhotosRemoteName := ctx.AppSettings.GetGooglePhotosRemoteName()
+		if req.GooglePhotosEnabled != nil {
+			googlePhotosEnabled = *req.GooglePhotosEnabled
+		} else if req.GooglePhotos != nil {
+			googlePhotosEnabled = *req.GooglePhotos
+		}
+		if req.GooglePhotosRemoteName != nil {
+			googlePhotosRemoteName = *req.GooglePhotosRemoteName
+		}
+		if err := ctx.AppSettings.SetGooglePhotos(googlePhotosEnabled, googlePhotosRemoteName); err != nil {
+			return err
+		}
+		ctx.SyncMgr.SetGooglePhotos(googlePhotosEnabled, googlePhotosRemoteName)
+		return nil
+	}},
+	{"google_photos_oauth", func(req *settingsRequest, ctx *Context) error {
+		if req.GooglePhotosOAuthEnabled == nil && req.GooglePhotosClientID == nil && req.GooglePhotosClientSecret == nil {
+			return nil
+		}
+		oauthEnabled := ctx.AppSettings.GetGooglePhotosOAuthEnabled()
+		clientID := ctx.AppSettings.GetGooglePhotosClientID()
+		clientSecret := ctx.AppSettings.GetGooglePhotosClientSecret()
+		if req.GooglePhotosOAuthEnabled != nil {
+			oauthEnabled = *req.GooglePhotosOAuthEnabled
+		}
+		if req.GooglePhotosClientID != nil {
+			clientID = *req.GooglePhotosClientID
+		}
+		if req.GooglePhotosClientSecret != nil {
+			clientSecret = *req.GooglePhotosClientSecret
+		}
+		if err := ctx.AppSettings.SetGooglePhotosOAuth(oauthEnabled, clientID, clientSecret); err != nil {
+			return err
+		}
+		ctx.EnsureGooglePhotosClient()
+		return nil
+	}},
+	{"prefer_5ghz_wifi", func(req *settingsRequest, ctx *Context) error {
+		if req.Prefer5GHzWiFi == nil {
+			return nil
+		}
+		if err := ctx.AppSettings.SetPrefer5GHzWiFi(*req.Prefer5GHzWiFi); err != nil {
+			return err
+		}
+		if ctx.WiFiMgr != nil {
+			ctx.WiFiMgr.SetPrefer5GHzNetworks(*req.Prefer5GHzWiFi)
+		}
+		return nil
+	}},
+}
+
+func applySettingsRequest(ctx *Context, r *http.Request, req *settingsRequest) (map[string]any, error) {
+	if req.TailscaleAuthKey != nil && *req.TailscaleAuthKey != "" {
+		if err := settings.ValidateTailscaleAuthKey(*req.TailscaleAuthKey); err != nil {
+			return nil, &settingsBadRequestError{msg: err.Error()}
+		}
+	}
+
+	for _, u := range settingsUpdaters {
+		if err := u.update(req, ctx); err != nil {
+			return nil, fmt.Errorf("%s: %w", u.name, err)
+		}
+	}
+
+	response := map[string]any{"status": "ok"}
+	if req.TailscaleAuthKey != nil && *req.TailscaleAuthKey != "" {
+		if warning, err := configureTailscale(*req.TailscaleAuthKey); err != nil {
+			return nil, err
+		} else if warning != "" {
+			response["warning"] = warning
+		}
+		response["tailscale_auth_key_configured"] = true
+		response["tailscale_auth_key_path"] = tailscaleAuthKeyPath
+		log.Println("Tailscale auth key saved")
+	}
+
+	return response, nil
+}
+
 // HandleSettings manages application settings
 func (ctx *Context) HandleSettings(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -415,22 +571,7 @@ func (ctx *Context) HandleSettings(w http.ResponseWriter, r *http.Request) {
 		JSONResponse(w, response)
 
 	case http.MethodPost:
-		var req struct {
-			RemoteName               *string  `json:"remote_name"`
-			RemotePath               *string  `json:"remote_path"`
-			ReformatThreshold        *float64 `json:"reformat_threshold"`
-			Transfers                *int     `json:"transfers"`
-			Checkers                 *int     `json:"checkers"`
-			GooglePhotosEnabled      *bool    `json:"google_photos_enabled"`
-			GooglePhotos             *bool    `json:"google_photos"`
-			GooglePhotosRemoteName   *string  `json:"google_photos_remote_name"`
-			GooglePhotosOAuthEnabled *bool    `json:"google_photos_oauth_enabled"`
-			GooglePhotosClientID     *string  `json:"google_photos_client_id"`
-			GooglePhotosClientSecret *string  `json:"google_photos_client_secret"`
-			Prefer5GHzWiFi           *bool    `json:"prefer_5ghz_wifi"`
-			TailscaleAuthKey         *string  `json:"tailscale_auth_key"`
-		}
-
+		var req settingsRequest
 		r.Body = http.MaxBytesReader(w, r.Body, maxSettingsBodyBytes)
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			var maxErr *http.MaxBytesError
@@ -442,117 +583,15 @@ func (ctx *Context) HandleSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if req.TailscaleAuthKey != nil && *req.TailscaleAuthKey != "" {
-			if err := settings.ValidateTailscaleAuthKey(*req.TailscaleAuthKey); err != nil {
+		response, err := applySettingsRequest(ctx, r, &req)
+		if err != nil {
+			var badRequest *settingsBadRequestError
+			if errors.As(err, &badRequest) {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-		}
-
-		// Update settings
-		if req.RemoteName != nil || req.RemotePath != nil {
-			remoteName := ctx.AppSettings.GetRemoteName()
-			remotePath := ctx.AppSettings.GetRemotePath()
-			if req.RemoteName != nil {
-				remoteName = *req.RemoteName
-			}
-			if req.RemotePath != nil {
-				remotePath = *req.RemotePath
-			}
-			if err := ctx.AppSettings.SetRemote(remoteName, remotePath); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			// Update sync manager
-			ctx.SyncMgr.SetRemote(remoteName, remotePath)
-		}
-
-		if req.ReformatThreshold != nil {
-			if err := ctx.AppSettings.SetReformatThreshold(*req.ReformatThreshold); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-		}
-
-		if req.Transfers != nil {
-			if err := ctx.AppSettings.SetTransfers(*req.Transfers); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-		}
-
-		if req.Checkers != nil {
-			if err := ctx.AppSettings.SetCheckers(*req.Checkers); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-		}
-
-		// Update Google Photos settings only when requested. The legacy
-		// google_photos key is kept for older UI payloads.
-		if req.GooglePhotosEnabled != nil || req.GooglePhotos != nil || req.GooglePhotosRemoteName != nil {
-			googlePhotosEnabled := ctx.AppSettings.GetGooglePhotosEnabled()
-			googlePhotosRemoteName := ctx.AppSettings.GetGooglePhotosRemoteName()
-			if req.GooglePhotosEnabled != nil {
-				googlePhotosEnabled = *req.GooglePhotosEnabled
-			} else if req.GooglePhotos != nil {
-				googlePhotosEnabled = *req.GooglePhotos
-			}
-			if req.GooglePhotosRemoteName != nil {
-				googlePhotosRemoteName = *req.GooglePhotosRemoteName
-			}
-
-			if err := ctx.AppSettings.SetGooglePhotos(googlePhotosEnabled, googlePhotosRemoteName); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			// Update sync manager with Google Photos settings
-			ctx.SyncMgr.SetGooglePhotos(googlePhotosEnabled, googlePhotosRemoteName)
-		}
-
-		// Update Google Photos native OAuth settings
-		if req.GooglePhotosOAuthEnabled != nil || req.GooglePhotosClientID != nil || req.GooglePhotosClientSecret != nil {
-			oauthEnabled := ctx.AppSettings.GetGooglePhotosOAuthEnabled()
-			clientID := ctx.AppSettings.GetGooglePhotosClientID()
-			clientSecret := ctx.AppSettings.GetGooglePhotosClientSecret()
-			if req.GooglePhotosOAuthEnabled != nil {
-				oauthEnabled = *req.GooglePhotosOAuthEnabled
-			}
-			if req.GooglePhotosClientID != nil {
-				clientID = *req.GooglePhotosClientID
-			}
-			if req.GooglePhotosClientSecret != nil {
-				clientSecret = *req.GooglePhotosClientSecret
-			}
-			if err := ctx.AppSettings.SetGooglePhotosOAuth(oauthEnabled, clientID, clientSecret); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			// Re-initialize Google Photos client if credentials now exist
-			ctx.EnsureGooglePhotosClient()
-		}
-
-		if req.Prefer5GHzWiFi != nil {
-			if err := ctx.AppSettings.SetPrefer5GHzWiFi(*req.Prefer5GHzWiFi); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			if ctx.WiFiMgr != nil {
-				ctx.WiFiMgr.SetPrefer5GHzNetworks(*req.Prefer5GHzWiFi)
-			}
-		}
-
-		response := map[string]any{"status": "ok"}
-		if req.TailscaleAuthKey != nil && *req.TailscaleAuthKey != "" {
-			if warning, err := configureTailscale(*req.TailscaleAuthKey); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			} else if warning != "" {
-				response["warning"] = warning
-			}
-			response["tailscale_auth_key_configured"] = true
-			response["tailscale_auth_key_path"] = tailscaleAuthKeyPath
-			log.Println("Tailscale auth key saved")
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
 
 		log.Println("Settings updated")

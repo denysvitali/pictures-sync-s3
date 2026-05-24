@@ -1072,3 +1072,114 @@ func TestSummary(t *testing.T) {
 	t.Log("23. Settings struct has too many responsibilities (persistence + business logic)")
 	t.Log("")
 }
+
+// TestSettingsRoundTrip verifies that every field survives a Save/Load cycle.
+// This prevents the bug where a new field is added to the Settings struct
+// but not included in the JSON serialization or default application logic.
+func TestSettingsRoundTrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "settings.json")
+
+	// Create settings with every field set to a non-default value
+	want := &Settings{
+		RemoteName:               "my-remote",
+		RemotePath:               "/backup/photos",
+		ReformatThreshold:        0.5,
+		Transfers:                8,
+		Checkers:                 16,
+		GooglePhotosEnabled:      true,
+		GooglePhotosRemoteName:   "gphotos-backup",
+		GooglePhotosClientID:     "test-client-id-123",
+		GooglePhotosClientSecret: "test-client-secret-456",
+		GooglePhotosOAuthEnabled: true,
+		Prefer5GHzWiFi:           false,
+	}
+
+	// Save
+	if err := want.SaveTo(testFile); err != nil {
+		t.Fatalf("SaveTo failed: %v", err)
+	}
+
+	// Load
+	got, err := LoadFrom(testFile)
+	if err != nil {
+		t.Fatalf("LoadFrom failed: %v", err)
+	}
+
+	// Verify every field round-tripped correctly
+	if got.RemoteName != want.RemoteName {
+		t.Errorf("RemoteName = %q, want %q", got.RemoteName, want.RemoteName)
+	}
+	if got.RemotePath != want.RemotePath {
+		t.Errorf("RemotePath = %q, want %q", got.RemotePath, want.RemotePath)
+	}
+	if got.ReformatThreshold != want.ReformatThreshold {
+		t.Errorf("ReformatThreshold = %v, want %v", got.ReformatThreshold, want.ReformatThreshold)
+	}
+	if got.Transfers != want.Transfers {
+		t.Errorf("Transfers = %d, want %d", got.Transfers, want.Transfers)
+	}
+	if got.Checkers != want.Checkers {
+		t.Errorf("Checkers = %d, want %d", got.Checkers, want.Checkers)
+	}
+	if got.GooglePhotosEnabled != want.GooglePhotosEnabled {
+		t.Errorf("GooglePhotosEnabled = %v, want %v", got.GooglePhotosEnabled, want.GooglePhotosEnabled)
+	}
+	if got.GooglePhotosRemoteName != want.GooglePhotosRemoteName {
+		t.Errorf("GooglePhotosRemoteName = %q, want %q", got.GooglePhotosRemoteName, want.GooglePhotosRemoteName)
+	}
+	if got.GooglePhotosClientID != want.GooglePhotosClientID {
+		t.Errorf("GooglePhotosClientID = %q, want %q", got.GooglePhotosClientID, want.GooglePhotosClientID)
+	}
+	if got.GooglePhotosClientSecret != want.GooglePhotosClientSecret {
+		t.Errorf("GooglePhotosClientSecret = %q, want %q", got.GooglePhotosClientSecret, want.GooglePhotosClientSecret)
+	}
+	if got.GooglePhotosOAuthEnabled != want.GooglePhotosOAuthEnabled {
+		t.Errorf("GooglePhotosOAuthEnabled = %v, want %v", got.GooglePhotosOAuthEnabled, want.GooglePhotosOAuthEnabled)
+	}
+	if got.Prefer5GHzWiFi != want.Prefer5GHzWiFi {
+		t.Errorf("Prefer5GHzWiFi = %v, want %v", got.Prefer5GHzWiFi, want.Prefer5GHzWiFi)
+	}
+}
+
+// TestSettingsRoundTripDefaults verifies that default values are applied
+// correctly when loading an empty or partial settings file.
+func TestSettingsRoundTripDefaults(t *testing.T) {
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "settings.json")
+
+	// Write a minimal settings file
+	minimal := `{"remote_name":"b2"}`
+	if err := os.WriteFile(testFile, []byte(minimal), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	got, err := LoadFrom(testFile)
+	if err != nil {
+		t.Fatalf("LoadFrom failed: %v", err)
+	}
+
+	// Fields that were not specified should get defaults
+	if got.RemotePath != "/photos" {
+		t.Errorf("RemotePath default = %q, want %q", got.RemotePath, "/photos")
+	}
+	if got.ReformatThreshold != 0.3 {
+		t.Errorf("ReformatThreshold default = %v, want 0.3", got.ReformatThreshold)
+	}
+	if got.Transfers != 4 {
+		t.Errorf("Transfers default = %d, want 4", got.Transfers)
+	}
+	if got.Checkers != 8 {
+		t.Errorf("Checkers default = %d, want 8", got.Checkers)
+	}
+	if got.Prefer5GHzWiFi != true {
+		t.Errorf("Prefer5GHzWiFi default = %v, want true", got.Prefer5GHzWiFi)
+	}
+	// Fields without defaults should be zero values
+	if got.GooglePhotosEnabled != false {
+		t.Errorf("GooglePhotosEnabled = %v, want false", got.GooglePhotosEnabled)
+	}
+	if got.GooglePhotosClientID != "" {
+		t.Errorf("GooglePhotosClientID = %q, want empty", got.GooglePhotosClientID)
+	}
+}

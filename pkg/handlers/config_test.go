@@ -235,6 +235,114 @@ func containsString(values []string, want string) bool {
 	return false
 }
 
+// TestHandleSettingsSavesAllFields verifies that a POST to /api/settings
+// correctly persists every field, including the Google Photos OAuth fields
+// that were previously missing from the request struct.
+func TestHandleSettingsSavesAllFields(t *testing.T) {
+	ctx, cleanup := setupTestContext(t)
+	defer cleanup()
+
+	body := strings.NewReader(`{
+		"remote_name": "b2-remote",
+		"remote_path": "/archive/photos",
+		"reformat_threshold": 0.75,
+		"transfers": 12,
+		"checkers": 24,
+		"google_photos_enabled": true,
+		"google_photos_remote_name": "gphotos-rclone",
+		"google_photos_oauth_enabled": true,
+		"google_photos_client_id": "test-oauth-id-123",
+		"google_photos_client_secret": "test-oauth-secret-456",
+		"prefer_5ghz_wifi": false
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/settings", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	ctx.HandleSettings(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	// Verify every field was persisted
+	if got := ctx.AppSettings.GetRemoteName(); got != "b2-remote" {
+		t.Errorf("RemoteName = %q, want %q", got, "b2-remote")
+	}
+	if got := ctx.AppSettings.GetRemotePath(); got != "/archive/photos" {
+		t.Errorf("RemotePath = %q, want %q", got, "/archive/photos")
+	}
+	if got := ctx.AppSettings.GetReformatThreshold(); got != 0.75 {
+		t.Errorf("ReformatThreshold = %v, want 0.75", got)
+	}
+	if got := ctx.AppSettings.GetTransfers(); got != 12 {
+		t.Errorf("Transfers = %d, want 12", got)
+	}
+	if got := ctx.AppSettings.GetCheckers(); got != 24 {
+		t.Errorf("Checkers = %d, want 24", got)
+	}
+	if got := ctx.AppSettings.GetGooglePhotosEnabled(); got != true {
+		t.Errorf("GooglePhotosEnabled = %v, want true", got)
+	}
+	if got := ctx.AppSettings.GetGooglePhotosRemoteName(); got != "gphotos-rclone" {
+		t.Errorf("GooglePhotosRemoteName = %q, want %q", got, "gphotos-rclone")
+	}
+	if got := ctx.AppSettings.GetGooglePhotosOAuthEnabled(); got != true {
+		t.Errorf("GooglePhotosOAuthEnabled = %v, want true", got)
+	}
+	if got := ctx.AppSettings.GetGooglePhotosClientID(); got != "test-oauth-id-123" {
+		t.Errorf("GooglePhotosClientID = %q, want %q", got, "test-oauth-id-123")
+	}
+	if got := ctx.AppSettings.GetGooglePhotosClientSecret(); got != "test-oauth-secret-456" {
+		t.Errorf("GooglePhotosClientSecret = %q, want %q", got, "test-oauth-secret-456")
+	}
+	if got := ctx.AppSettings.GetPrefer5GHzWiFi(); got != false {
+		t.Errorf("Prefer5GHzWiFi = %v, want false", got)
+	}
+}
+
+// TestHandleSettingsPartialUpdateDoesNotResetOthers verifies that sending
+// only a subset of fields does not reset unmentioned fields to defaults.
+func TestHandleSettingsPartialUpdateDoesNotResetOthers(t *testing.T) {
+	ctx, cleanup := setupTestContext(t)
+	defer cleanup()
+
+	// Pre-populate some fields
+	if err := ctx.AppSettings.SetGooglePhotosOAuth(true, "pre-existing-id", "pre-existing-secret"); err != nil {
+		t.Fatalf("SetGooglePhotosOAuth failed: %v", err)
+	}
+	if err := ctx.AppSettings.SetRemote("original-remote", "/original/path"); err != nil {
+		t.Fatalf("SetRemote failed: %v", err)
+	}
+
+	// Now POST only transfers
+	body := strings.NewReader(`{"transfers": 2}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/settings", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	ctx.HandleSettings(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	// Transfers should be updated
+	if got := ctx.AppSettings.GetTransfers(); got != 2 {
+		t.Errorf("Transfers = %d, want 2", got)
+	}
+	// Other fields should be untouched
+	if got := ctx.AppSettings.GetRemoteName(); got != "original-remote" {
+		t.Errorf("RemoteName = %q, want %q", got, "original-remote")
+	}
+	if got := ctx.AppSettings.GetGooglePhotosClientID(); got != "pre-existing-id" {
+		t.Errorf("GooglePhotosClientID = %q, want %q", got, "pre-existing-id")
+	}
+	if got := ctx.AppSettings.GetGooglePhotosOAuthEnabled(); got != true {
+		t.Errorf("GooglePhotosOAuthEnabled = %v, want true", got)
+	}
+}
+
 func TestRedactRcloneConfig(t *testing.T) {
 	config := []byte(`[b2]
 type = b2
