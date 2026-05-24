@@ -39,6 +39,7 @@ export default function GooglePhotosPage() {
   const [connecting, setConnecting] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [progress, setProgress] = useState(null)
+  const [lastSyncResult, setLastSyncResult] = useState(null)
   const [albumsLoading, setAlbumsLoading] = useState(false)
   const progressIntervalRef = useRef(null)
   const statusIntervalRef = useRef(null)
@@ -111,6 +112,8 @@ export default function GooglePhotosPage() {
         setProgress(data)
         if (data?.status === 'completed' || data?.status === 'error' || data?.status === 'cancelled') {
           setSyncing(false)
+          setLastSyncResult(data)
+          setProgress(null)
           loadStatus()
           loadAlbums()
         }
@@ -271,7 +274,7 @@ export default function GooglePhotosPage() {
         </div>
       </Card>
 
-      {/* Sync Progress */}
+      {/* Sync Progress (live during sync) */}
       {syncing && progress && (
         <Card>
           <CardHeader>
@@ -304,7 +307,7 @@ export default function GooglePhotosPage() {
                 Current: {progress.current_file}
               </div>
             )}
-            {progress.uploaded_files > 0 && (
+            {(progress.uploaded_files > 0 || progress.skipped_files > 0 || progress.failed_files > 0) && (
               <div className="flex items-center gap-4 text-xs text-surface-400">
                 <span className="text-emerald-400">{progress.uploaded_files} uploaded</span>
                 {progress.skipped_files > 0 && <span className="text-amber-400">{progress.skipped_files} skipped</span>}
@@ -322,8 +325,66 @@ export default function GooglePhotosPage() {
               </div>
             )}
             {progress.error && (
-              <p className="text-xs text-rose-400">{progress.error}</p>
+              <div className="rounded-lg border border-rose-500/20 bg-rose-500/10 p-3">
+                <p className="text-xs font-medium text-rose-400">Sync Error</p>
+                <p className="mt-1 text-xs text-rose-300">{progress.error}</p>
+              </div>
             )}
+          </div>
+        </Card>
+      )}
+
+      {/* Last Sync Result (shown after sync ends, especially for errors) */}
+      {lastSyncResult && !syncing && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Last Sync Result</CardTitle>
+            <span
+              className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                lastSyncResult.status === 'completed'
+                  ? 'bg-emerald-500/15 text-emerald-400'
+                  : lastSyncResult.status === 'error'
+                    ? 'bg-rose-500/15 text-rose-400'
+                    : 'bg-amber-500/15 text-amber-400'
+              }`}
+            >
+              {lastSyncResult.status?.replace('_', ' ') || 'unknown'}
+            </span>
+          </CardHeader>
+          <div className="space-y-3">
+            <div className="flex items-center gap-4 text-sm">
+              <span className="text-emerald-400">{lastSyncResult.uploaded_files || 0} uploaded</span>
+              {lastSyncResult.skipped_files > 0 && <span className="text-amber-400">{lastSyncResult.skipped_files} skipped</span>}
+              {lastSyncResult.failed_files > 0 && <span className="text-rose-400">{lastSyncResult.failed_files} failed</span>}
+            </div>
+            {lastSyncResult.total_cards > 0 && (
+              <div className="text-xs text-surface-400">
+                Processed {lastSyncResult.total_cards} card{lastSyncResult.total_cards !== 1 ? 's' : ''}
+              </div>
+            )}
+            {lastSyncResult.error && (
+              <div className="rounded-lg border border-rose-500/20 bg-rose-500/10 p-3">
+                <p className="text-xs font-medium text-rose-400">Error</p>
+                <p className="mt-1 text-xs text-rose-300">{lastSyncResult.error}</p>
+              </div>
+            )}
+            {lastSyncResult.card_errors && lastSyncResult.card_errors.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-surface-300">Failed Cards</p>
+                {lastSyncResult.card_errors.map((ce) => (
+                  <div
+                    key={ce.card_id}
+                    className="rounded-lg border border-rose-500/15 bg-rose-500/5 p-2.5"
+                  >
+                    <p className="text-xs font-medium text-surface-200">Card {ce.card_id}</p>
+                    <p className="mt-0.5 text-xs text-rose-400">{ce.error}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            <Button variant="secondary" size="sm" onClick={() => setLastSyncResult(null)}>
+              Dismiss
+            </Button>
           </div>
         </Card>
       )}

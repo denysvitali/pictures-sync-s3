@@ -101,6 +101,7 @@ func (sm *SyncManager) Sync(ctx context.Context) error {
 	log.Printf("[GooglePhotos] Starting sync of %d cards to Google Photos", len(cards))
 
 	var totalUploaded, totalSkipped, totalFailed int
+	var cardErrors []CardError
 
 	for i, card := range cards {
 		// Check for cancellation
@@ -129,6 +130,10 @@ func (sm *SyncManager) Sync(ctx context.Context) error {
 
 		if err != nil {
 			log.Printf("[GooglePhotos] Error syncing card %s: %v", cardID, err)
+			cardErrors = append(cardErrors, CardError{
+				CardID: actualCardID,
+				Error:  err.Error(),
+			})
 			// Continue with other cards
 		}
 	}
@@ -137,7 +142,18 @@ func (sm *SyncManager) Sync(ctx context.Context) error {
 	sm.progress.UploadedFiles = totalUploaded
 	sm.progress.SkippedFiles = totalSkipped
 	sm.progress.FailedFiles = totalFailed
-	sm.progress.Status = "completed"
+	sm.progress.CardErrors = cardErrors
+	if len(cardErrors) > 0 {
+		sm.progress.Status = "error"
+		if len(cardErrors) == 1 {
+			sm.progress.Error = fmt.Sprintf("Failed to sync card %s: %s", cardErrors[0].CardID, cardErrors[0].Error)
+		} else {
+			sm.progress.Error = fmt.Sprintf("Failed to sync %d cards", len(cardErrors))
+		}
+	} else {
+		sm.progress.Status = "completed"
+		sm.progress.Error = ""
+	}
 	sm.progress.CurrentFile = ""
 	sm.mu.Unlock()
 

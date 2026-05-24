@@ -130,19 +130,26 @@ type AuthState struct {
 	ExpiresAt     time.Time
 }
 
+// CardError tracks an error for a specific card during sync
+type CardError struct {
+	CardID string `json:"card_id"`
+	Error  string `json:"error"`
+}
+
 // SyncProgress tracks the progress of a B2 to Google Photos sync
 type SyncProgress struct {
-	TotalCards      int    `json:"total_cards"`
-	CurrentCard     int    `json:"current_card"`
-	CurrentCardID   string `json:"current_card_id"`
-	TotalFiles      int    `json:"total_files"`
-	ProcessedFiles  int    `json:"processed_files"`
-	UploadedFiles   int    `json:"uploaded_files"`
-	SkippedFiles    int    `json:"skipped_files"`
-	FailedFiles     int    `json:"failed_files"`
-	CurrentFile     string `json:"current_file,omitempty"`
-	Status          string `json:"status"`
-	Error           string `json:"error,omitempty"`
+	TotalCards      int         `json:"total_cards"`
+	CurrentCard     int         `json:"current_card"`
+	CurrentCardID   string      `json:"current_card_id"`
+	TotalFiles      int         `json:"total_files"`
+	ProcessedFiles  int         `json:"processed_files"`
+	UploadedFiles   int         `json:"uploaded_files"`
+	SkippedFiles    int         `json:"skipped_files"`
+	FailedFiles     int         `json:"failed_files"`
+	CurrentFile     string      `json:"current_file,omitempty"`
+	Status          string      `json:"status"`
+	Error           string      `json:"error,omitempty"`
+	CardErrors      []CardError `json:"card_errors,omitempty"`
 }
 
 // ConnectionStatus represents the Google Photos connection status
