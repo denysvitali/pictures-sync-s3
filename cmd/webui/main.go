@@ -17,6 +17,7 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/auth"
 	"github.com/denysvitali/pictures-sync-s3/pkg/daemoncontrol"
 	"github.com/denysvitali/pictures-sync-s3/pkg/events"
+	"github.com/denysvitali/pictures-sync-s3/pkg/googlephotos"
 	"github.com/denysvitali/pictures-sync-s3/pkg/handlers"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ntpsync"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ota"
@@ -214,6 +215,26 @@ func main() {
 	// Update Google Photos settings
 	syncMgr.SetGooglePhotos(appSettings.GetGooglePhotosEnabled(), appSettings.GetGooglePhotosRemoteName())
 
+	// Initialize Google Photos native OAuth (only if configured)
+	var (
+		gpClient     *googlephotos.Client
+		gpSyncMgr    *googlephotos.SyncManager
+		gpStateStore *googlephotos.StateStore
+	)
+	if appSettings.GetGooglePhotosOAuthEnabled() {
+		clientID := appSettings.GetGooglePhotosClientID()
+		clientSecret := appSettings.GetGooglePhotosClientSecret()
+		if clientID != "" && clientSecret != "" {
+			tokenStore := googlephotos.NewTokenStore("")
+			gpClient = googlephotos.NewClient(clientID, clientSecret, tokenStore)
+			gpSyncMgr = googlephotos.NewSyncManager(gpClient, syncMgr)
+			gpStateStore = googlephotos.NewStateStore()
+			log.Println("Google Photos native OAuth initialized")
+		} else {
+			log.Println("Warning: Google Photos OAuth enabled but client credentials not configured")
+		}
+	}
+
 	// Initialize WiFi manager
 	wifiMgr, err := wifimanager.NewManager()
 	if err != nil {
@@ -236,14 +257,17 @@ func main() {
 
 	// Create handler context
 	ctx := &handlers.Context{
-		StateMgr:      stateMgr,
-		SyncMgr:       syncMgr,
-		Daemon:        handlers.DaemonControlClient{},
-		WiFiMgr:       wifiMgr,
-		AppSettings:   appSettings,
-		SSRFValidator: ssrfValidator,
-		OTAMgr:        otaMgr,
-		PasswordMgr:   passwordMgr,
+		StateMgr:               stateMgr,
+		SyncMgr:                syncMgr,
+		Daemon:                 handlers.DaemonControlClient{},
+		WiFiMgr:                wifiMgr,
+		AppSettings:            appSettings,
+		SSRFValidator:          ssrfValidator,
+		OTAMgr:                 otaMgr,
+		PasswordMgr:            passwordMgr,
+		GooglePhotosClient:     gpClient,
+		GooglePhotosSyncMgr:    gpSyncMgr,
+		GooglePhotosStateStore: gpStateStore,
 	}
 
 	allowedOrigins := configuredAllowedOrigins()
@@ -299,6 +323,13 @@ func main() {
 	http.HandleFunc("/api/system/time", ctx.HandleSystemTime)
 	http.HandleFunc("/api/system/tls-certificate", ctx.HandleSystemTLSCertificate)
 	http.HandleFunc("/api/system/services/restart", ctx.HandleSystemServicesRestart)
+	http.HandleFunc("/api/googlephotos/status", ctx.HandleGooglePhotosStatus)
+	http.HandleFunc("/api/googlephotos/auth/start", ctx.HandleGooglePhotosAuthStart)
+	http.HandleFunc("/api/googlephotos/auth/callback", ctx.HandleGooglePhotosAuthCallback)
+	http.HandleFunc("/api/googlephotos/auth/disconnect", ctx.HandleGooglePhotosAuthDisconnect)
+	http.HandleFunc("/api/googlephotos/sync", ctx.HandleGooglePhotosSync)
+	http.HandleFunc("/api/googlephotos/sync/progress", ctx.HandleGooglePhotosSyncProgress)
+	http.HandleFunc("/api/googlephotos/albums", ctx.HandleGooglePhotosAlbums)
 	http.HandleFunc("/ws", websocket.HandleWebSocket(stateMgr, eventMgr, otaMgr))
 
 	// SPA route and static assets for React frontend

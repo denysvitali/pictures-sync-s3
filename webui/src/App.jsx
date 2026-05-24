@@ -135,6 +135,7 @@ export default function App() {
     wifi: 'Wi-Fi',
     history: 'Sync History',
     gallery: 'Gallery',
+    googlephotos: 'Google Photos',
     config: 'Settings',
   }
 

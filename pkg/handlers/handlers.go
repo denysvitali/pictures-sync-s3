@@ -10,6 +10,7 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/auth"
 	"github.com/denysvitali/pictures-sync-s3/pkg/captiveportal"
 	"github.com/denysvitali/pictures-sync-s3/pkg/daemoncontrol"
+	"github.com/denysvitali/pictures-sync-s3/pkg/googlephotos"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ota"
 	"github.com/denysvitali/pictures-sync-s3/pkg/sdcardbrowser"
 	"github.com/denysvitali/pictures-sync-s3/pkg/sdmonitor"
@@ -136,16 +137,19 @@ func (DaemonControlClient) RequestSDCardThumbnail(ctx context.Context, path stri
 
 // Context holds dependencies for all handlers
 type Context struct {
-	StateMgr      *state.Manager
-	SyncMgr       SyncManager
-	ManualSync    ManualSyncRequester
-	Daemon        DaemonClient
-	WiFiMgr       wifimanager.WiFiManager
-	AppSettings   *settings.Settings
-	SSRFValidator *ssrf.Validator
-	CaptivePortal *captiveportal.Authenticator
-	OTAMgr        *ota.Manager
-	PasswordMgr   *auth.PasswordManager
+	StateMgr               *state.Manager
+	SyncMgr                SyncManager
+	ManualSync             ManualSyncRequester
+	Daemon                 DaemonClient
+	WiFiMgr                wifimanager.WiFiManager
+	AppSettings            *settings.Settings
+	SSRFValidator          *ssrf.Validator
+	CaptivePortal          *captiveportal.Authenticator
+	OTAMgr                 *ota.Manager
+	PasswordMgr            *auth.PasswordManager
+	GooglePhotosClient     GooglePhotosManager
+	GooglePhotosSyncMgr    GooglePhotosSyncManager
+	GooglePhotosStateStore *googlephotos.StateStore
 }
 
 func (ctx *Context) VersionInfo() version.Info {

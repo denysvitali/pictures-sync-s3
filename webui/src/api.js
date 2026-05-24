@@ -206,6 +206,19 @@ export async function getFileViewContent(d, filePath) {
 export const getThumbnailUrl = (d, filePath) =>
   `${normalizeBaseUrl(d)}/api/thumbnail?path=${encodeURIComponent(filePath || '')}`
 
+export const getGooglePhotosStatus = (d) => apiRequest('/api/googlephotos/status', { deviceUrl: d })
+export const startGooglePhotosAuth = (d, redirectUri) =>
+  apiRequest('/api/googlephotos/auth/start', { deviceUrl: d, method: 'POST', body: { redirect_uri: redirectUri } })
+export const disconnectGooglePhotos = (d) =>
+  apiRequest('/api/googlephotos/auth/disconnect', { deviceUrl: d, method: 'POST' })
+export const startGooglePhotosSync = (d) =>
+  apiRequest('/api/googlephotos/sync', { deviceUrl: d, method: 'POST' })
+export const getGooglePhotosSyncProgress = (d) =>
+  apiRequest('/api/googlephotos/sync/progress', { deviceUrl: d })
+export const getGooglePhotosAlbums = (d) => apiRequest('/api/googlephotos/albums', { deviceUrl: d })
+export const createGooglePhotosAlbum = (d, title) =>
+  apiRequest('/api/googlephotos/albums', { deviceUrl: d, method: 'POST', body: { title } })
+
 export function getWebSocketUrl(deviceUrl) {
   const base = normalizeBaseUrl(deviceUrl)
   if (!base) {

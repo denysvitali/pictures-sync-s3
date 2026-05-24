@@ -552,6 +552,9 @@ function SyncSettingsSection() {
   const [transfers, setTransfers] = useState('4')
   const [bandwidth, setBandwidth] = useState('')
   const [googlePhotos, setGooglePhotos] = useState(false)
+  const [googlePhotosOAuth, setGooglePhotosOAuth] = useState(false)
+  const [googlePhotosClientID, setGooglePhotosClientID] = useState('')
+  const [googlePhotosClientSecret, setGooglePhotosClientSecret] = useState('')
   const [prefer5GHzWiFi, setPrefer5GHzWiFi] = useState(true)
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -568,6 +571,9 @@ function SyncSettingsSection() {
           setTransfers(String(data.transfers ?? '4'))
           setBandwidth(data.bandwidth || '')
           setGooglePhotos(!!(data.google_photos_enabled ?? data.google_photos))
+          setGooglePhotosOAuth(!!data.google_photos_oauth_enabled)
+          setGooglePhotosClientID(data.google_photos_client_id || '')
+          setGooglePhotosClientSecret(data.google_photos_client_secret || '')
           setPrefer5GHzWiFi(data.prefer_5ghz_wifi ?? true)
         }
       })
@@ -593,6 +599,9 @@ function SyncSettingsSection() {
         transfers: t,
         bandwidth: bandwidth.trim() || undefined,
         google_photos_enabled: googlePhotos,
+        google_photos_oauth_enabled: googlePhotosOAuth,
+        google_photos_client_id: googlePhotosClientID.trim() || undefined,
+        google_photos_client_secret: googlePhotosClientSecret.trim() || undefined,
         prefer_5ghz_wifi: prefer5GHzWiFi,
       })
       toast.success('Sync settings saved')
@@ -601,7 +610,7 @@ function SyncSettingsSection() {
     } finally {
       setSaving(false)
     }
-  }, [deviceUrl, transfers, bandwidth, googlePhotos, prefer5GHzWiFi, loadError, toast])
+  }, [deviceUrl, transfers, bandwidth, googlePhotos, googlePhotosOAuth, googlePhotosClientID, googlePhotosClientSecret, prefer5GHzWiFi, loadError, toast])
 
   return (
     <AccordionSection title="Sync Settings" icon="settings">
@@ -637,10 +646,38 @@ function SyncSettingsSection() {
             <Toggle
               checked={googlePhotos}
               onChange={setGooglePhotos}
-              label="Enable Google Photos integration"
+              label="Enable Google Photos integration (rclone mode)"
               disabled={saving || !!loadError}
             />
           </div>
+          <div className="py-2">
+            <Toggle
+              checked={googlePhotosOAuth}
+              onChange={setGooglePhotosOAuth}
+              label="Enable Google Photos native OAuth"
+              disabled={saving || !!loadError}
+            />
+          </div>
+          {googlePhotosOAuth && (
+            <>
+              <Field label="Client ID" hint="Google Cloud OAuth 2.0 client ID">
+                <TextInput
+                  value={googlePhotosClientID}
+                  onChange={setGooglePhotosClientID}
+                  placeholder="your-client-id.apps.googleusercontent.com"
+                  disabled={saving || !!loadError}
+                />
+              </Field>
+              <Field label="Client Secret" hint="Google Cloud OAuth 2.0 client secret">
+                <PasswordInput
+                  value={googlePhotosClientSecret}
+                  onChange={setGooglePhotosClientSecret}
+                  placeholder="your-client-secret"
+                  disabled={saving || !!loadError}
+                />
+              </Field>
+            </>
+          )}
           <div className="py-2">
             <Toggle
               checked={prefer5GHzWiFi}
