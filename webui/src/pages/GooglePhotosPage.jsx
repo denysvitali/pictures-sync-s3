@@ -29,6 +29,27 @@ function describeError(err) {
   return msg
 }
 
+function CopyButton({ text }) {
+  const [copied, setCopied] = useState(false)
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // Ignore clipboard errors
+    }
+  }
+  return (
+    <button
+      onClick={handleCopy}
+      className="text-xs text-surface-400 hover:text-surface-200 underline"
+    >
+      {copied ? 'Copied!' : 'Copy'}
+    </button>
+  )
+}
+
 export default function GooglePhotosPage() {
   const { deviceUrl } = useDevice()
   const toast = useToast()
@@ -326,7 +347,10 @@ export default function GooglePhotosPage() {
             )}
             {progress.error && (
               <div className="rounded-lg border border-rose-500/20 bg-rose-500/10 p-3">
-                <p className="text-xs font-medium text-rose-400">Sync Error</p>
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-medium text-rose-400">Sync Error</p>
+                  <CopyButton text={progress.error} />
+                </div>
                 <p className="mt-1 text-xs text-rose-300">{progress.error}</p>
               </div>
             )}
@@ -364,7 +388,10 @@ export default function GooglePhotosPage() {
             )}
             {lastSyncResult.error && (
               <div className="rounded-lg border border-rose-500/20 bg-rose-500/10 p-3">
-                <p className="text-xs font-medium text-rose-400">Error</p>
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-medium text-rose-400">Error</p>
+                  <CopyButton text={lastSyncResult.error} />
+                </div>
                 <p className="mt-1 text-xs text-rose-300">{lastSyncResult.error}</p>
               </div>
             )}
@@ -376,7 +403,10 @@ export default function GooglePhotosPage() {
                     key={ce.card_id}
                     className="rounded-lg border border-rose-500/15 bg-rose-500/5 p-2.5"
                   >
-                    <p className="text-xs font-medium text-surface-200">Card {ce.card_id}</p>
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-medium text-surface-200">Card {ce.card_id}</p>
+                      <CopyButton text={`Card ${ce.card_id}: ${ce.error}`} />
+                    </div>
                     <p className="mt-0.5 text-xs text-rose-400">{ce.error}</p>
                   </div>
                 ))}
