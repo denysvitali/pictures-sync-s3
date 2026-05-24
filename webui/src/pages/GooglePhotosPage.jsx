@@ -244,11 +244,13 @@ export default function GooglePhotosPage() {
           <p className="text-sm text-surface-300">
             {isConnected
               ? `Your Google Photos account is connected. ${albums.length > 0 ? `${albums.length} album(s) found.` : ''}`
-              : 'Connect your Google Photos account to sync photos from cloud storage.'}
+              : isConfigured
+                ? 'Your Google Photos account is configured but the connection could not be verified. You can still try to sync.'
+                : 'Connect your Google Photos account to sync photos from cloud storage.'}
           </p>
 
           <div className="flex flex-wrap gap-2">
-            {!isConnected ? (
+            {!isConfigured ? (
               <Button onClick={handleConnect} loading={connecting} disabled={connecting}>
                 <Icon name="lock" className="w-4 h-4" />
                 Connect Google Photos
@@ -371,7 +373,7 @@ export default function GooglePhotosPage() {
       )}
 
       {/* How it works */}
-      {!isConnected && (
+      {!isConfigured && (
         <Card>
           <CardHeader>
             <CardTitle>How it works</CardTitle>
