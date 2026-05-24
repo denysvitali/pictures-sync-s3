@@ -292,6 +292,11 @@ on boot.
    - Set Remote Name (e.g., "b2backup") and Remote Path (e.g., "/photos")
    - Click "Test Connection" to verify
 
+4. **Google Photos (optional)**:
+   - You can sync photos from your cloud storage (B2/S3) directly to Google Photos albums
+   - This is done via native OAuth — no rclone Google Photos remote needed
+   - See [Google Photos OAuth Setup](#google-photos-oauth-setup) below
+
 ### Rclone Configuration Examples
 
 #### Backblaze B2
@@ -323,6 +328,56 @@ secret_access_key = <your_secret_key>
 endpoint = https://s3.example.com
 region = auto
 ```
+
+### Google Photos OAuth Setup
+
+This feature lets you sync **all existing photos** from your cloud storage (B2/S3/etc.)
+directly to Google Photos, organized into albums by card ID.
+
+#### 1. Create a Google Cloud OAuth App
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/) and create a project
+2. Enable the **Google Photos Library API**:
+   - APIs & Services > Library > Search "Photos Library API" > Enable
+3. Create OAuth 2.0 credentials:
+   - APIs & Services > Credentials > Create Credentials > **OAuth client ID**
+   - Application type: **Web application**
+   - Name: `Photo Backup Station`
+   - Authorized redirect URIs: add your device's callback URL(s)
+     - Local access: `http://photo-backup.local:8080/api/googlephotos/auth/callback`
+     - Tailscale access: `https://photo-backup:443/api/googlephotos/auth/callback`
+     - Add any other IPs/hostnames you use to reach the device
+   - Click **Create**
+   - Copy the **Client ID** and **Client Secret**
+
+#### 2. Configure the Device
+
+1. Open the Web UI and go to **Settings** > **Sync Settings**
+2. Enable **"Google Photos native OAuth"**
+3. Paste your **Client ID** and **Client Secret**
+4. Click **Save Settings**
+
+#### 3. Connect Your Account
+
+1. Go to the **Google Photos** tab in the Web UI
+2. Click **Connect Google Photos**
+3. A popup will open asking you to authorize the app
+4. Grant permission — the popup will close automatically
+5. Your account is now connected
+
+#### 4. Run a Sync
+
+1. Click **Sync to Google Photos**
+2. The device will:
+   - List all card folders from your B2/S3 storage
+   - Create a Google Photos album for each card (e.g. "Card abc123")
+   - Download each photo/video from B2, upload to Google Photos
+   - Add each photo to its card's album
+   - Skip RAW files automatically (.CR2, .NEF, .ARW, etc.)
+3. Monitor real-time progress on the same page
+
+**Note**: Only JPG, PNG, HEIC, MP4, MOV, and other common photo/video formats
+are uploaded. RAW files are filtered out.
 
 ## Usage
 
