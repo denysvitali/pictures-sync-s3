@@ -15,8 +15,7 @@ import (
 )
 
 const (
-	batchSize       = 50   // Google Photos batch create limit
-	uploadChunkSize = 50   // Number of files to upload before batching
+	batchSize = 50 // Google Photos batch create limit
 )
 
 // SyncManager orchestrates syncing photos from B2 to Google Photos
@@ -248,11 +247,13 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 
 		// Batch create when we reach the limit
 		if len(batch) >= batchSize {
-			if err := sm.createBatch(album.ID, batch); err != nil {
+			successCount, failCount, err := sm.createBatch(album.ID, batch)
+			if err != nil {
 				log.Printf("[GooglePhotos] Failed to create batch in album %s: %v", albumTitle, err)
-				failed += len(batch)
-				uploaded -= len(batch)
 			}
+			uploaded -= failCount
+			failed += failCount
+			_ = successCount
 			batch = batch[:0]
 
 			// Small delay to avoid rate limiting
@@ -262,11 +263,13 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 
 	// Create remaining items in batch
 	if len(batch) > 0 {
-		if err := sm.createBatch(album.ID, batch); err != nil {
+		successCount, failCount, err := sm.createBatch(album.ID, batch)
+		if err != nil {
 			log.Printf("[GooglePhotos] Failed to create final batch in album %s: %v", albumTitle, err)
-			failed += len(batch)
-			uploaded -= len(batch)
 		}
+		uploaded -= failCount
+		failed += failCount
+		_ = successCount
 	}
 
 	return uploaded, skipped, failed, nil
@@ -291,21 +294,24 @@ func (w *bytesWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// createBatch creates media items in a batch
-func (sm *SyncManager) createBatch(albumID string, items []*NewMediaItem) error {
+// createBatch creates media items in a batch and returns (successCount, failCount, error)
+func (sm *SyncManager) createBatch(albumID string, items []*NewMediaItem) (int, int, error) {
 	resp, err := sm.client.BatchCreateMediaItems(albumID, items)
 	if err != nil {
-		return err
+		return 0, len(items), err
 	}
 
-	// Check for individual failures
+	var successCount, failCount int
 	for _, result := range resp.NewMediaItemResults {
 		if result.Status != nil && result.Status.Code != 0 {
 			log.Printf("[GooglePhotos] Item creation failed: %s (code %d)", result.Status.Message, result.Status.Code)
+			failCount++
+		} else {
+			successCount++
 		}
 	}
 
-	return nil
+	return successCount, failCount, nil
 }
 
 func (sm *SyncManager) setError(err error) {
