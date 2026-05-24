@@ -343,11 +343,22 @@ func main() {
 	// against Basic Auth get throttled and locked out (50 attempts / 15 min).
 	authLimiter := ratelimit.NewLimiter(ratelimit.AuthConfig())
 
+	// OAuth callbacks arrive from external redirects (Google -> us) and cannot
+	// carry Basic Auth credentials, so we skip auth for those paths. They are
+	// secured by PKCE + state validation instead.
+	authProtected := auth.BasicAuthMiddlewareWithProvider(passwordMgr, authLimiter)(http.DefaultServeMux)
+
 	// Wrap default mux with middleware chain: security headers -> CORS -> basic auth.
 	// Security headers are applied first so they're present on all responses (including auth failures).
 	handler := auth.SecurityHeadersMiddleware(
 		auth.CORSMiddleware(allowedOrigins, true)(
-			auth.BasicAuthMiddlewareWithProvider(passwordMgr, authLimiter)(http.DefaultServeMux),
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/googlephotos/auth/callback" {
+					http.DefaultServeMux.ServeHTTP(w, r)
+					return
+				}
+				authProtected.ServeHTTP(w, r)
+			}),
 		),
 	)
 

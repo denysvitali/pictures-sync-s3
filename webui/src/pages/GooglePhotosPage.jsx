@@ -42,19 +42,22 @@ export default function GooglePhotosPage() {
   const [albumsLoading, setAlbumsLoading] = useState(false)
   const progressIntervalRef = useRef(null)
   const statusIntervalRef = useRef(null)
+  const hasLoadedStatusRef = useRef(false)
 
   const loadStatus = useCallback(async () => {
     if (!deviceUrl) return
     try {
       const data = await getGooglePhotosStatus(deviceUrl)
       setStatus(data)
+      hasLoadedStatusRef.current = true
     } catch (err) {
       // Silently fail on background status checks
-      if (!status) {
+      if (!hasLoadedStatusRef.current) {
         setStatus({ connected: false, configured: false, albums_count: 0 })
+        hasLoadedStatusRef.current = true
       }
     }
-  }, [deviceUrl, status])
+  }, [deviceUrl])
 
   const loadAlbums = useCallback(async () => {
     if (!deviceUrl) return
