@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"log"
 	"net/url"
 	"sync"
 	"time"
@@ -88,6 +89,8 @@ func (s *StateStore) StartAuth(clientID, redirectURI string) (*AuthState, string
 		url.QueryEscape(state),
 		url.QueryEscape(challenge),
 	)
+
+	log.Printf("[GooglePhotos] OAuth auth URL generated with scopes: %s", oauthScope)
 
 	return authState, authURL, nil
 }

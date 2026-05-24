@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -72,6 +73,8 @@ func (c *Client) ExchangeCode(code, redirectURI, codeVerifier string) (*OAuthTok
 	if err := json.Unmarshal(body, &tokenResp); err != nil {
 		return nil, fmt.Errorf("failed to parse token response: %w", err)
 	}
+
+	log.Printf("[GooglePhotos] Token exchanged. Granted scopes: %s", tokenResp.Scope)
 
 	token := &OAuthToken{
 		AccessToken:  tokenResp.AccessToken,

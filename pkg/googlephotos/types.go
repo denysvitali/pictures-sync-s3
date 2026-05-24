@@ -120,6 +120,7 @@ type TokenResponse struct {
 	RefreshToken string `json:"refresh_token,omitempty"`
 	TokenType    string `json:"token_type"`
 	ExpiresIn    int    `json:"expires_in"`
+	Scope        string `json:"scope,omitempty"`
 }
 
 // AuthState holds the PKCE state for OAuth flow
