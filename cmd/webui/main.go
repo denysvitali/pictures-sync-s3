@@ -215,24 +215,20 @@ func main() {
 	// Update Google Photos settings
 	syncMgr.SetGooglePhotos(appSettings.GetGooglePhotosEnabled(), appSettings.GetGooglePhotosRemoteName())
 
-	// Initialize Google Photos native OAuth (only if configured)
-	var (
-		gpClient     *googlephotos.Client
-		gpSyncMgr    *googlephotos.SyncManager
-		gpStateStore *googlephotos.StateStore
-	)
-	if appSettings.GetGooglePhotosOAuthEnabled() {
-		clientID := appSettings.GetGooglePhotosClientID()
-		clientSecret := appSettings.GetGooglePhotosClientSecret()
-		if clientID != "" && clientSecret != "" {
-			tokenStore := googlephotos.NewTokenStore("")
-			gpClient = googlephotos.NewClient(clientID, clientSecret, tokenStore)
-			gpSyncMgr = googlephotos.NewSyncManager(gpClient, syncMgr)
-			gpStateStore = googlephotos.NewStateStore()
-			log.Println("Google Photos native OAuth initialized")
-		} else {
-			log.Println("Warning: Google Photos OAuth enabled but client credentials not configured")
-		}
+	// Initialize Google Photos native OAuth. The state store is always created
+	// (it's lightweight) so OAuth can be started after settings are updated.
+	// The client is created eagerly when credentials exist at startup, and
+	// lazily via EnsureGooglePhotosClient() when they arrive later.
+	gpStateStore := googlephotos.NewStateStore()
+	var gpClient *googlephotos.Client
+	var gpSyncMgr *googlephotos.SyncManager
+	clientID := appSettings.GetGooglePhotosClientID()
+	clientSecret := appSettings.GetGooglePhotosClientSecret()
+	if clientID != "" && clientSecret != "" {
+		tokenStore := googlephotos.NewTokenStore("")
+		gpClient = googlephotos.NewClient(clientID, clientSecret, tokenStore)
+		gpSyncMgr = googlephotos.NewSyncManager(gpClient, syncMgr)
+		log.Println("Google Photos native OAuth initialized")
 	}
 
 	// Initialize WiFi manager

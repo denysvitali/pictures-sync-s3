@@ -36,6 +36,7 @@ func (ctx *Context) HandleGooglePhotosStatus(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	ctx.EnsureGooglePhotosClient()
 	if ctx.GooglePhotosClient == nil {
 		JSONResponse(w, map[string]interface{}{
 			"connected":   false,
@@ -71,6 +72,8 @@ func (ctx *Context) HandleGooglePhotosAuthStart(w http.ResponseWriter, r *http.R
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	ctx.EnsureGooglePhotosClient()
 
 	clientID := ctx.AppSettings.GetGooglePhotosClientID()
 	if clientID == "" {
@@ -147,6 +150,7 @@ func (ctx *Context) HandleGooglePhotosAuthCallback(w http.ResponseWriter, r *htt
 		return
 	}
 
+	ctx.EnsureGooglePhotosClient()
 	if ctx.GooglePhotosClient == nil {
 		http.Error(w, "Google Photos client not initialized", http.StatusInternalServerError)
 		return
@@ -187,6 +191,7 @@ func (ctx *Context) HandleGooglePhotosAuthDisconnect(w http.ResponseWriter, r *h
 		return
 	}
 
+	ctx.EnsureGooglePhotosClient()
 	if ctx.GooglePhotosClient == nil {
 		JSONResponse(w, map[string]interface{}{"disconnected": true})
 		return
@@ -209,6 +214,7 @@ func (ctx *Context) HandleGooglePhotosSync(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	ctx.EnsureGooglePhotosClient()
 	if ctx.GooglePhotosSyncMgr == nil {
 		http.Error(w, "Google Photos sync manager not initialized", http.StatusServiceUnavailable)
 		return
@@ -263,6 +269,7 @@ func (ctx *Context) HandleGooglePhotosAlbums(w http.ResponseWriter, r *http.Requ
 }
 
 func (ctx *Context) listGooglePhotosAlbums(w http.ResponseWriter, r *http.Request) {
+	ctx.EnsureGooglePhotosClient()
 	if ctx.GooglePhotosClient == nil {
 		http.Error(w, "Google Photos client not initialized", http.StatusServiceUnavailable)
 		return
@@ -286,6 +293,7 @@ func (ctx *Context) listGooglePhotosAlbums(w http.ResponseWriter, r *http.Reques
 }
 
 func (ctx *Context) createGooglePhotosAlbum(w http.ResponseWriter, r *http.Request) {
+	ctx.EnsureGooglePhotosClient()
 	if ctx.GooglePhotosClient == nil {
 		http.Error(w, "Google Photos client not initialized", http.StatusServiceUnavailable)
 		return

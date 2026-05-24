@@ -416,16 +416,19 @@ func (ctx *Context) HandleSettings(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPost:
 		var req struct {
-			RemoteName             *string  `json:"remote_name"`
-			RemotePath             *string  `json:"remote_path"`
-			ReformatThreshold      *float64 `json:"reformat_threshold"`
-			Transfers              *int     `json:"transfers"`
-			Checkers               *int     `json:"checkers"`
-			GooglePhotosEnabled    *bool    `json:"google_photos_enabled"`
-			GooglePhotos           *bool    `json:"google_photos"`
-			GooglePhotosRemoteName *string  `json:"google_photos_remote_name"`
-			Prefer5GHzWiFi         *bool    `json:"prefer_5ghz_wifi"`
-			TailscaleAuthKey       *string  `json:"tailscale_auth_key"`
+			RemoteName               *string  `json:"remote_name"`
+			RemotePath               *string  `json:"remote_path"`
+			ReformatThreshold        *float64 `json:"reformat_threshold"`
+			Transfers                *int     `json:"transfers"`
+			Checkers                 *int     `json:"checkers"`
+			GooglePhotosEnabled      *bool    `json:"google_photos_enabled"`
+			GooglePhotos             *bool    `json:"google_photos"`
+			GooglePhotosRemoteName   *string  `json:"google_photos_remote_name"`
+			GooglePhotosOAuthEnabled *bool    `json:"google_photos_oauth_enabled"`
+			GooglePhotosClientID     *string  `json:"google_photos_client_id"`
+			GooglePhotosClientSecret *string  `json:"google_photos_client_secret"`
+			Prefer5GHzWiFi           *bool    `json:"prefer_5ghz_wifi"`
+			TailscaleAuthKey         *string  `json:"tailscale_auth_key"`
 		}
 
 		r.Body = http.MaxBytesReader(w, r.Body, maxSettingsBodyBytes)
@@ -505,6 +508,28 @@ func (ctx *Context) HandleSettings(w http.ResponseWriter, r *http.Request) {
 			}
 			// Update sync manager with Google Photos settings
 			ctx.SyncMgr.SetGooglePhotos(googlePhotosEnabled, googlePhotosRemoteName)
+		}
+
+		// Update Google Photos native OAuth settings
+		if req.GooglePhotosOAuthEnabled != nil || req.GooglePhotosClientID != nil || req.GooglePhotosClientSecret != nil {
+			oauthEnabled := ctx.AppSettings.GetGooglePhotosOAuthEnabled()
+			clientID := ctx.AppSettings.GetGooglePhotosClientID()
+			clientSecret := ctx.AppSettings.GetGooglePhotosClientSecret()
+			if req.GooglePhotosOAuthEnabled != nil {
+				oauthEnabled = *req.GooglePhotosOAuthEnabled
+			}
+			if req.GooglePhotosClientID != nil {
+				clientID = *req.GooglePhotosClientID
+			}
+			if req.GooglePhotosClientSecret != nil {
+				clientSecret = *req.GooglePhotosClientSecret
+			}
+			if err := ctx.AppSettings.SetGooglePhotosOAuth(oauthEnabled, clientID, clientSecret); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			// Re-initialize Google Photos client if credentials now exist
+			ctx.EnsureGooglePhotosClient()
 		}
 
 		if req.Prefer5GHzWiFi != nil {

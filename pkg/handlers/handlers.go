@@ -22,6 +22,29 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/wifimanager"
 )
 
+// EnsureGooglePhotosClient lazily initializes the Google Photos client when
+// credentials become available after startup. It is safe to call multiple times.
+func (ctx *Context) EnsureGooglePhotosClient() {
+	if ctx.GooglePhotosClient != nil {
+		return
+	}
+	if ctx.GooglePhotosStateStore == nil {
+		return
+	}
+	clientID := ctx.AppSettings.GetGooglePhotosClientID()
+	clientSecret := ctx.AppSettings.GetGooglePhotosClientSecret()
+	if clientID == "" || clientSecret == "" {
+		return
+	}
+	tokenStore := googlephotos.NewTokenStore("")
+	client := googlephotos.NewClient(clientID, clientSecret, tokenStore)
+	ctx.GooglePhotosClient = client
+	if ctx.SyncMgr != nil {
+		ctx.GooglePhotosSyncMgr = googlephotos.NewSyncManager(client, ctx.SyncMgr)
+	}
+	log.Println("[GooglePhotos] Client initialized lazily from updated settings")
+}
+
 // SyncManager describes the sync operations used by HTTP handlers.
 type SyncManager interface {
 	IsRunning() bool
