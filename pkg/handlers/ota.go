@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -155,6 +156,8 @@ func (ctx *Context) HandleOTAStatus(w http.ResponseWriter, r *http.Request) {
 
 			response.Releases = append(response.Releases, option)
 		}
+	} else {
+		log.Printf("OTA status: failed to fetch available releases: %v", err)
 	}
 
 	httputil.JSON(w, http.StatusOK, response)

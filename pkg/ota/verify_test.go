@@ -101,7 +101,11 @@ func newOTATestServer(t *testing.T, assetBytes []byte, sidecarBody []byte) *http
 			PublishedAt: time.Now().UTC(),
 			Assets:      assets,
 		}}
-		body, err := json.Marshal(releases)
+		var response any = releases
+		if r.URL.Path == "/repos/owner/repo/releases/tags/v1.0.0" {
+			response = releases[0]
+		}
+		body, err := json.Marshal(response)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -359,7 +363,11 @@ func TestRunRejectsTruncatedDownload(t *testing.T) {
 				Size: int64(len(asset)) + 1,
 			}},
 		}}
-		body, _ := json.Marshal(releases)
+		var response any = releases
+		if r.URL.Path == "/repos/owner/repo/releases/tags/v1.0.0" {
+			response = releases[0]
+		}
+		body, _ := json.Marshal(response)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(body)
 	})

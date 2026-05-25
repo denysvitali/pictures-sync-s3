@@ -108,6 +108,103 @@ func TestLatestReleaseRejectsFlashOnlyAsset(t *testing.T) {
 	}
 }
 
+func TestSelectReleaseFetchesSpecificTagDirectly(t *testing.T) {
+	release := Release{
+		TagName:     "v2026.5.25.1222",
+		PublishedAt: time.Now().UTC(),
+		Assets: []Asset{
+			{
+				Name:               DefaultAssetName,
+				BrowserDownloadURL: "https://example.invalid/photo-backup-rpi4b-root.squashfs.gz",
+				Size:               1234,
+			},
+			{
+				Name:               DefaultAssetName + SHA256SidecarSuffix,
+				BrowserDownloadURL: "https://example.invalid/photo-backup-rpi4b-root.squashfs.gz.sha256",
+				Size:               64,
+			},
+		},
+	}
+
+	body, err := json.Marshal(release)
+	if err != nil {
+		t.Fatalf("marshal release: %v", err)
+	}
+
+	var requestedPath string
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requestedPath = req.URL.Path
+		if req.URL.Path != "/repos/owner/repo/releases/tags/v2026.5.25.1222" {
+			t.Fatalf("unexpected path: %s", req.URL.Path)
+		}
+		return jsonResponse(body), nil
+	})}
+
+	manager := &Manager{
+		Owner:      "owner",
+		Repo:       "repo",
+		APIURL:     "https://api.example.invalid",
+		AssetName:  DefaultAssetName,
+		HTTPClient: client,
+	}
+
+	gotRelease, asset, err := manager.SelectRelease(context.Background(), "v2026.5.25.1222")
+	if err != nil {
+		t.Fatalf("SelectRelease returned error: %v", err)
+	}
+	if requestedPath == "" {
+		t.Fatal("expected SelectRelease to fetch the release by tag")
+	}
+	if gotRelease.TagName != release.TagName {
+		t.Fatalf("release tag = %q, want %q", gotRelease.TagName, release.TagName)
+	}
+	if asset.Name != DefaultAssetName {
+		t.Fatalf("asset name = %q, want %q", asset.Name, DefaultAssetName)
+	}
+	if len(gotRelease.Assets) != 2 {
+		t.Fatalf("release asset count = %d, want 2", len(gotRelease.Assets))
+	}
+	if gotRelease.Assets[1].Name != DefaultAssetName+SHA256SidecarSuffix {
+		t.Fatalf("sidecar asset name = %q, want %q", gotRelease.Assets[1].Name, DefaultAssetName+SHA256SidecarSuffix)
+	}
+}
+
+func TestSelectReleaseRejectsSpecificTagWithoutRootAsset(t *testing.T) {
+	release := Release{
+		TagName:     "v2026.5.25.1222",
+		PublishedAt: time.Now().UTC(),
+		Assets: []Asset{{
+			Name:               FlashAssetName,
+			BrowserDownloadURL: "https://example.invalid/photo-backup-rpi4b.img.gz",
+		}},
+	}
+
+	body, err := json.Marshal(release)
+	if err != nil {
+		t.Fatalf("marshal release: %v", err)
+	}
+
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path != "/repos/owner/repo/releases/tags/v2026.5.25.1222" {
+			t.Fatalf("unexpected path: %s", req.URL.Path)
+		}
+		return jsonResponse(body), nil
+	})}
+
+	manager := &Manager{
+		Owner:      "owner",
+		Repo:       "repo",
+		APIURL:     "https://api.example.invalid",
+		AssetName:  DefaultAssetName,
+		HTTPClient: client,
+	}
+
+	_, _, err = manager.SelectRelease(context.Background(), "v2026.5.25.1222")
+	if err == nil {
+		t.Fatal("SelectRelease succeeded for a release without the root OTA asset")
+	}
+}
+
 func TestSubscribeReceivesStatusUpdates(t *testing.T) {
 	manager := &Manager{status: Status{State: "idle"}}
 	updates := manager.Subscribe()

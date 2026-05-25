@@ -316,7 +316,7 @@ func (m *Manager) StartWithRelease(ctx context.Context, release string) (Status,
 	m.mu.Unlock()
 	publishStatus(status, subscribers)
 
-	runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Hour)
+	runCtx, cancel := context.WithTimeout(context.Background(), time.Hour)
 	go func() {
 		defer cancel()
 		m.run(runCtx, release)
@@ -337,20 +337,36 @@ func (m *Manager) LatestRelease(ctx context.Context) (*Release, *Asset, error) {
 }
 
 func (m *Manager) SelectRelease(ctx context.Context, tag string) (*Release, *Asset, error) {
-	if strings.EqualFold(strings.TrimSpace(tag), "latest") || strings.TrimSpace(tag) == "" {
+	tag = strings.TrimSpace(tag)
+	if strings.EqualFold(tag, "latest") || tag == "" {
 		return m.LatestRelease(ctx)
 	}
 
-	releases, err := m.AvailableReleases(ctx)
+	release, err := m.ReleaseByTag(ctx, tag)
 	if err != nil {
 		return nil, nil, err
 	}
-	for i := range releases {
-		if releases[i].TagName == tag {
-			return &releases[i], &releases[i].Assets[0], nil
-		}
+	return release, &release.Assets[0], nil
+}
+
+func (m *Manager) ReleaseByTag(ctx context.Context, tag string) (*Release, error) {
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return nil, errors.New("release tag is required")
 	}
-	return nil, nil, fmt.Errorf("release %q not found", tag)
+
+	release, err := m.fetchReleaseByTag(ctx, tag)
+	if err != nil {
+		return nil, err
+	}
+	if release.Draft {
+		return nil, fmt.Errorf("release %q is a draft", tag)
+	}
+	filtered, ok := m.releaseWithInstallAsset(release)
+	if !ok {
+		return nil, fmt.Errorf("release %q does not contain %s", tag, m.assetName())
+	}
+	return &filtered, nil
 }
 
 func (m *Manager) run(ctx context.Context, releaseTag string) {
@@ -533,20 +549,11 @@ func (m *Manager) AvailableReleases(ctx context.Context) ([]Release, error) {
 		if release.Draft {
 			continue
 		}
-		asset := findAsset(release.Assets, m.assetName())
-		if asset == nil {
+		filteredRelease, ok := m.releaseWithInstallAsset(release)
+		if !ok {
 			continue
 		}
-		kept := []Asset{*asset}
-		// Retain the optional SHA256 sidecar so the installer can verify
-		// the downloaded image before applying it. The main asset must
-		// remain at index 0 — existing callers (e.g. the WebUI status
-		// handler) read release.Assets[0] as the image.
-		if sidecar := findAsset(release.Assets, m.assetName()+SHA256SidecarSuffix); sidecar != nil {
-			kept = append(kept, *sidecar)
-		}
-		release.Assets = kept
-		filtered = append(filtered, release)
+		filtered = append(filtered, filteredRelease)
 	}
 
 	if len(filtered) == 0 {
@@ -554,6 +561,24 @@ func (m *Manager) AvailableReleases(ctx context.Context) ([]Release, error) {
 	}
 
 	return filtered, nil
+}
+
+func (m *Manager) releaseWithInstallAsset(release Release) (Release, bool) {
+	asset := findAsset(release.Assets, m.assetName())
+	if asset == nil {
+		return Release{}, false
+	}
+
+	kept := []Asset{*asset}
+	// Retain the optional SHA256 sidecar so the installer can verify
+	// the downloaded image before applying it. The main asset must
+	// remain at index 0 — existing callers (e.g. the WebUI status
+	// handler) read release.Assets[0] as the image.
+	if sidecar := findAsset(release.Assets, m.assetName()+SHA256SidecarSuffix); sidecar != nil {
+		kept = append(kept, *sidecar)
+	}
+	release.Assets = kept
+	return release, true
 }
 
 func (m *Manager) ReleaseTagCommit(ctx context.Context, tag string) (string, error) {
@@ -648,6 +673,31 @@ func (m *Manager) fetchReleases(ctx context.Context) ([]Release, error) {
 		return nil, fmt.Errorf("decode GitHub releases: %w", err)
 	}
 	return releases, nil
+}
+
+func (m *Manager) fetchReleaseByTag(ctx context.Context, tag string) (Release, error) {
+	apiURL := strings.TrimRight(m.apiURL(), "/")
+	reqURL := fmt.Sprintf("%s/repos/%s/%s/releases/tags/%s", apiURL, url.PathEscape(m.owner()), url.PathEscape(m.repo()), url.PathEscape(tag))
+	req, err := m.newGitHubRequest(ctx, reqURL)
+	if err != nil {
+		return Release{}, err
+	}
+
+	resp, err := m.client().Do(req)
+	if err != nil {
+		return Release{}, fmt.Errorf("fetch GitHub release %q: %w", tag, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return Release{}, fmt.Errorf("fetch GitHub release %q: %s: %s", tag, resp.Status, strings.TrimSpace(string(body)))
+	}
+
+	var release Release
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return Release{}, fmt.Errorf("decode GitHub release %q: %w", tag, err)
+	}
+	return release, nil
 }
 
 func (m *Manager) newGitHubRequest(ctx context.Context, reqURL string) (*http.Request, error) {
