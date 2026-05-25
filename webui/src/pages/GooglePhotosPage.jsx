@@ -62,6 +62,8 @@ export default function GooglePhotosPage() {
   const [progress, setProgress] = useState(null)
   const [lastSyncResult, setLastSyncResult] = useState(null)
   const [albumsLoading, setAlbumsLoading] = useState(false)
+  const [statusError, setStatusError] = useState(null)
+  const [albumsError, setAlbumsError] = useState(null)
   const progressIntervalRef = useRef(null)
   const statusIntervalRef = useRef(null)
   const hasLoadedStatusRef = useRef(false)
@@ -71,11 +73,13 @@ export default function GooglePhotosPage() {
     try {
       const data = await getGooglePhotosStatus(deviceUrl)
       setStatus(data)
+      setStatusError(null)
       hasLoadedStatusRef.current = true
     } catch (err) {
       // Silently fail on background status checks
       if (!hasLoadedStatusRef.current) {
         setStatus({ connected: false, configured: false, albums_count: 0 })
+        setStatusError(describeError(err))
         hasLoadedStatusRef.current = true
       }
     }
@@ -84,11 +88,12 @@ export default function GooglePhotosPage() {
   const loadAlbums = useCallback(async () => {
     if (!deviceUrl) return
     setAlbumsLoading(true)
+    setAlbumsError(null)
     try {
       const data = await getGooglePhotosAlbums(deviceUrl)
       setAlbums(data?.albums || [])
     } catch (err) {
-      // Albums may fail if not connected; don't show toast
+      setAlbumsError(describeError(err))
     } finally {
       setAlbumsLoading(false)
     }
@@ -207,6 +212,8 @@ export default function GooglePhotosPage() {
       toast.success('Google Photos disconnected')
       setStatus({ connected: false, configured: false, albums_count: 0 })
       setAlbums([])
+      setAlbumsError(null)
+      setStatusError(null)
     } catch (err) {
       toast.error(`Failed to disconnect: ${describeError(err)}`)
     }
@@ -272,6 +279,12 @@ export default function GooglePhotosPage() {
                 ? 'Your Google Photos account is configured but the connection could not be verified. You can still try to sync.'
                 : 'Connect your Google Photos account to sync photos from cloud storage.'}
           </p>
+          {statusError && (
+            <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-3">
+              <p className="text-xs font-medium text-amber-300">Status check failed</p>
+              <p className="mt-1 text-xs text-amber-200">{statusError}</p>
+            </div>
+          )}
 
           <div className="flex flex-wrap gap-2">
             {!isConfigured ? (
@@ -430,9 +443,19 @@ export default function GooglePhotosPage() {
             {albumsLoading && <LoadingSpinner size="sm" />}
           </CardHeader>
           {albums.length === 0 ? (
-            <p className="text-sm text-surface-400">
-              {albumsLoading ? 'Loading albums...' : 'No albums yet. Run a sync to create albums.'}
-            </p>
+            albumsError ? (
+              <div className="rounded-lg border border-rose-500/20 bg-rose-500/10 p-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-medium text-rose-400">Album list failed</p>
+                  <CopyButton text={albumsError} />
+                </div>
+                <p className="mt-1 text-xs text-rose-300">{albumsError}</p>
+              </div>
+            ) : (
+              <p className="text-sm text-surface-400">
+                {albumsLoading ? 'Loading albums...' : 'No albums yet. Run a sync to create albums.'}
+              </p>
+            )
           ) : (
             <div className="space-y-2">
               {albums.map((album) => (

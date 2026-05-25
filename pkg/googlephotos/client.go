@@ -8,7 +8,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"strings"
 	"sync"
 	"time"
 )
@@ -219,17 +218,7 @@ func (c *Client) GetConnectionStatus() (*ConnectionStatus, error) {
 		return &ConnectionStatus{Connected: false}, nil
 	}
 
-	// Try to list albums to verify the connection works
-	albums, err := c.ListAlbums()
-	if err != nil {
-		if strings.Contains(err.Error(), "401") || strings.Contains(err.Error(), "403") {
-			return &ConnectionStatus{Connected: false}, nil
-		}
-		return nil, err
-	}
-
 	return &ConnectionStatus{
-		Connected:   true,
-		AlbumsCount: len(albums),
+		Connected: true,
 	}, nil
 }

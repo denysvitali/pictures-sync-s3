@@ -92,7 +92,7 @@ function bodyPayload(payload) {
 }
 
 export async function apiRequest(path, options = {}) {
-  const { deviceUrl, query, method = 'GET', headers = {}, body, ...fetchOptions } = options
+  const { deviceUrl, query, method = 'GET', headers = {}, body, timeoutMs = 0, ...fetchOptions } = options
 
   const resolvedBody = bodyPayload(body)
   const requestHeaders = {
@@ -102,15 +102,37 @@ export async function apiRequest(path, options = {}) {
     ...headers
   }
 
-  const response = await fetch(buildUrl(deviceUrl, path, query), {
-    method,
-    credentials: 'include',
-    ...fetchOptions,
-    headers: requestHeaders,
-    body: resolvedBody
-  })
+  let timeoutId = null
+  let controller = null
+  let signal = fetchOptions.signal
 
-  return parseResponse(response)
+  if (timeoutMs > 0) {
+    controller = new AbortController()
+    signal = controller.signal
+    timeoutId = window.setTimeout(() => controller.abort(), timeoutMs)
+  }
+
+  try {
+    const response = await fetch(buildUrl(deviceUrl, path, query), {
+      method,
+      credentials: 'include',
+      ...fetchOptions,
+      signal,
+      headers: requestHeaders,
+      body: resolvedBody
+    })
+
+    return parseResponse(response)
+  } catch (err) {
+    if (err?.name === 'AbortError' && timeoutMs > 0) {
+      throw new Error('Request timed out')
+    }
+    throw err
+  } finally {
+    if (timeoutId !== null) {
+      window.clearTimeout(timeoutId)
+    }
+  }
 }
 
 export const getStatus = (d) => apiRequest('/api/status', { deviceUrl: d })
@@ -206,7 +228,7 @@ export async function getFileViewContent(d, filePath) {
 export const getThumbnailUrl = (d, filePath) =>
   `${normalizeBaseUrl(d)}/api/thumbnail?path=${encodeURIComponent(filePath || '')}`
 
-export const getGooglePhotosStatus = (d) => apiRequest('/api/googlephotos/status', { deviceUrl: d })
+export const getGooglePhotosStatus = (d) => apiRequest('/api/googlephotos/status', { deviceUrl: d, timeoutMs: 10000 })
 export const startGooglePhotosAuth = (d, redirectUri) =>
   apiRequest('/api/googlephotos/auth/start', { deviceUrl: d, method: 'POST', body: { redirect_uri: redirectUri } })
 export const disconnectGooglePhotos = (d) =>
@@ -215,7 +237,7 @@ export const startGooglePhotosSync = (d) =>
   apiRequest('/api/googlephotos/sync', { deviceUrl: d, method: 'POST' })
 export const getGooglePhotosSyncProgress = (d) =>
   apiRequest('/api/googlephotos/sync/progress', { deviceUrl: d })
-export const getGooglePhotosAlbums = (d) => apiRequest('/api/googlephotos/albums', { deviceUrl: d })
+export const getGooglePhotosAlbums = (d) => apiRequest('/api/googlephotos/albums', { deviceUrl: d, timeoutMs: 15000 })
 export const createGooglePhotosAlbum = (d, title) =>
   apiRequest('/api/googlephotos/albums', { deviceUrl: d, method: 'POST', body: { title } })
 

@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -62,6 +63,37 @@ func TestExchangeCodeSendsCodeVerifier(t *testing.T) {
 		if got := form.Get(key); got != value {
 			t.Errorf("%s = %q, want %q", key, got, value)
 		}
+	}
+}
+
+func TestGetConnectionStatusDoesNotCallGoogle(t *testing.T) {
+	tokenStore := NewTokenStore(t.TempDir() + "/token.json")
+	if err := tokenStore.Save(&OAuthToken{
+		AccessToken:  "access",
+		RefreshToken: "refresh",
+		TokenType:    "Bearer",
+		Expiry:       time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("failed to save token: %v", err)
+	}
+
+	client := NewClient("client-id", "client-secret", tokenStore)
+	client.httpClient = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			t.Fatalf("GetConnectionStatus made an HTTP request to %s", req.URL.String())
+			return nil, nil
+		}),
+	}
+
+	status, err := client.GetConnectionStatus()
+	if err != nil {
+		t.Fatalf("GetConnectionStatus returned error: %v", err)
+	}
+	if !status.Connected {
+		t.Fatal("Connected = false, want true")
+	}
+	if status.AlbumsCount != 0 {
+		t.Errorf("AlbumsCount = %d, want 0", status.AlbumsCount)
 	}
 }
 
