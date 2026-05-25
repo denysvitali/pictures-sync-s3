@@ -64,3 +64,32 @@ func TestExchangeCodeSendsCodeVerifier(t *testing.T) {
 		}
 	}
 }
+
+func TestStartAuthRequestsCurrentGooglePhotosScopes(t *testing.T) {
+	store := NewStateStore()
+
+	_, authURL, err := store.StartAuth("client-id", "http://device.local/api/googlephotos/auth/callback")
+	if err != nil {
+		t.Fatalf("StartAuth returned error: %v", err)
+	}
+
+	parsedURL, err := url.Parse(authURL)
+	if err != nil {
+		t.Fatalf("failed to parse auth URL: %v", err)
+	}
+
+	gotScopes := strings.Fields(parsedURL.Query().Get("scope"))
+	wantScopes := []string{
+		"https://www.googleapis.com/auth/photoslibrary.readonly.appcreateddata",
+		"https://www.googleapis.com/auth/photoslibrary.appendonly",
+	}
+
+	if len(gotScopes) != len(wantScopes) {
+		t.Fatalf("scopes = %v, want %v", gotScopes, wantScopes)
+	}
+	for i, want := range wantScopes {
+		if gotScopes[i] != want {
+			t.Errorf("scope[%d] = %q, want %q", i, gotScopes[i], want)
+		}
+	}
+}
