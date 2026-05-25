@@ -50,6 +50,9 @@ function CopyButton({ text }) {
   )
 }
 
+const activeSyncStatuses = new Set(['listing_cards', 'syncing'])
+const terminalSyncStatuses = new Set(['completed', 'error', 'cancelled'])
+
 export default function GooglePhotosPage() {
   const { deviceUrl } = useDevice()
   const toast = useToast()
@@ -67,6 +70,42 @@ export default function GooglePhotosPage() {
   const progressIntervalRef = useRef(null)
   const statusIntervalRef = useRef(null)
   const hasLoadedStatusRef = useRef(false)
+
+  const applySyncProgress = useCallback((data, { preserveSyncing = false } = {}) => {
+    const syncStatus = data?.status
+
+    if (activeSyncStatuses.has(syncStatus)) {
+      setSyncing(true)
+      setProgress(data)
+      return
+    }
+
+    if (terminalSyncStatuses.has(syncStatus)) {
+      setSyncing(false)
+      setLastSyncResult(data)
+      setProgress(null)
+      return
+    }
+
+    if (preserveSyncing) {
+      return
+    }
+
+    setSyncing(false)
+    setProgress(null)
+  }, [])
+
+  const loadSyncProgress = useCallback(async (options) => {
+    if (!deviceUrl) return
+    try {
+      const data = await getGooglePhotosSyncProgress(deviceUrl)
+      applySyncProgress(data, options)
+      return data
+    } catch {
+      // Ignore progress errors; status loading will surface connection issues.
+    }
+    return null
+  }, [deviceUrl, applySyncProgress])
 
   const loadStatus = useCallback(async () => {
     if (!deviceUrl) return
@@ -101,9 +140,9 @@ export default function GooglePhotosPage() {
 
   const loadAll = useCallback(async () => {
     setLoading(true)
-    await loadStatus()
+    await Promise.all([loadStatus(), loadSyncProgress()])
     setLoading(false)
-  }, [loadStatus])
+  }, [loadStatus, loadSyncProgress])
 
   useEffect(() => {
     loadAll()
@@ -132,14 +171,9 @@ export default function GooglePhotosPage() {
     }
     // Poll progress every 2 seconds while syncing
     progressIntervalRef.current = setInterval(async () => {
-      if (!deviceUrl) return
       try {
-        const data = await getGooglePhotosSyncProgress(deviceUrl)
-        setProgress(data)
-        if (data?.status === 'completed' || data?.status === 'error' || data?.status === 'cancelled') {
-          setSyncing(false)
-          setLastSyncResult(data)
-          setProgress(null)
+        const data = await loadSyncProgress()
+        if (terminalSyncStatuses.has(data?.status)) {
           loadStatus()
           loadAlbums()
         }
@@ -148,7 +182,7 @@ export default function GooglePhotosPage() {
       }
     }, 2000)
     return () => clearInterval(progressIntervalRef.current)
-  }, [syncing, deviceUrl, loadStatus, loadAlbums])
+  }, [syncing, loadSyncProgress, loadStatus, loadAlbums])
 
   const handleConnect = useCallback(async () => {
     if (!deviceUrl) return
@@ -224,17 +258,19 @@ export default function GooglePhotosPage() {
     try {
       await startGooglePhotosSync(deviceUrl)
       setSyncing(true)
+      loadSyncProgress({ preserveSyncing: true })
       toast.success('Sync to Google Photos started')
     } catch (err) {
       const msg = describeError(err)
       if (msg.includes('already in progress')) {
         toast.info('Sync is already running')
         setSyncing(true)
+        loadSyncProgress()
       } else {
         toast.error(`Failed to start sync: ${msg}`)
       }
     }
-  }, [deviceUrl, toast])
+  }, [deviceUrl, loadSyncProgress, toast])
 
   if (loading) {
     return (
