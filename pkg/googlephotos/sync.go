@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -33,6 +34,10 @@ type SyncManagerMinimal interface {
 	ListCardIDs() ([]syncmanager.FileInfo, error)
 	ListFiles(path string) ([]syncmanager.FileInfo, error)
 	GetFile(path string, w io.Writer) error
+}
+
+type syncManagerWithDownloadTimeout interface {
+	GetFileWithTimeout(path string, w io.Writer, timeout time.Duration) error
 }
 
 // NewSyncManager creates a new sync manager for B2 to Google Photos
@@ -209,7 +214,7 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 		sm.mu.Unlock()
 
 		// Download file from B2
-		fileData, err := sm.downloadFile(file.Path)
+		fileData, fileSize, cleanup, err := sm.downloadFile(file)
 		if err != nil {
 			log.Printf("[GooglePhotos] Failed to download %s: %v", file.Path, err)
 			failed++
@@ -217,7 +222,8 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 		}
 
 		// Upload to Google Photos
-		uploadToken, err := sm.client.UploadMedia(fileData, file.Name)
+		uploadToken, err := sm.client.UploadMediaReader(fileData, fileSize, file.Name)
+		cleanup()
 		if err != nil {
 			log.Printf("[GooglePhotos] Failed to upload %s: %v", file.Name, err)
 			failed++
@@ -300,23 +306,60 @@ func (sm *SyncManager) listMediaFiles(ctx context.Context, path string) ([]syncm
 	return mediaFiles, skipped, nil
 }
 
-// downloadFile downloads a file from B2 using the sync manager
-func (sm *SyncManager) downloadFile(path string) ([]byte, error) {
-	var dataBuf []byte
-	w := &bytesWriter{data: &dataBuf}
-	if err := sm.syncMgr.GetFile(path, w); err != nil {
-		return nil, err
+// downloadFile downloads a file from B2 using the sync manager. Native Google
+// Photos sync may process large videos, so use a temp file instead of buffering
+// the whole media item in memory.
+func (sm *SyncManager) downloadFile(file syncmanager.FileInfo) (*os.File, int64, func(), error) {
+	tmp, err := os.CreateTemp("", "pictures-sync-gphotos-*"+filepath.Ext(file.Name))
+	if err != nil {
+		return nil, 0, nil, fmt.Errorf("failed to create temp file: %w", err)
 	}
-	return dataBuf, nil
+
+	cleanup := func() {
+		name := tmp.Name()
+		_ = tmp.Close()
+		_ = os.Remove(name)
+	}
+
+	timeout := googlePhotosTransferTimeout(file.Size)
+	if downloader, ok := sm.syncMgr.(syncManagerWithDownloadTimeout); ok {
+		err = downloader.GetFileWithTimeout(file.Path, tmp, timeout)
+	} else {
+		err = sm.syncMgr.GetFile(file.Path, tmp)
+	}
+	if err != nil {
+		cleanup()
+		return nil, 0, nil, err
+	}
+	info, err := tmp.Stat()
+	if err != nil {
+		cleanup()
+		return nil, 0, nil, fmt.Errorf("failed to stat temp file: %w", err)
+	}
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		cleanup()
+		return nil, 0, nil, fmt.Errorf("failed to rewind temp file: %w", err)
+	}
+	return tmp, info.Size(), cleanup, nil
 }
 
-type bytesWriter struct {
-	data *[]byte
-}
-
-func (w *bytesWriter) Write(p []byte) (int, error) {
-	*w.data = append(*w.data, p...)
-	return len(p), nil
+func googlePhotosTransferTimeout(size int64) time.Duration {
+	const (
+		minTimeout       = 5 * time.Minute
+		maxTimeout       = 2 * time.Hour
+		assumedBytesPerS = 512 * 1024
+	)
+	if size <= 0 {
+		return minTimeout
+	}
+	timeout := time.Duration(size/assumedBytesPerS) * time.Second
+	if timeout < minTimeout {
+		return minTimeout
+	}
+	if timeout > maxTimeout {
+		return maxTimeout
+	}
+	return timeout
 }
 
 // createBatch creates media items in a batch and returns (successCount, failCount, error)

@@ -10,7 +10,12 @@ import (
 
 // UploadMedia uploads media bytes to Google Photos and returns an upload token
 func (c *Client) UploadMedia(data []byte, filename string) (string, error) {
-	resp, err := c.doUploadRequest(data, filename)
+	return c.UploadMediaReader(bytes.NewReader(data), int64(len(data)), filename)
+}
+
+// UploadMediaReader uploads media from a reader to Google Photos and returns an upload token.
+func (c *Client) UploadMediaReader(r io.Reader, size int64, filename string) (string, error) {
+	resp, err := c.doUploadRequest(r, size, filename)
 	if err != nil {
 		return "", err
 	}

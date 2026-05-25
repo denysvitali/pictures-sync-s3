@@ -1,7 +1,6 @@
 package googlephotos
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -186,17 +185,20 @@ func (c *Client) doRequest(method, path string, body io.Reader) (*http.Response,
 	return c.httpClient.Do(req)
 }
 
-// doUploadRequest performs an authenticated upload request with binary data
-func (c *Client) doUploadRequest(data []byte, filename string) (*http.Response, error) {
+// doUploadRequest performs an authenticated upload request with binary data.
+func (c *Client) doUploadRequest(r io.Reader, size int64, filename string) (*http.Response, error) {
 	accessToken, err := c.getAccessToken()
 	if err != nil {
 		return nil, err
 	}
 
 	url := "https://photoslibrary.googleapis.com/v1/uploads"
-	req, err := http.NewRequest("POST", url, bytes.NewReader(data))
+	req, err := http.NewRequest("POST", url, r)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create upload request: %w", err)
+	}
+	if size >= 0 {
+		req.ContentLength = size
 	}
 
 	req.Header.Set("Authorization", "Bearer "+accessToken)
@@ -204,7 +206,9 @@ func (c *Client) doUploadRequest(data []byte, filename string) (*http.Response, 
 	req.Header.Set("X-Goog-Upload-File-Name", filename)
 	req.Header.Set("X-Goog-Upload-Protocol", "raw")
 
-	return c.httpClient.Do(req)
+	uploadClient := *c.httpClient
+	uploadClient.Timeout = googlePhotosTransferTimeout(size)
+	return uploadClient.Do(req)
 }
 
 // Disconnect removes stored tokens

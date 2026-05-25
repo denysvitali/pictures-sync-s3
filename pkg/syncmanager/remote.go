@@ -17,6 +17,7 @@ import (
 )
 
 const publicLinkExpiry = 15 * time.Minute
+const defaultFileDownloadTimeout = 60 * time.Second
 
 // FileInfo represents a file or directory on the remote
 type FileInfo struct {
@@ -309,6 +310,20 @@ func (m *Manager) ListFiles(path string) ([]FileInfo, error) {
 
 // GetFile retrieves a file from the remote and writes it to the provided writer
 func (m *Manager) GetFile(path string, w io.Writer) error {
+	return m.getFile(path, w, defaultFileDownloadTimeout)
+}
+
+// GetFileWithTimeout retrieves a file from the remote using the provided
+// timeout. It is intended for background transfers where large video files can
+// legitimately take longer than the interactive file-view timeout.
+func (m *Manager) GetFileWithTimeout(path string, w io.Writer, timeout time.Duration) error {
+	if timeout <= 0 {
+		timeout = defaultFileDownloadTimeout
+	}
+	return m.getFile(path, w, timeout)
+}
+
+func (m *Manager) getFile(path string, w io.Writer, timeout time.Duration) error {
 	// Validate path to prevent directory traversal
 	if strings.Contains(path, "..") {
 		return fmt.Errorf("invalid path: contains directory traversal")
@@ -328,8 +343,7 @@ func (m *Manager) GetFile(path string, w io.Writer) error {
 		return err
 	}
 
-	// Create context with 60 second timeout (larger files may take longer)
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	// Split path into directory and filename
@@ -388,7 +402,7 @@ func (m *Manager) GetFile(path string, w io.Writer) error {
 
 	select {
 	case <-ctx.Done():
-		return fmt.Errorf("timeout downloading file")
+		return fmt.Errorf("timeout downloading file after %s", timeout)
 	case result := <-resultChan:
 		if result.err != nil {
 			return fmt.Errorf("failed to copy file content: %w", result.err)
