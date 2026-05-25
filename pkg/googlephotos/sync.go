@@ -162,7 +162,20 @@ func (sm *SyncManager) Sync(ctx context.Context) error {
 
 // syncCard syncs all photos from a single card to Google Photos
 func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string) (uploaded, skipped, failed int, err error) {
-	// Find or create album for this card
+	// List all media in the card's DCIM directory before creating an album.
+	// Camera cards commonly store files under DCIM/100CANON, DCIM/100MSDCF, etc.
+	dcimPath := filepath.Join(cardDirName, "DCIM")
+	mediaFiles, skipped, err := sm.listMediaFiles(ctx, dcimPath)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("failed to list files: %w", err)
+	}
+
+	if len(mediaFiles) == 0 {
+		log.Printf("[GooglePhotos] No media files found in card %s", cardID)
+		return 0, skipped, 0, nil
+	}
+
+	// Find or create album for this card only after there is something to upload.
 	albumTitle := "Card " + cardID
 	album, err := sm.client.FindAlbumByTitle(albumTitle)
 	if err != nil {
@@ -175,31 +188,6 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 		if err != nil {
 			return 0, 0, 0, fmt.Errorf("failed to create album: %w", err)
 		}
-	}
-
-	// List all files in the card's DCIM directory
-	dcimPath := filepath.Join(cardDirName, "DCIM")
-	files, err := sm.syncMgr.ListFiles(dcimPath)
-	if err != nil {
-		return 0, 0, 0, fmt.Errorf("failed to list files: %w", err)
-	}
-
-	// Filter to photo/video files only (exclude RAW)
-	var mediaFiles []syncmanager.FileInfo
-	for _, f := range files {
-		if f.IsDir {
-			continue
-		}
-		if IsPhotoOrVideo(f.Name) {
-			mediaFiles = append(mediaFiles, f)
-		} else if IsRAW(f.Name) {
-			skipped++
-		}
-	}
-
-	if len(mediaFiles) == 0 {
-		log.Printf("[GooglePhotos] No media files found in card %s", cardID)
-		return 0, skipped, 0, nil
 	}
 
 	sm.mu.Lock()
@@ -273,6 +261,43 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 	}
 
 	return uploaded, skipped, failed, nil
+}
+
+func (sm *SyncManager) listMediaFiles(ctx context.Context, path string) ([]syncmanager.FileInfo, int, error) {
+	if ctx.Err() != nil {
+		return nil, 0, ctx.Err()
+	}
+
+	files, err := sm.syncMgr.ListFiles(path)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	var mediaFiles []syncmanager.FileInfo
+	var skipped int
+	for _, f := range files {
+		if ctx.Err() != nil {
+			return nil, skipped, ctx.Err()
+		}
+
+		if f.IsDir {
+			nestedMediaFiles, nestedSkipped, err := sm.listMediaFiles(ctx, f.Path)
+			skipped += nestedSkipped
+			if err != nil {
+				return nil, skipped, err
+			}
+			mediaFiles = append(mediaFiles, nestedMediaFiles...)
+			continue
+		}
+
+		if IsPhotoOrVideo(f.Name) {
+			mediaFiles = append(mediaFiles, f)
+		} else if IsRAW(f.Name) {
+			skipped++
+		}
+	}
+
+	return mediaFiles, skipped, nil
 }
 
 // downloadFile downloads a file from B2 using the sync manager
