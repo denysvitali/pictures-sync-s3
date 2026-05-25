@@ -181,7 +181,11 @@ func recoverOrphanedTempFile(pf persistedFile) error {
 // saveState persists current state to disk
 // IMPORTANT: Caller must hold at least a read lock (RLock or Lock)
 func (m *Manager) saveState() error {
-	data, err := utils.MarshalJSONIndent(m.currentState)
+	s := m.currentState
+	if s.SchemaVersion == 0 {
+		s.SchemaVersion = CurrentStateSchemaVersion
+	}
+	data, err := utils.MarshalJSONIndent(s)
 	if err != nil {
 		return err
 	}
@@ -196,6 +200,9 @@ func (m *Manager) saveState() error {
 // turn follows the in-memory commit order because each caller captured its
 // snapshot under m.mu before contending for saveMu.
 func (m *Manager) saveStateSnapshot(s CurrentState) error {
+	if s.SchemaVersion == 0 {
+		s.SchemaVersion = CurrentStateSchemaVersion
+	}
 	data, err := utils.MarshalJSONIndent(s)
 	if err != nil {
 		return err

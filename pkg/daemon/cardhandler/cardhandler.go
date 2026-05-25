@@ -44,13 +44,14 @@ const (
 
 // Handler manages SD card insertion and removal events
 type Handler struct {
-	monitor      *sdmonitor.Monitor
-	stateMgr     *state.Manager
-	syncMgr      syncManager
-	settings     *settings.Settings
-	eventMgr     *events.Manager
-	syncStartMu  sync.Mutex // Protects syncStarting flag
-	syncStarting bool       // True when a sync operation is being initiated
+	monitor       *sdmonitor.Monitor
+	stateMgr      *state.Manager
+	syncMgr       syncManager
+	settings      *settings.Settings
+	eventMgr      *events.Manager
+	syncStartMu   sync.Mutex // Protects syncStarting and activeSyncKey
+	syncStarting  bool       // True while the daemon-owned sync workflow is active
+	activeSyncKey string     // Device currently being prepared or synced
 }
 
 type syncManager interface {
@@ -94,14 +95,18 @@ func (h *Handler) HandleInserted(event sdmonitor.Event) {
 	h.syncStartMu.Lock()
 	defer h.syncStartMu.Unlock()
 
-	// Check if a sync is already running or starting
 	if h.syncMgr.IsRunning() || h.syncStarting {
-		log.Println("Sync already in progress or starting, ignoring new card insertion")
+		if h.activeSyncKey == event.DevPath {
+			log.Printf("Sync workflow already active for %s, ignoring duplicate insertion", event.DevPath)
+		} else {
+			log.Println("Sync already in progress or starting, ignoring new card insertion")
+		}
 		return
 	}
 
 	// Mark that we're starting a sync - this prevents other threads from also starting
 	h.syncStarting = true
+	h.activeSyncKey = event.DevPath
 
 	// Launch the sync operation in a goroutine
 	// The goroutine will clear syncStarting flag when sync actually starts or fails
@@ -137,6 +142,7 @@ func (h *Handler) HandleManualSync(devicePath string) error {
 	h.stateMgr.SetSDCardDevice(device)
 	h.stateMgr.SetStatus(state.StatusDetected)
 	h.syncStarting = true
+	h.activeSyncKey = device
 
 	go h.processSyncOperation(sdmonitor.Event{
 		Type:      sdmonitor.EventInserted,
@@ -154,6 +160,13 @@ func (h *Handler) HandleRemoved(event sdmonitor.Event) {
 	h.eventMgr.EmitSDCardRemoved(event.DevName)
 	h.stateMgr.SetSDCard(false, "")
 
+	h.syncStartMu.Lock()
+	startingForRemovedDevice := h.syncStarting && (h.activeSyncKey == "" || h.activeSyncKey == event.DevPath)
+	h.syncStartMu.Unlock()
+	if startingForRemovedDevice && !h.syncMgr.IsRunning() {
+		log.Println("Sync preparation interrupted by card removal")
+	}
+
 	// If we were syncing, cancel and mark as error
 	if h.syncMgr.IsRunning() {
 		log.Println("Sync interrupted by card removal, cancelling...")
@@ -168,12 +181,11 @@ func (h *Handler) HandleRemoved(event sdmonitor.Event) {
 
 // processSyncOperation handles the complete sync workflow for an inserted card
 func (h *Handler) processSyncOperation(event sdmonitor.Event) {
-	// Ensure we clear the syncStarting flag if we don't make it to actual sync
 	defer func() {
 		h.syncStartMu.Lock()
-		// Only clear if sync is not actually running (i.e., we failed before calling Sync())
-		if !h.syncMgr.IsRunning() {
+		if h.activeSyncKey == "" || h.activeSyncKey == event.DevPath {
 			h.syncStarting = false
+			h.activeSyncKey = ""
 		}
 		h.syncStartMu.Unlock()
 	}()
@@ -259,12 +271,6 @@ func (h *Handler) processSyncOperation(event sdmonitor.Event) {
 		h.stateMgr.SetStatus(state.StatusIdle)
 		return
 	}
-
-	// Clear syncStarting flag now that we're about to call performSync
-	// The syncMgr.Sync() call will set its own isRunning flag
-	h.syncStartMu.Lock()
-	h.syncStarting = false
-	h.syncStartMu.Unlock()
 
 	// Perform the sync
 	h.performSync(event.MountPath, cardID, totalFiles, totalBytes)

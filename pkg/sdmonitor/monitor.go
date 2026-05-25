@@ -19,6 +19,11 @@ const (
 	// when the event channel is full. Beyond this we drop the event rather
 	// than block the poller (and, transitively, Stop()).
 	eventSendTimeout = 2 * time.Second
+
+	// eventDebounceWindow suppresses duplicate notifications caused by noisy
+	// device settle/flap behavior while still allowing insert->remove changes
+	// to pass through immediately.
+	eventDebounceWindow = 750 * time.Millisecond
 )
 
 // Monitor monitors for SD card insertion/removal
@@ -32,6 +37,9 @@ type Monitor struct {
 	stopped       bool         // Tracks if monitor has been stopped
 	mu            sync.RWMutex // Protects lastDevice and stopped
 	mountMu       sync.Mutex   // Protects mount/unmount operations (prevents concurrent mounts)
+	eventMu       sync.Mutex
+	lastEvent     Event
+	lastEventTime time.Time
 
 	// Cache for /proc/mounts to reduce I/O
 	mountsCacheMu   sync.Mutex // Protects cachedMounts and mountsCacheTime
@@ -276,6 +284,11 @@ func (m *Monitor) checkDevices() {
 // rather than wedge the monitor. Stop() also unblocks pending sends by
 // closing stopChan and stops being a deadlock victim.
 func (m *Monitor) sendEvent(ev Event) {
+	if m.shouldDebounceEvent(ev) {
+		log.Printf("sendEvent: debounced duplicate %v event for %s", ev.Type, ev.DevName)
+		return
+	}
+
 	// Fast path: deliver immediately if buffer has room and we are not stopping.
 	select {
 	case <-m.stopChan:
@@ -298,6 +311,21 @@ func (m *Monitor) sendEvent(ev Event) {
 	case <-timer.C:
 		log.Printf("sendEvent: WARNING - event channel full, dropping %v event for %s", ev.Type, ev.DevName)
 	}
+}
+
+func (m *Monitor) shouldDebounceEvent(ev Event) bool {
+	m.eventMu.Lock()
+	defer m.eventMu.Unlock()
+
+	now := time.Now()
+	duplicate := m.lastEvent.Type == ev.Type &&
+		m.lastEvent.DevPath == ev.DevPath &&
+		m.lastEvent.MountPath == ev.MountPath &&
+		now.Sub(m.lastEventTime) < eventDebounceWindow
+
+	m.lastEvent = ev
+	m.lastEventTime = now
+	return duplicate
 }
 
 // getCachedMounts returns cached /proc/mounts content or refreshes if expired

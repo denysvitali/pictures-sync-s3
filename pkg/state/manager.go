@@ -50,8 +50,9 @@ func NewManager() (*Manager, error) {
 	// Load existing state
 	if err := m.load(); err != nil {
 		// If loading fails, start with empty state
-		m.currentState = CurrentState{Status: StatusIdle}
+		m.currentState = CurrentState{SchemaVersion: CurrentStateSchemaVersion, Status: StatusIdle}
 	}
+	m.ensureCurrentStateSchema()
 
 	// Clear any stale in-progress sync from previous crash/restart
 	if err := m.clearStaleSync(); err != nil {
@@ -73,6 +74,12 @@ func (m *Manager) load() error {
 		return err
 	}
 	return m.loadHistory()
+}
+
+func (m *Manager) ensureCurrentStateSchema() {
+	if m.currentState.SchemaVersion == 0 {
+		m.currentState.SchemaVersion = CurrentStateSchemaVersion
+	}
 }
 
 // save persists current state to disk. It acquires an RLock to safely read

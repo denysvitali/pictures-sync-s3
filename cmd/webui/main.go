@@ -37,6 +37,8 @@ import (
 // Operators can opt in to additional origins via WEBUI_ALLOWED_ORIGINS.
 const defaultAllowedOrigins = ""
 
+const apiRequestTimeout = 30 * time.Second
+
 // logConfiguredWiFiNetworks logs WiFi networks from both gokrazy and app config files
 func logConfiguredWiFiNetworks(wifiMgr *wifimanager.Manager) {
 	// Log networks from our app's config (/perm/extra-wifi.json)
@@ -361,6 +363,7 @@ func main() {
 			}),
 		),
 	)
+	handler = requestTimeoutMiddleware(apiRequestTimeout)(handler)
 
 	// Start server (HTTPS if certificates are available, HTTP for development)
 	addr := ":" + port
@@ -520,5 +523,20 @@ func serveWithShutdown(ctx context.Context, server *http.Server, serve func() er
 			return nil
 		}
 		return err
+	}
+}
+
+func requestTimeoutMiddleware(timeout time.Duration) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/ws" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			ctx, cancel := context.WithTimeout(r.Context(), timeout)
+			defer cancel()
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
 	}
 }

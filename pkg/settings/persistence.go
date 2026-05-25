@@ -56,6 +56,9 @@ func LoadFrom(path string) (*Settings, error) {
 func applyDefaults(s *Settings) {
 	defaults := DefaultSettings()
 
+	if s.SchemaVersion == 0 {
+		s.SchemaVersion = defaults.SchemaVersion
+	}
 	// Only apply defaults if field is truly missing (empty string or zero)
 	// Note: This means you cannot explicitly set these to zero/empty
 	if s.RemoteName == "" {

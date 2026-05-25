@@ -2,6 +2,8 @@ package state
 
 import "time"
 
+const CurrentStateSchemaVersion = 1
+
 // SyncStatus represents the current sync operation status
 type SyncStatus string
 
@@ -63,6 +65,7 @@ type PartitionInfo struct {
 
 // CurrentState represents the current system state
 type CurrentState struct {
+	SchemaVersion     int          `json:"schema_version"`
 	Status            SyncStatus   `json:"status"`
 	Error             string       `json:"error,omitempty"`
 	CurrentSync       *SyncRecord  `json:"current_sync,omitempty"`

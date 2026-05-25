@@ -18,6 +18,8 @@ import (
 
 // Settings represents persistent application settings
 type Settings struct {
+	SchemaVersion int `json:"schema_version"`
+
 	RemoteName string `json:"remote_name"`
 	RemotePath string `json:"remote_path"`
 
@@ -66,6 +68,7 @@ func (s *Settings) UnmarshalJSON(data []byte) error {
 	}
 
 	s.RemoteName = decoded.RemoteName
+	s.SchemaVersion = decoded.SchemaVersion
 	s.RemotePath = decoded.RemotePath
 	s.ReformatThreshold = decoded.ReformatThreshold
 	s.Transfers = decoded.Transfers
@@ -121,6 +124,8 @@ func jsonNestingDepth(data []byte) int {
 
 // Validation constants
 const (
+	SchemaVersion = 1
+
 	MinTransfers              = 1
 	MaxTransfers              = 128
 	MinCheckers               = 1
@@ -135,6 +140,7 @@ const (
 // DefaultSettings returns default settings
 func DefaultSettings() *Settings {
 	return &Settings{
+		SchemaVersion:     SchemaVersion,
 		RemoteName:        "remote",
 		RemotePath:        "/photos",
 		ReformatThreshold: 0.3, // 30%
@@ -279,6 +285,9 @@ func (s *Settings) Validate() error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
+	if s.SchemaVersion > SchemaVersion {
+		return fmt.Errorf("unsupported settings schema version %d", s.SchemaVersion)
+	}
 	if err := ValidateRemoteName(s.RemoteName); err != nil {
 		return fmt.Errorf("remote name: %w", err)
 	}
@@ -486,11 +495,12 @@ func (s *Settings) ToJSON() map[string]any {
 	defer s.mu.RUnlock()
 
 	return map[string]any{
-		"remote_name":               s.RemoteName,
-		"remote_path":               s.RemotePath,
-		"reformat_threshold":        s.ReformatThreshold,
-		"transfers":                 s.Transfers,
-		"checkers":                  s.Checkers,
+		"schema_version":              s.SchemaVersion,
+		"remote_name":                 s.RemoteName,
+		"remote_path":                 s.RemotePath,
+		"reformat_threshold":          s.ReformatThreshold,
+		"transfers":                   s.Transfers,
+		"checkers":                    s.Checkers,
 		"google_photos_enabled":       s.GooglePhotosEnabled,
 		"google_photos_remote_name":   s.GooglePhotosRemoteName,
 		"google_photos_client_id":     s.GooglePhotosClientID,
