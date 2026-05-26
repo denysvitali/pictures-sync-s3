@@ -14,8 +14,9 @@ import (
 	_ "github.com/rclone/rclone/backend/azureblob" // Azure Blob Storage
 	_ "github.com/rclone/rclone/backend/b2"        // Backblaze B2
 	_ "github.com/rclone/rclone/backend/drive"     // Google Drive (for Google Photos)
-	_ "github.com/rclone/rclone/backend/local"     // Local filesystem (useful for testing)
-	_ "github.com/rclone/rclone/backend/s3"        // Amazon S3, Wasabi, etc.
+	_ "github.com/rclone/rclone/backend/googlephotos"
+	_ "github.com/rclone/rclone/backend/local" // Local filesystem (useful for testing)
+	_ "github.com/rclone/rclone/backend/s3"    // Amazon S3, Wasabi, etc.
 )
 
 // Manager manages rclone sync operations

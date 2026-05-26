@@ -140,7 +140,7 @@ func (m *Manager) SyncCardsToGooglePhotos(ctx context.Context) error {
 		}
 
 		srcPath := filepath.Join(m.remoteName+":"+m.remotePath, card.Name, "DCIM")
-		dstPath := m.googlePhotosRemoteName + ":album/" + card.Name
+		dstPath := gpRemote + ":album/" + card.Name
 
 		log.Printf("Google Photos sync: card %d/%d (%s) — %s → %s", i+1, len(cards), card.Name, srcPath, dstPath)
 		m.setGooglePhotosProgress(Progress{
