@@ -41,6 +41,19 @@ type syncManagerWithDownloadTimeout interface {
 	GetFileWithTimeout(path string, w io.Writer, timeout time.Duration) error
 }
 
+type mediaUploadResult struct {
+	file syncmanager.FileInfo
+	item *NewMediaItem
+	err  error
+	ack  chan struct{}
+}
+
+func (r mediaUploadResult) done() {
+	if r.ack != nil {
+		close(r.ack)
+	}
+}
+
 type progressReader struct {
 	reader    io.Reader
 	onRead    func(int64)
@@ -254,81 +267,49 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 
 	log.Printf("[GooglePhotos] Syncing %d files from card %s to album %s", len(mediaFiles), cardID, albumTitle)
 
-	// Process files in batches
 	var batch []*NewMediaItem
-	for fileIndex, file := range mediaFiles {
+	for result := range sm.uploadMediaItems(ctx, cardID, mediaFiles) {
+		if result.err != nil {
+			log.Printf("[GooglePhotos] Failed to upload %s: %v", result.file.Name, result.err)
+			failed++
+			sm.finishFileProgress(result.file.Size, uploaded, skipped, failed)
+			result.done()
+			continue
+		}
+
+		batch = append(batch, result.item)
+		uploaded++
+		sm.finishFileProgress(result.file.Size, uploaded, skipped, failed)
+		sm.setBatchPending(len(batch))
+		result.done()
+
 		if ctx.Err() != nil {
 			return uploaded, skipped, failed, ctx.Err()
 		}
 
-		sm.mu.Lock()
-		sm.progress.CurrentFile = file.Name
-		sm.progress.CurrentFilePath = file.Path
-		sm.progress.CurrentFileSize = file.Size
-		sm.progress.CurrentFileIndex = fileIndex + 1
-		sm.progress.CurrentFileBytesUploaded = 0
-		sm.progress.CurrentFilePercent = 0
-		sm.progress.CurrentPhase = "Downloading"
-		sm.progress.UpdatedAt = timePtr(time.Now())
-		sm.mu.Unlock()
-
-		log.Printf("[GooglePhotos] Uploading file %d/%d from card %s: %s (%d bytes)", fileIndex+1, len(mediaFiles), cardID, file.Path, file.Size)
-
-		// Download file from B2
-		fileData, fileSize, cleanup, err := sm.downloadFile(file)
-		if err != nil {
-			log.Printf("[GooglePhotos] Failed to download %s: %v", file.Path, err)
-			failed++
-			sm.finishFileProgress(file.Size, uploaded, skipped, failed)
+		if len(batch) < batchSize {
 			continue
 		}
 
-		// Upload to Google Photos
-		sm.setUploadProgress(file.Name, file.Path, file.Size, 0)
-		uploadReader := &progressReader{
-			reader: fileData,
-			onRead: func(uploadedBytes int64) {
-				sm.setUploadProgress(file.Name, file.Path, file.Size, uploadedBytes)
-			},
-		}
-		uploadToken, err := sm.client.UploadMediaReader(uploadReader, fileSize, file.Name)
-		cleanup()
+		sm.setPhase("Adding to album")
+		successCount, failCount, err := sm.createBatch(album.ID, batch)
 		if err != nil {
-			log.Printf("[GooglePhotos] Failed to upload %s: %v", file.Name, err)
-			failed++
-			sm.finishFileProgress(file.Size, uploaded, skipped, failed)
-			continue
+			log.Printf("[GooglePhotos] Failed to create batch in album %s: %v", albumTitle, err)
 		}
+		log.Printf("[GooglePhotos] Created media items in album %s: success=%d failed=%d", albumTitle, successCount, failCount)
+		uploaded -= failCount
+		failed += failCount
+		_ = successCount
+		batch = batch[:0]
+		sm.setCounts(uploaded, skipped, failed)
+		sm.setBatchPending(0)
 
-		batch = append(batch, &NewMediaItem{
-			SimpleMediaItem: &SimpleMediaItem{
-				UploadToken: uploadToken,
-				FileName:    file.Name,
-			},
-		})
+		// Small delay to avoid rate limiting
+		time.Sleep(100 * time.Millisecond)
+	}
 
-		uploaded++
-		sm.finishFileProgress(file.Size, uploaded, skipped, failed)
-		sm.setBatchPending(len(batch))
-
-		// Batch create when we reach the limit
-		if len(batch) >= batchSize {
-			sm.setPhase("Adding to album")
-			successCount, failCount, err := sm.createBatch(album.ID, batch)
-			if err != nil {
-				log.Printf("[GooglePhotos] Failed to create batch in album %s: %v", albumTitle, err)
-			}
-			log.Printf("[GooglePhotos] Created media items in album %s: success=%d failed=%d", albumTitle, successCount, failCount)
-			uploaded -= failCount
-			failed += failCount
-			_ = successCount
-			batch = batch[:0]
-			sm.setCounts(uploaded, skipped, failed)
-			sm.setBatchPending(0)
-
-			// Small delay to avoid rate limiting
-			time.Sleep(100 * time.Millisecond)
-		}
+	if ctx.Err() != nil {
+		return uploaded, skipped, failed, ctx.Err()
 	}
 
 	// Create remaining items in batch
@@ -347,6 +328,78 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 	}
 
 	return uploaded, skipped, failed, nil
+}
+
+func (sm *SyncManager) uploadMediaItems(ctx context.Context, cardID string, mediaFiles []syncmanager.FileInfo) <-chan mediaUploadResult {
+	results := make(chan mediaUploadResult)
+	go func() {
+		defer close(results)
+		for fileIndex, file := range mediaFiles {
+			if ctx.Err() != nil {
+				return
+			}
+
+			sm.mu.Lock()
+			sm.progress.CurrentFile = file.Name
+			sm.progress.CurrentFilePath = file.Path
+			sm.progress.CurrentFileSize = file.Size
+			sm.progress.CurrentFileIndex = fileIndex + 1
+			sm.progress.CurrentFileBytesUploaded = 0
+			sm.progress.CurrentFilePercent = 0
+			sm.progress.CurrentPhase = "Downloading"
+			sm.progress.UpdatedAt = timePtr(time.Now())
+			sm.mu.Unlock()
+
+			log.Printf("[GooglePhotos] Uploading file %d/%d from card %s: %s (%d bytes)", fileIndex+1, len(mediaFiles), cardID, file.Path, file.Size)
+
+			item, err := sm.uploadMediaItem(file)
+			result := mediaUploadResult{
+				file: file,
+				item: item,
+				err:  err,
+				ack:  make(chan struct{}),
+			}
+			select {
+			case results <- result:
+			case <-ctx.Done():
+				return
+			}
+
+			select {
+			case <-result.ack:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return results
+}
+
+func (sm *SyncManager) uploadMediaItem(file syncmanager.FileInfo) (*NewMediaItem, error) {
+	fileData, fileSize, cleanup, err := sm.downloadFile(file)
+	if err != nil {
+		return nil, fmt.Errorf("download %s: %w", file.Path, err)
+	}
+	defer cleanup()
+
+	sm.setUploadProgress(file.Name, file.Path, file.Size, 0)
+	uploadReader := &progressReader{
+		reader: fileData,
+		onRead: func(uploadedBytes int64) {
+			sm.setUploadProgress(file.Name, file.Path, file.Size, uploadedBytes)
+		},
+	}
+	uploadToken, err := sm.client.UploadMediaReader(uploadReader, fileSize, file.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	return &NewMediaItem{
+		SimpleMediaItem: &SimpleMediaItem{
+			UploadToken: uploadToken,
+			FileName:    file.Name,
+		},
+	}, nil
 }
 
 func (sm *SyncManager) listMediaFiles(ctx context.Context, path string) ([]syncmanager.FileInfo, int, error) {
