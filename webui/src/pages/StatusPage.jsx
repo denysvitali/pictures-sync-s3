@@ -583,17 +583,22 @@ function SyncHistoryCard({ history }) {
 }
 
 function PanicInfoCard({ panicInfo, onClear, clearing }) {
-  if (!panicInfo?.exists || !panicInfo?.panic) return null
+  const records = Array.isArray(panicInfo?.panics)
+    ? panicInfo.panics
+    : (panicInfo?.panic ? [panicInfo.panic] : [])
+  if (!panicInfo?.exists || records.length === 0) return null
 
-  const record = panicInfo.panic
-  const occurredAt = record.time ? new Date(record.time).toLocaleString() : 'Unknown time'
+  const title = records.length === 1 ? 'Saved Panic' : 'Saved Panics'
 
   return (
     <Card>
       <CardHeader>
         <div className="flex items-center gap-2">
           <Icon name="exclamation-triangle" className="w-5 h-5 text-danger" />
-          <CardTitle>Saved Panic</CardTitle>
+          <CardTitle>{title}</CardTitle>
+          <span className="rounded-full bg-danger/10 px-2 py-0.5 text-xs font-medium text-danger">
+            {records.length}
+          </span>
         </div>
         <Button
           variant="secondary"
@@ -607,27 +612,37 @@ function PanicInfoCard({ panicInfo, onClear, clearing }) {
         </Button>
       </CardHeader>
 
-      <div className="space-y-3">
-        <div className="grid gap-2 text-xs text-surface-400 sm:grid-cols-2">
-          <div>
-            <p className="text-surface-500">Time</p>
-            <p className="font-medium text-surface-200">{occurredAt}</p>
-          </div>
-          <div>
-            <p className="text-surface-500">Source</p>
-            <p className="font-medium text-surface-200">{record.source || '--'}</p>
-          </div>
-        </div>
+      <div className="space-y-4">
+        {records.map((record, index) => {
+          const occurredAt = record.time ? new Date(record.time).toLocaleString() : 'Unknown time'
+          return (
+            <div
+              key={`${record.time || 'unknown'}-${record.source || 'panic'}-${index}`}
+              className="space-y-3 border-t border-surface-700/60 pt-4 first:border-t-0 first:pt-0"
+            >
+              <div className="grid gap-2 text-xs text-surface-400 sm:grid-cols-2">
+                <div>
+                  <p className="text-surface-500">Time</p>
+                  <p className="font-medium text-surface-200">{occurredAt}</p>
+                </div>
+                <div>
+                  <p className="text-surface-500">Source</p>
+                  <p className="font-medium text-surface-200">{record.source || '--'}</p>
+                </div>
+              </div>
 
-        <div className="rounded-lg border border-danger/25 bg-danger/10 p-3">
-          <p className="text-sm font-medium text-danger break-words">{record.message || 'panic'}</p>
-        </div>
+              <div className="rounded-lg border border-danger/25 bg-danger/10 p-3">
+                <p className="text-sm font-medium text-danger break-words">{record.message || 'panic'}</p>
+              </div>
 
-        {record.stack && (
-          <pre className="max-h-64 overflow-auto rounded-lg border border-surface-700 bg-surface-950 p-3 text-xs leading-relaxed text-surface-300">
-            {record.stack}
-          </pre>
-        )}
+              {record.stack && (
+                <pre className="max-h-64 overflow-auto rounded-lg border border-surface-700 bg-surface-950 p-3 text-xs leading-relaxed text-surface-300">
+                  {record.stack}
+                </pre>
+              )}
+            </div>
+          )
+        })}
       </div>
     </Card>
   )
@@ -979,7 +994,7 @@ export default function StatusPage() {
     setPanicClearLoading(true)
     try {
       await clearSystemPanic(deviceUrl)
-      setPanicInfo({ exists: false })
+      setPanicInfo({ exists: false, panics: [] })
       toast.success('Saved panic information cleared')
     } catch (err) {
       toast.error(`Failed to clear panic information: ${describeError(err)}`)

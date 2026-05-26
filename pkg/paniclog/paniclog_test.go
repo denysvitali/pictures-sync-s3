@@ -45,6 +45,36 @@ func TestCaptureReadAndClear(t *testing.T) {
 	}
 }
 
+func TestCaptureAppendsPanicHistory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "webui-panic.json")
+
+	if err := Capture(path, "first-source", "first"); err != nil {
+		t.Fatalf("first Capture() error = %v", err)
+	}
+	if err := Capture(path, "second-source", "second"); err != nil {
+		t.Fatalf("second Capture() error = %v", err)
+	}
+
+	records, err := ReadAll(path)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("ReadAll() len = %d, want 2", len(records))
+	}
+	if records[0].Message != "first" || records[1].Message != "second" {
+		t.Fatalf("records = %#v, want append order", records)
+	}
+
+	latest, err := Read(path)
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if latest == nil || latest.Message != "second" {
+		t.Fatalf("Read() = %#v, want second record", latest)
+	}
+}
+
 func TestReadStoredReturnsRawCrashOutput(t *testing.T) {
 	dir := t.TempDir()
 	crashPath := filepath.Join(dir, "webui-panic.log")
@@ -68,6 +98,27 @@ func TestReadStoredReturnsRawCrashOutput(t *testing.T) {
 	}
 	if !record.Raw {
 		t.Fatal("Raw = false, want true")
+	}
+}
+
+func TestReadAllStoredReturnsMultipleCrashRecords(t *testing.T) {
+	dir := t.TempDir()
+	crashPath := filepath.Join(dir, "webui-panic.log")
+
+	raw := "panic: first crash\n\ngoroutine 7 [running]:\n\npanic: second crash\n\ngoroutine 8 [running]:\n"
+	if err := os.WriteFile(crashPath, []byte(raw), 0600); err != nil {
+		t.Fatalf("write crash output: %v", err)
+	}
+
+	records, err := ReadAllStored(filepath.Join(dir, "missing.json"), crashPath)
+	if err != nil {
+		t.Fatalf("ReadAllStored() error = %v", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("ReadAllStored() len = %d, want 2", len(records))
+	}
+	if records[0].Message != "panic: first crash" || records[1].Message != "panic: second crash" {
+		t.Fatalf("records = %#v, want both crash records", records)
 	}
 }
 

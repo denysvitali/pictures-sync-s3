@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"time"
 
@@ -23,6 +24,10 @@ type Record struct {
 	Raw     bool   `json:"raw,omitempty"`
 }
 
+type Store struct {
+	Panics []Record `json:"panics"`
+}
+
 func Capture(path, source string, recovered any) error {
 	if path == "" {
 		path = DefaultPath
@@ -33,7 +38,7 @@ func Capture(path, source string, recovered any) error {
 		Message: fmt.Sprint(recovered),
 		Stack:   string(debug.Stack()),
 	}
-	return Write(path, record)
+	return Append(path, record)
 }
 
 func Write(path string, record Record) error {
@@ -43,6 +48,30 @@ func Write(path string, record Record) error {
 	data, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal panic record: %w", err)
+	}
+	data = append(data, '\n')
+	return utils.AtomicWrite(path, data, 0600)
+}
+
+func Append(path string, record Record) error {
+	if path == "" {
+		path = DefaultPath
+	}
+	records, err := ReadAll(path)
+	if err != nil {
+		return err
+	}
+	records = append(records, record)
+	return writeAll(path, records)
+}
+
+func writeAll(path string, records []Record) error {
+	if path == "" {
+		path = DefaultPath
+	}
+	data, err := json.MarshalIndent(Store{Panics: records}, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal panic records: %w", err)
 	}
 	data = append(data, '\n')
 	return utils.AtomicWrite(path, data, 0600)
@@ -66,31 +95,28 @@ func ConfigureCrashOutput(path string) error {
 }
 
 func Read(path string) (*Record, error) {
-	return readJSON(path)
+	records, err := ReadAll(path)
+	if err != nil {
+		return nil, err
+	}
+	if len(records) == 0 {
+		return nil, nil
+	}
+	return &records[len(records)-1], nil
 }
 
 func ReadStored(recordPath, crashPath string) (*Record, error) {
-	record, recordErr := readJSON(recordPath)
-	crash, crashErr := readCrash(crashPath)
-	if recordErr != nil {
-		return nil, recordErr
+	records, err := ReadAllStored(recordPath, crashPath)
+	if err != nil {
+		return nil, err
 	}
-	if crashErr != nil {
-		return nil, crashErr
+	if len(records) == 0 {
+		return nil, nil
 	}
-	if record == nil {
-		return crash, nil
-	}
-	if crash == nil {
-		return record, nil
-	}
-	if crash.Time > record.Time {
-		return crash, nil
-	}
-	return record, nil
+	return &records[0], nil
 }
 
-func readJSON(path string) (*Record, error) {
+func ReadAll(path string) ([]Record, error) {
 	if path == "" {
 		path = DefaultPath
 	}
@@ -102,14 +128,42 @@ func readJSON(path string) (*Record, error) {
 		return nil, fmt.Errorf("read panic record: %w", err)
 	}
 
+	var store Store
+	if err := json.Unmarshal(data, &store); err == nil && store.Panics != nil {
+		return store.Panics, nil
+	}
+
+	var records []Record
+	if err := json.Unmarshal(data, &records); err == nil {
+		return records, nil
+	}
+
 	var record Record
 	if err := json.Unmarshal(data, &record); err != nil {
 		return nil, fmt.Errorf("parse panic record: %w", err)
 	}
-	return &record, nil
+	return []Record{record}, nil
 }
 
-func readCrash(path string) (*Record, error) {
+func ReadAllStored(recordPath, crashPath string) ([]Record, error) {
+	records, recordErr := ReadAll(recordPath)
+	crashes, crashErr := readCrashRecords(crashPath)
+	if recordErr != nil {
+		return nil, recordErr
+	}
+	if crashErr != nil {
+		return nil, crashErr
+	}
+
+	all := append([]Record{}, records...)
+	all = append(all, crashes...)
+	sort.SliceStable(all, func(i, j int) bool {
+		return all[i].Time > all[j].Time
+	})
+	return all, nil
+}
+
+func readCrashRecords(path string) ([]Record, error) {
 	if path == "" {
 		path = DefaultCrashPath
 	}
@@ -128,14 +182,45 @@ func readCrash(path string) (*Record, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read crash output: %w", err)
 	}
-	raw := string(data)
-	return &Record{
-		Time:    info.ModTime().UTC().Format(time.RFC3339Nano),
-		Source:  "webui-crash",
-		Message: crashMessage(raw),
-		Stack:   raw,
-		Raw:     true,
-	}, nil
+	return crashRecords(string(data), info.ModTime().UTC().Format(time.RFC3339Nano)), nil
+}
+
+func crashRecords(raw, timestamp string) []Record {
+	chunks := splitCrashLog(raw)
+	records := make([]Record, 0, len(chunks))
+	for _, chunk := range chunks {
+		chunk = strings.TrimSpace(chunk)
+		if chunk == "" {
+			continue
+		}
+		records = append(records, Record{
+			Time:    timestamp,
+			Source:  "webui-crash",
+			Message: crashMessage(chunk),
+			Stack:   chunk,
+			Raw:     true,
+		})
+	}
+	return records
+}
+
+func splitCrashLog(raw string) []string {
+	lines := strings.Split(raw, "\n")
+	var chunks []string
+	var current []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		startsCrash := strings.HasPrefix(trimmed, "panic: ") || strings.HasPrefix(trimmed, "fatal error: ")
+		if startsCrash && len(current) > 0 {
+			chunks = append(chunks, strings.Join(current, "\n"))
+			current = nil
+		}
+		current = append(current, line)
+	}
+	if len(current) > 0 {
+		chunks = append(chunks, strings.Join(current, "\n"))
+	}
+	return chunks
 }
 
 func crashMessage(raw string) string {

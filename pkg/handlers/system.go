@@ -97,20 +97,22 @@ func (ctx *Context) HandleSystemTLSCertificate(w http.ResponseWriter, r *http.Re
 func (ctx *Context) HandleSystemPanic(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		record, err := paniclog.ReadStored(panicLogPath, panicCrashPath)
+		records, err := paniclog.ReadAllStored(panicLogPath, panicCrashPath)
 		if err != nil {
 			httputil.Error(w, http.StatusInternalServerError, fmt.Sprintf("Failed to read panic information: %v", err))
 			return
 		}
-		if record == nil {
+		if len(records) == 0 {
 			httputil.JSON(w, http.StatusOK, map[string]any{
 				"exists": false,
+				"panics": []paniclog.Record{},
 			})
 			return
 		}
 		httputil.JSON(w, http.StatusOK, map[string]any{
 			"exists": true,
-			"panic":  record,
+			"panic":  records[0],
+			"panics": records,
 		})
 	case http.MethodDelete:
 		if err := paniclog.ClearStored(panicLogPath, panicCrashPath); err != nil {

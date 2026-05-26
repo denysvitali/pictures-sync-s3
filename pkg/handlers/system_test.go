@@ -132,7 +132,8 @@ func TestHandleSystemPanicReadsAndClearsRecord(t *testing.T) {
 		t.Fatalf("initial GET status = %d, want %d; body: %s", rr.Code, http.StatusOK, rr.Body.String())
 	}
 	var initial struct {
-		Exists bool `json:"exists"`
+		Exists bool              `json:"exists"`
+		Panics []paniclog.Record `json:"panics"`
 	}
 	if err := json.NewDecoder(rr.Body).Decode(&initial); err != nil {
 		t.Fatalf("Decode initial response: %v", err)
@@ -140,14 +141,25 @@ func TestHandleSystemPanicReadsAndClearsRecord(t *testing.T) {
 	if initial.Exists {
 		t.Fatal("initial exists = true, want false")
 	}
+	if len(initial.Panics) != 0 {
+		t.Fatalf("initial panics len = %d, want 0", len(initial.Panics))
+	}
 
-	if err := paniclog.Write(panicLogPath, paniclog.Record{
+	if err := paniclog.Append(panicLogPath, paniclog.Record{
 		Time:    "2026-05-26T00:00:00Z",
 		Source:  "webui-http",
-		Message: "boom",
+		Message: "first boom",
 		Stack:   "stack",
 	}); err != nil {
-		t.Fatalf("write panic record: %v", err)
+		t.Fatalf("write first panic record: %v", err)
+	}
+	if err := paniclog.Append(panicLogPath, paniclog.Record{
+		Time:    "2026-05-26T00:00:01Z",
+		Source:  "webui-http",
+		Message: "second boom",
+		Stack:   "stack",
+	}); err != nil {
+		t.Fatalf("write second panic record: %v", err)
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/system/panic", nil)
@@ -159,14 +171,18 @@ func TestHandleSystemPanicReadsAndClearsRecord(t *testing.T) {
 		t.Fatalf("GET status = %d, want %d; body: %s", rr.Code, http.StatusOK, rr.Body.String())
 	}
 	var got struct {
-		Exists bool             `json:"exists"`
-		Panic  *paniclog.Record `json:"panic"`
+		Exists bool              `json:"exists"`
+		Panic  *paniclog.Record  `json:"panic"`
+		Panics []paniclog.Record `json:"panics"`
 	}
 	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
 		t.Fatalf("Decode response: %v", err)
 	}
-	if !got.Exists || got.Panic == nil || got.Panic.Message != "boom" {
+	if !got.Exists || got.Panic == nil || got.Panic.Message != "second boom" {
 		t.Fatalf("unexpected panic response: %+v", got)
+	}
+	if len(got.Panics) != 2 {
+		t.Fatalf("panics len = %d, want 2", len(got.Panics))
 	}
 
 	req = httptest.NewRequest(http.MethodDelete, "/api/system/panic", nil)
