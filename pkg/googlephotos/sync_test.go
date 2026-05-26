@@ -350,6 +350,83 @@ func TestSyncCardUploadsMediaInParallelAndAddsAlbumInModTimeOrder(t *testing.T) 
 	}
 }
 
+func TestSyncCardCreatesMultipleBatchesBeyondGoogleLimit(t *testing.T) {
+	const fileCount = 72
+	files := make([]syncmanager.FileInfo, 0, fileCount)
+	contents := make(map[string]string, fileCount)
+	for i := 0; i < fileCount; i++ {
+		name := fmt.Sprintf("IMG_%04d.JPG", i+1)
+		path := "card-many/DCIM/" + name
+		files = append(files, syncmanager.FileInfo{
+			Name:    name,
+			Path:    path,
+			Size:    int64(len(name)),
+			ModTime: time.Date(2026, 1, 2, 9, i, 0, 0, time.UTC),
+		})
+		contents[path] = "jpeg " + name
+	}
+
+	remote := &fakeRemoteSyncManager{
+		files: map[string][]syncmanager.FileInfo{
+			"card-many/DCIM": files,
+		},
+		contents: contents,
+	}
+
+	var batchSizes []int
+	client := newTestClient(t, func(req *http.Request) (*http.Response, error) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/albums":
+			return jsonResponse(http.StatusOK, `{}`), nil
+		case req.Method == http.MethodPost && req.URL.Path == "/v1/albums":
+			return jsonResponse(http.StatusOK, `{"id":"album-1","title":"Card many"}`), nil
+		case req.Method == http.MethodPost && req.URL.Path == "/v1/uploads":
+			return textResponse(http.StatusOK, "upload-token-"+req.Header.Get("X-Goog-Upload-File-Name")), nil
+		case req.Method == http.MethodPost && req.URL.Path == "/v1/mediaItems:batchCreate":
+			var batch BatchCreateRequest
+			if err := json.NewDecoder(req.Body).Decode(&batch); err != nil {
+				t.Fatalf("failed to decode batch create request: %v", err)
+			}
+			if len(batch.NewMediaItems) > 50 {
+				t.Fatalf("batch size = %d, Google Photos maximum is 50", len(batch.NewMediaItems))
+			}
+			batchSizes = append(batchSizes, len(batch.NewMediaItems))
+			results := make([]map[string]any, len(batch.NewMediaItems))
+			for i := range results {
+				results[i] = map[string]any{"status": map[string]any{"code": 0}}
+			}
+			body, err := json.Marshal(map[string]any{"newMediaItemResults": results})
+			if err != nil {
+				t.Fatalf("failed to marshal batch response: %v", err)
+			}
+			return jsonResponse(http.StatusOK, string(body)), nil
+		default:
+			t.Fatalf("unexpected Google Photos request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	})
+
+	manager := NewSyncManager(client, remote)
+	manager.progress = &SyncProgress{}
+	uploaded, skipped, failed, err := manager.syncCard(context.Background(), "many", "card-many")
+	if err != nil {
+		t.Fatalf("syncCard returned error: %v", err)
+	}
+	if uploaded != fileCount || skipped != 0 || failed != 0 {
+		t.Fatalf("syncCard counts = uploaded %d skipped %d failed %d, want %d 0 0", uploaded, skipped, failed, fileCount)
+	}
+	if len(batchSizes) < 2 {
+		t.Fatalf("batchCreate calls = %d, want multiple calls for %d files", len(batchSizes), fileCount)
+	}
+	total := 0
+	for _, size := range batchSizes {
+		total += size
+	}
+	if total != fileCount {
+		t.Fatalf("total batch items = %d, want %d (batch sizes %v)", total, fileCount, batchSizes)
+	}
+}
+
 func TestSortMediaForUploadUsesModTime(t *testing.T) {
 	oldest := time.Date(2026, 1, 2, 9, 0, 0, 0, time.UTC)
 	middle := time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC)
