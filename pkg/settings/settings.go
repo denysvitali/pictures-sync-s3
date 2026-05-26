@@ -34,6 +34,11 @@ type Settings struct {
 	GooglePhotosEnabled    bool   `json:"google_photos_enabled"`     // Enable uploading JPG files to Google Photos
 	GooglePhotosRemoteName string `json:"google_photos_remote_name"` // Google Photos rclone remote name
 
+	// Google Photos OAuth credentials (for automatic rclone remote setup)
+	GooglePhotosOAuthEnabled bool   `json:"google_photos_oauth_enabled"` // Enable native OAuth flow for Google Photos
+	GooglePhotosClientID     string `json:"google_photos_client_id"`     // Google Photos OAuth client ID
+	GooglePhotosClientSecret string `json:"google_photos_client_secret"` // Google Photos OAuth client secret
+
 	// WiFi scan behavior
 	Prefer5GHzWiFi bool `json:"prefer_5ghz_wifi"` // Prefer 5 GHz APs when duplicate SSIDs are found
 
@@ -70,6 +75,9 @@ func (s *Settings) UnmarshalJSON(data []byte) error {
 	s.Checkers = decoded.Checkers
 	s.GooglePhotosEnabled = decoded.GooglePhotosEnabled
 	s.GooglePhotosRemoteName = decoded.GooglePhotosRemoteName
+	s.GooglePhotosOAuthEnabled = decoded.GooglePhotosOAuthEnabled
+	s.GooglePhotosClientID = decoded.GooglePhotosClientID
+	s.GooglePhotosClientSecret = decoded.GooglePhotosClientSecret
 	s.Prefer5GHzWiFi = decoded.Prefer5GHzWiFi
 	if _, ok := raw["prefer_5ghz_wifi"]; !ok {
 		s.Prefer5GHzWiFi = true
@@ -239,6 +247,28 @@ func ValidateGooglePhotos(enabled bool, remoteName string) error {
 	return nil
 }
 
+// ValidateGooglePhotosClientID validates a Google Photos OAuth client ID
+func ValidateGooglePhotosClientID(id string) error {
+	if id == "" {
+		return nil // empty is valid (optional)
+	}
+	if strings.ContainsAny(id, "\x00\r\n\t ") {
+		return errors.New("google photos client ID contains invalid whitespace")
+	}
+	return nil
+}
+
+// ValidateGooglePhotosClientSecret validates a Google Photos OAuth client secret
+func ValidateGooglePhotosClientSecret(secret string) error {
+	if secret == "" {
+		return nil // empty is valid (optional)
+	}
+	if strings.ContainsAny(secret, "\x00\r\n") {
+		return errors.New("google photos client secret contains invalid characters")
+	}
+	return nil
+}
+
 // ValidateTailscaleAuthKey validates a Tailscale auth key before it is passed to tailscale.
 func ValidateTailscaleAuthKey(authKey string) error {
 	if authKey == "" {
@@ -284,6 +314,12 @@ func (s *Settings) Validate() error {
 	}
 	if err := ValidateGooglePhotos(s.GooglePhotosEnabled, s.GooglePhotosRemoteName); err != nil {
 		return fmt.Errorf("google photos: %w", err)
+	}
+	if err := ValidateGooglePhotosClientID(s.GooglePhotosClientID); err != nil {
+		return fmt.Errorf("google photos client id: %w", err)
+	}
+	if err := ValidateGooglePhotosClientSecret(s.GooglePhotosClientSecret); err != nil {
+		return fmt.Errorf("google photos client secret: %w", err)
 	}
 	return nil
 }
@@ -337,6 +373,27 @@ func (s *Settings) GetGooglePhotosRemoteName() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.GooglePhotosRemoteName
+}
+
+// GetGooglePhotosOAuthEnabled returns whether native OAuth is enabled
+func (s *Settings) GetGooglePhotosOAuthEnabled() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.GooglePhotosOAuthEnabled
+}
+
+// GetGooglePhotosClientID returns the Google Photos OAuth client ID
+func (s *Settings) GetGooglePhotosClientID() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.GooglePhotosClientID
+}
+
+// GetGooglePhotosClientSecret returns the Google Photos OAuth client secret
+func (s *Settings) GetGooglePhotosClientSecret() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.GooglePhotosClientSecret
 }
 
 // GetPrefer5GHzWiFi returns whether 5 GHz APs are preferred for duplicate SSIDs.
@@ -418,6 +475,24 @@ func (s *Settings) SetGooglePhotos(enabled bool, remoteName string) error {
 	return s.Save()
 }
 
+// SetGooglePhotosOAuth updates the Google Photos OAuth credentials
+func (s *Settings) SetGooglePhotosOAuth(enabled bool, clientID, clientSecret string) error {
+	if err := ValidateGooglePhotosClientID(clientID); err != nil {
+		return err
+	}
+	if err := ValidateGooglePhotosClientSecret(clientSecret); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	s.GooglePhotosOAuthEnabled = enabled
+	s.GooglePhotosClientID = clientID
+	s.GooglePhotosClientSecret = clientSecret
+	s.mu.Unlock()
+
+	return s.Save()
+}
+
 // SetPrefer5GHzWiFi updates WiFi scan preference behavior.
 func (s *Settings) SetPrefer5GHzWiFi(prefer bool) error {
 	s.mu.Lock()
@@ -435,15 +510,18 @@ func (s *Settings) ToJSON() map[string]any {
 	defer s.mu.RUnlock()
 
 	return map[string]any{
-		"schema_version":            s.SchemaVersion,
-		"remote_name":               s.RemoteName,
-		"remote_path":               s.RemotePath,
-		"reformat_threshold":        s.ReformatThreshold,
-		"transfers":                 s.Transfers,
-		"checkers":                  s.Checkers,
-		"google_photos_enabled":     s.GooglePhotosEnabled,
-		"google_photos_remote_name": s.GooglePhotosRemoteName,
-		"prefer_5ghz_wifi":          s.Prefer5GHzWiFi,
+		"schema_version":              s.SchemaVersion,
+		"remote_name":                 s.RemoteName,
+		"remote_path":                 s.RemotePath,
+		"reformat_threshold":          s.ReformatThreshold,
+		"transfers":                   s.Transfers,
+		"checkers":                    s.Checkers,
+		"google_photos_enabled":       s.GooglePhotosEnabled,
+		"google_photos_remote_name":   s.GooglePhotosRemoteName,
+		"google_photos_oauth_enabled": s.GooglePhotosOAuthEnabled,
+		"google_photos_client_id":     s.GooglePhotosClientID,
+		"google_photos_client_secret": s.GooglePhotosClientSecret,
+		"prefer_5ghz_wifi":            s.Prefer5GHzWiFi,
 	}
 }
 
@@ -470,13 +548,16 @@ func (s *Settings) Clone() *Settings {
 	defer s.mu.RUnlock()
 
 	return &Settings{
-		RemoteName:             s.RemoteName,
-		RemotePath:             s.RemotePath,
-		ReformatThreshold:      s.ReformatThreshold,
-		Transfers:              s.Transfers,
-		Checkers:               s.Checkers,
-		GooglePhotosEnabled:    s.GooglePhotosEnabled,
-		GooglePhotosRemoteName: s.GooglePhotosRemoteName,
-		Prefer5GHzWiFi:         s.Prefer5GHzWiFi,
+		RemoteName:               s.RemoteName,
+		RemotePath:               s.RemotePath,
+		ReformatThreshold:        s.ReformatThreshold,
+		Transfers:                s.Transfers,
+		Checkers:                 s.Checkers,
+		GooglePhotosEnabled:      s.GooglePhotosEnabled,
+		GooglePhotosRemoteName:   s.GooglePhotosRemoteName,
+		GooglePhotosOAuthEnabled: s.GooglePhotosOAuthEnabled,
+		GooglePhotosClientID:     s.GooglePhotosClientID,
+		GooglePhotosClientSecret: s.GooglePhotosClientSecret,
+		Prefer5GHzWiFi:           s.Prefer5GHzWiFi,
 	}
 }

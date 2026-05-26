@@ -7,6 +7,8 @@ import { Icon } from '../components/Icons.jsx'
 import { LoadingSpinner } from '../components/LoadingSpinner.jsx'
 import {
   getGooglePhotosStatus,
+  startGooglePhotosAuth,
+  disconnectGooglePhotos,
   startGooglePhotosSync,
   cancelGooglePhotosSync,
   getGooglePhotosSyncProgress,
@@ -58,6 +60,7 @@ export default function GooglePhotosPage() {
 
   const [status, setStatus] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [connecting, setConnecting] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [progress, setProgress] = useState(null)
   const [statusError, setStatusError] = useState(null)
@@ -150,6 +153,69 @@ export default function GooglePhotosPage() {
     return () => clearInterval(progressIntervalRef.current)
   }, [syncing, loadSyncProgress, loadStatus])
 
+  const handleConnect = useCallback(async () => {
+    if (!deviceUrl) return
+    setConnecting(true)
+    try {
+      const redirectUri = `${deviceUrl}/api/googlephotos/auth/callback`
+      const data = await startGooglePhotosAuth(deviceUrl, redirectUri)
+      const authUrl = data?.auth_url
+      if (!authUrl) {
+        toast.error('No authorization URL received')
+        return
+      }
+
+      const width = 500
+      const height = 600
+      const left = window.screenX + (window.outerWidth - width) / 2
+      const top = window.screenY + (window.outerHeight - height) / 2
+      const popup = window.open(
+        authUrl,
+        'google-photos-auth',
+        `width=${width},height=${height},left=${left},top=${top},popup=1`
+      )
+
+      if (!popup) {
+        toast.error('Popup blocked — please allow popups for this site')
+        return
+      }
+
+      const onMessage = (event) => {
+        if (event.data?.type === 'google-photos-connected') {
+          window.removeEventListener('message', onMessage)
+          toast.success('Google Photos connected!')
+          loadStatus()
+        }
+      }
+      window.addEventListener('message', onMessage)
+
+      const checkClosed = setInterval(() => {
+        if (popup.closed) {
+          clearInterval(checkClosed)
+          window.removeEventListener('message', onMessage)
+          loadStatus()
+        }
+      }, 500)
+    } catch (err) {
+      toast.error(`Failed to start OAuth: ${describeError(err)}`)
+    } finally {
+      setConnecting(false)
+    }
+  }, [deviceUrl, toast, loadStatus])
+
+  const handleDisconnect = useCallback(async () => {
+    if (!deviceUrl) return
+    if (!window.confirm('Disconnect Google Photos? This will remove the stored authorization and rclone remote.')) return
+    try {
+      await disconnectGooglePhotos(deviceUrl)
+      toast.success('Google Photos disconnected')
+      setStatus({ connected: false, configured: false })
+      setStatusError(null)
+    } catch (err) {
+      toast.error(`Failed to disconnect: ${describeError(err)}`)
+    }
+  }, [deviceUrl, toast])
+
   const handleSync = useCallback(async () => {
     if (!deviceUrl) return
     try {
@@ -188,6 +254,7 @@ export default function GooglePhotosPage() {
     )
   }
 
+  const isConnected = status?.connected
   const isConfigured = status?.configured
   const percentage = clampPercent(progress?.percentage)
 
@@ -198,26 +265,30 @@ export default function GooglePhotosPage() {
         <CardHeader>
           <div className="flex items-center gap-2">
             <Icon name="cloud" className="w-5 h-5 text-brand-400" />
-            <CardTitle>Google Photos Sync</CardTitle>
+            <CardTitle>Google Photos Connection</CardTitle>
           </div>
           <div className="flex items-center gap-2">
             <span
               className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                isConfigured
+                isConnected
                   ? 'bg-emerald-500/15 text-emerald-400'
-                  : 'bg-surface-600/30 text-surface-400'
+                  : isConfigured
+                    ? 'bg-amber-500/15 text-amber-400'
+                    : 'bg-surface-600/30 text-surface-400'
               }`}
             >
-              {isConfigured ? 'Configured' : 'Not configured'}
+              {isConnected ? 'Connected' : isConfigured ? 'Configured' : 'Not connected'}
             </span>
           </div>
         </CardHeader>
 
         <div className="space-y-4">
           <p className="text-sm text-surface-300">
-            {isConfigured
-              ? 'Google Photos is configured via rclone. Click Sync to copy photos from cloud storage to Google Photos.'
-              : 'Google Photos is not configured. Set up a googlephotos remote in rclone and enable it in Settings.'}
+            {isConnected
+              ? 'Your Google Photos account is connected. Photos will be synced to albums named after each card.'
+              : isConfigured
+                ? 'Your Google Photos account is configured but the connection could not be verified. You can still try to sync.'
+                : 'Connect your Google Photos account to sync photos from cloud storage. Set your OAuth client ID and secret in Settings first.'}
           </p>
           {statusError && (
             <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-3">
@@ -227,7 +298,12 @@ export default function GooglePhotosPage() {
           )}
 
           <div className="flex flex-wrap gap-2">
-            {isConfigured && (
+            {!isConfigured ? (
+              <Button onClick={handleConnect} loading={connecting} disabled={connecting}>
+                <Icon name="lock" className="w-4 h-4" />
+                Connect Google Photos
+              </Button>
+            ) : (
               <>
                 <Button onClick={handleSync} loading={syncing} disabled={syncing}>
                   <Icon name="arrow-up-tray" className="w-4 h-4" />
@@ -239,6 +315,10 @@ export default function GooglePhotosPage() {
                     Cancel sync
                   </Button>
                 )}
+                <Button variant="danger" onClick={handleDisconnect}>
+                  <Icon name="x" className="w-4 h-4" />
+                  Disconnect
+                </Button>
               </>
             )}
           </div>
@@ -327,16 +407,19 @@ export default function GooglePhotosPage() {
           </CardHeader>
           <div className="space-y-2 text-sm text-surface-300">
             <p>
-              1. Configure a <code>googlephotos</code> remote in rclone via the Settings page.
+              1. Enter your Google Photos <strong>OAuth client ID</strong> and <strong>client secret</strong> in Settings.
             </p>
             <p>
-              2. Enable Google Photos sync and set the remote name in Settings.
+              2. Click <strong>Connect Google Photos</strong> to authorize this device.
             </p>
             <p>
-              3. Click <strong>Sync to Google Photos</strong> to copy photos from your cloud storage to Google Photos.
+              3. Once connected, click <strong>Sync to Google Photos</strong> to copy photos from your cloud storage.
+            </p>
+            <p>
+              4. Photos are organized into albums by card ID (e.g., &quot;card-abc123&quot;).
             </p>
             <p className="text-surface-500 text-xs">
-              Photos are uploaded to the main Google Photos stream. Albums are not created automatically.
+              RAW files are automatically filtered out. Only JPG, PNG, HEIC, MP4, MOV, and other common photo/video formats are uploaded.
             </p>
           </div>
         </Card>

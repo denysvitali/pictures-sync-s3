@@ -229,6 +229,10 @@ export const getThumbnailUrl = (d, filePath) =>
   `${normalizeBaseUrl(d)}/api/thumbnail?path=${encodeURIComponent(filePath || '')}`
 
 export const getGooglePhotosStatus = (d) => apiRequest('/api/googlephotos/status', { deviceUrl: d, timeoutMs: 10000 })
+export const startGooglePhotosAuth = (d, redirectUri) =>
+  apiRequest('/api/googlephotos/auth/start', { deviceUrl: d, method: 'POST', body: { redirect_uri: redirectUri } })
+export const disconnectGooglePhotos = (d) =>
+  apiRequest('/api/googlephotos/auth/disconnect', { deviceUrl: d, method: 'POST' })
 export const startGooglePhotosSync = (d) =>
   apiRequest('/api/googlephotos/sync', { deviceUrl: d, method: 'POST' })
 export const cancelGooglePhotosSync = (d) =>

@@ -17,6 +17,7 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/auth"
 	"github.com/denysvitali/pictures-sync-s3/pkg/daemoncontrol"
 	"github.com/denysvitali/pictures-sync-s3/pkg/events"
+	"github.com/denysvitali/pictures-sync-s3/pkg/googlephotos"
 	"github.com/denysvitali/pictures-sync-s3/pkg/handlers"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ntpsync"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ota"
@@ -238,14 +239,15 @@ func main() {
 
 	// Create handler context
 	ctx := &handlers.Context{
-		StateMgr:      stateMgr,
-		SyncMgr:       syncMgr,
-		Daemon:        handlers.DaemonControlClient{},
-		WiFiMgr:       wifiMgr,
-		AppSettings:   appSettings,
-		SSRFValidator: ssrfValidator,
-		OTAMgr:        otaMgr,
-		PasswordMgr:   passwordMgr,
+		StateMgr:               stateMgr,
+		SyncMgr:                syncMgr,
+		Daemon:                 handlers.DaemonControlClient{},
+		WiFiMgr:                wifiMgr,
+		AppSettings:            appSettings,
+		SSRFValidator:          ssrfValidator,
+		OTAMgr:                 otaMgr,
+		PasswordMgr:            passwordMgr,
+		GooglePhotosStateStore: googlephotos.NewStateStore(),
 	}
 
 	allowedOrigins := configuredAllowedOrigins()
