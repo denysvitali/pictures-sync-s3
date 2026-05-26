@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,7 +17,7 @@ import (
 )
 
 const (
-	batchSize = 50 // Google Photos batch create limit
+	batchSize = 10 // Google Photos allows up to 50; smaller batches make album updates visible sooner.
 )
 
 // SyncManager orchestrates syncing photos from B2 to Google Photos
@@ -179,6 +180,7 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 		log.Printf("[GooglePhotos] No media files found in card %s", cardID)
 		return 0, skipped, 0, nil
 	}
+	sortMediaForUpload(mediaFiles)
 
 	// Find or create album for this card only after there is something to upload.
 	albumTitle := "Card " + cardID
@@ -203,7 +205,7 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 
 	// Process files in batches
 	var batch []*NewMediaItem
-	for _, file := range mediaFiles {
+	for fileIndex, file := range mediaFiles {
 		if ctx.Err() != nil {
 			return uploaded, skipped, failed, ctx.Err()
 		}
@@ -212,6 +214,8 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 		sm.progress.CurrentFile = file.Name
 		sm.progress.ProcessedFiles++
 		sm.mu.Unlock()
+
+		log.Printf("[GooglePhotos] Uploading file %d/%d from card %s: %s (%d bytes)", fileIndex+1, len(mediaFiles), cardID, file.Path, file.Size)
 
 		// Download file from B2
 		fileData, fileSize, cleanup, err := sm.downloadFile(file)
@@ -245,6 +249,7 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 			if err != nil {
 				log.Printf("[GooglePhotos] Failed to create batch in album %s: %v", albumTitle, err)
 			}
+			log.Printf("[GooglePhotos] Created media items in album %s: success=%d failed=%d", albumTitle, successCount, failCount)
 			uploaded -= failCount
 			failed += failCount
 			_ = successCount
@@ -261,6 +266,7 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 		if err != nil {
 			log.Printf("[GooglePhotos] Failed to create final batch in album %s: %v", albumTitle, err)
 		}
+		log.Printf("[GooglePhotos] Created final media items in album %s: success=%d failed=%d", albumTitle, successCount, failCount)
 		uploaded -= failCount
 		failed += failCount
 		_ = successCount
@@ -304,6 +310,20 @@ func (sm *SyncManager) listMediaFiles(ctx context.Context, path string) ([]syncm
 	}
 
 	return mediaFiles, skipped, nil
+}
+
+func sortMediaForUpload(files []syncmanager.FileInfo) {
+	sort.SliceStable(files, func(i, j int) bool {
+		iVideo := IsVideo(files[i].Name)
+		jVideo := IsVideo(files[j].Name)
+		if iVideo != jVideo {
+			return !iVideo
+		}
+		if files[i].Size != files[j].Size {
+			return files[i].Size < files[j].Size
+		}
+		return files[i].Path < files[j].Path
+	})
 }
 
 // downloadFile downloads a file from B2 using the sync manager. Native Google

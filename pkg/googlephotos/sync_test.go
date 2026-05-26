@@ -118,6 +118,25 @@ func TestSyncCardDoesNotCreateAlbumWithoutMedia(t *testing.T) {
 	}
 }
 
+func TestSortMediaForUploadPrioritizesPhotosAndSmallFiles(t *testing.T) {
+	files := []syncmanager.FileInfo{
+		{Name: "DJI_0001.MP4", Path: "card/DCIM/DJI_0001.MP4", Size: 5000},
+		{Name: "IMG_0002.JPG", Path: "card/DCIM/IMG_0002.JPG", Size: 2000},
+		{Name: "IMG_0001.JPG", Path: "card/DCIM/IMG_0001.JPG", Size: 1000},
+		{Name: "DJI_0002.MOV", Path: "card/DCIM/DJI_0002.MOV", Size: 1000},
+	}
+
+	sortMediaForUpload(files)
+
+	var names []string
+	for _, file := range files {
+		names = append(names, file.Name)
+	}
+	if got, want := strings.Join(names, ","), "IMG_0001.JPG,IMG_0002.JPG,DJI_0002.MOV,DJI_0001.MP4"; got != want {
+		t.Fatalf("sorted files = %q, want %q", got, want)
+	}
+}
+
 func newTestClient(t *testing.T, rt roundTripFunc) *Client {
 	t.Helper()
 
