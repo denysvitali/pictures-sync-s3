@@ -1082,17 +1082,14 @@ func TestSettingsRoundTrip(t *testing.T) {
 
 	// Create settings with every field set to a non-default value
 	want := &Settings{
-		RemoteName:               "my-remote",
-		RemotePath:               "/backup/photos",
-		ReformatThreshold:        0.5,
-		Transfers:                8,
-		Checkers:                 16,
-		GooglePhotosEnabled:      true,
-		GooglePhotosRemoteName:   "gphotos-backup",
-		GooglePhotosClientID:     "test-client-id-123",
-		GooglePhotosClientSecret: "test-client-secret-456",
-		GooglePhotosOAuthEnabled: true,
-		Prefer5GHzWiFi:           false,
+		RemoteName:             "my-remote",
+		RemotePath:             "/backup/photos",
+		ReformatThreshold:      0.5,
+		Transfers:              8,
+		Checkers:               16,
+		GooglePhotosEnabled:    true,
+		GooglePhotosRemoteName: "gphotos-backup",
+		Prefer5GHzWiFi:         false,
 	}
 
 	// Save
@@ -1127,15 +1124,6 @@ func TestSettingsRoundTrip(t *testing.T) {
 	}
 	if got.GooglePhotosRemoteName != want.GooglePhotosRemoteName {
 		t.Errorf("GooglePhotosRemoteName = %q, want %q", got.GooglePhotosRemoteName, want.GooglePhotosRemoteName)
-	}
-	if got.GooglePhotosClientID != want.GooglePhotosClientID {
-		t.Errorf("GooglePhotosClientID = %q, want %q", got.GooglePhotosClientID, want.GooglePhotosClientID)
-	}
-	if got.GooglePhotosClientSecret != want.GooglePhotosClientSecret {
-		t.Errorf("GooglePhotosClientSecret = %q, want %q", got.GooglePhotosClientSecret, want.GooglePhotosClientSecret)
-	}
-	if got.GooglePhotosOAuthEnabled != want.GooglePhotosOAuthEnabled {
-		t.Errorf("GooglePhotosOAuthEnabled = %v, want %v", got.GooglePhotosOAuthEnabled, want.GooglePhotosOAuthEnabled)
 	}
 	if got.Prefer5GHzWiFi != want.Prefer5GHzWiFi {
 		t.Errorf("Prefer5GHzWiFi = %v, want %v", got.Prefer5GHzWiFi, want.Prefer5GHzWiFi)
@@ -1178,8 +1166,5 @@ func TestSettingsRoundTripDefaults(t *testing.T) {
 	// Fields without defaults should be zero values
 	if got.GooglePhotosEnabled != false {
 		t.Errorf("GooglePhotosEnabled = %v, want false", got.GooglePhotosEnabled)
-	}
-	if got.GooglePhotosClientID != "" {
-		t.Errorf("GooglePhotosClientID = %q, want empty", got.GooglePhotosClientID)
 	}
 }

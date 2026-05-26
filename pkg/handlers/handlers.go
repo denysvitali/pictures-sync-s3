@@ -10,7 +10,6 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/auth"
 	"github.com/denysvitali/pictures-sync-s3/pkg/captiveportal"
 	"github.com/denysvitali/pictures-sync-s3/pkg/daemoncontrol"
-	"github.com/denysvitali/pictures-sync-s3/pkg/googlephotos"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ota"
 	"github.com/denysvitali/pictures-sync-s3/pkg/sdcardbrowser"
 	"github.com/denysvitali/pictures-sync-s3/pkg/sdmonitor"
@@ -21,29 +20,6 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/version"
 	"github.com/denysvitali/pictures-sync-s3/pkg/wifimanager"
 )
-
-// EnsureGooglePhotosClient lazily initializes the Google Photos client when
-// credentials become available after startup. It is safe to call multiple times.
-func (ctx *Context) EnsureGooglePhotosClient() {
-	if ctx.GooglePhotosClient != nil {
-		return
-	}
-	if ctx.GooglePhotosStateStore == nil {
-		return
-	}
-	clientID := ctx.AppSettings.GetGooglePhotosClientID()
-	clientSecret := ctx.AppSettings.GetGooglePhotosClientSecret()
-	if clientID == "" || clientSecret == "" {
-		return
-	}
-	tokenStore := googlephotos.NewTokenStore("")
-	client := googlephotos.NewClient(clientID, clientSecret, tokenStore)
-	ctx.GooglePhotosClient = client
-	if ctx.SyncMgr != nil {
-		ctx.GooglePhotosSyncMgr = googlephotos.NewSyncManager(client, ctx.SyncMgr)
-	}
-	log.Println("[GooglePhotos] Client initialized lazily from updated settings")
-}
 
 // SyncManager describes the sync operations used by HTTP handlers.
 type SyncManager interface {
@@ -59,6 +35,11 @@ type SyncManager interface {
 	ListFilesPaginated(path string, page, pageSize int) (*syncmanager.FileListResult, error)
 	GetFile(path string, w io.Writer) error
 	GetPublicLink(path string) (string, error)
+	// Google Photos sync (rclone-based)
+	IsGooglePhotosRunning() bool
+	CancelGooglePhotos() error
+	SyncCardsToGooglePhotos(ctx context.Context) error
+	GetGooglePhotosProgress() syncmanager.Progress
 }
 
 type ManualSyncRequester interface {
@@ -160,19 +141,16 @@ func (DaemonControlClient) RequestSDCardThumbnail(ctx context.Context, path stri
 
 // Context holds dependencies for all handlers
 type Context struct {
-	StateMgr               *state.Manager
-	SyncMgr                SyncManager
-	ManualSync             ManualSyncRequester
-	Daemon                 DaemonClient
-	WiFiMgr                wifimanager.WiFiManager
-	AppSettings            *settings.Settings
-	SSRFValidator          *ssrf.Validator
-	CaptivePortal          *captiveportal.Authenticator
-	OTAMgr                 *ota.Manager
-	PasswordMgr            *auth.PasswordManager
-	GooglePhotosClient     GooglePhotosManager
-	GooglePhotosSyncMgr    GooglePhotosSyncManager
-	GooglePhotosStateStore *googlephotos.StateStore
+	StateMgr      *state.Manager
+	SyncMgr       SyncManager
+	ManualSync    ManualSyncRequester
+	Daemon        DaemonClient
+	WiFiMgr       wifimanager.WiFiManager
+	AppSettings   *settings.Settings
+	SSRFValidator *ssrf.Validator
+	CaptivePortal *captiveportal.Authenticator
+	OTAMgr        *ota.Manager
+	PasswordMgr   *auth.PasswordManager
 }
 
 func (ctx *Context) VersionInfo() version.Info {

@@ -406,19 +406,16 @@ func formatErrors(errors []error) []string {
 // from an explicit zero value. When adding a new setting, add the field here
 // AND register an updater in applySettingsRequest below.
 type settingsRequest struct {
-	RemoteName               *string  `json:"remote_name"`
-	RemotePath               *string  `json:"remote_path"`
-	ReformatThreshold        *float64 `json:"reformat_threshold"`
-	Transfers                *int     `json:"transfers"`
-	Checkers                 *int     `json:"checkers"`
-	GooglePhotosEnabled      *bool    `json:"google_photos_enabled"`
-	GooglePhotos             *bool    `json:"google_photos"`
-	GooglePhotosRemoteName   *string  `json:"google_photos_remote_name"`
-	GooglePhotosOAuthEnabled *bool    `json:"google_photos_oauth_enabled"`
-	GooglePhotosClientID     *string  `json:"google_photos_client_id"`
-	GooglePhotosClientSecret *string  `json:"google_photos_client_secret"`
-	Prefer5GHzWiFi           *bool    `json:"prefer_5ghz_wifi"`
-	TailscaleAuthKey         *string  `json:"tailscale_auth_key"`
+	RemoteName             *string  `json:"remote_name"`
+	RemotePath             *string  `json:"remote_path"`
+	ReformatThreshold      *float64 `json:"reformat_threshold"`
+	Transfers              *int     `json:"transfers"`
+	Checkers               *int     `json:"checkers"`
+	GooglePhotosEnabled    *bool    `json:"google_photos_enabled"`
+	GooglePhotos           *bool    `json:"google_photos"`
+	GooglePhotosRemoteName *string  `json:"google_photos_remote_name"`
+	Prefer5GHzWiFi         *bool    `json:"prefer_5ghz_wifi"`
+	TailscaleAuthKey       *string  `json:"tailscale_auth_key"`
 }
 
 type settingsBadRequestError struct{ msg string }
@@ -491,28 +488,6 @@ var settingsUpdaters = []fieldUpdater{
 			return err
 		}
 		ctx.SyncMgr.SetGooglePhotos(googlePhotosEnabled, googlePhotosRemoteName)
-		return nil
-	}},
-	{"google_photos_oauth", func(req *settingsRequest, ctx *Context) error {
-		if req.GooglePhotosOAuthEnabled == nil && req.GooglePhotosClientID == nil && req.GooglePhotosClientSecret == nil {
-			return nil
-		}
-		oauthEnabled := ctx.AppSettings.GetGooglePhotosOAuthEnabled()
-		clientID := ctx.AppSettings.GetGooglePhotosClientID()
-		clientSecret := ctx.AppSettings.GetGooglePhotosClientSecret()
-		if req.GooglePhotosOAuthEnabled != nil {
-			oauthEnabled = *req.GooglePhotosOAuthEnabled
-		}
-		if req.GooglePhotosClientID != nil {
-			clientID = *req.GooglePhotosClientID
-		}
-		if req.GooglePhotosClientSecret != nil {
-			clientSecret = *req.GooglePhotosClientSecret
-		}
-		if err := ctx.AppSettings.SetGooglePhotosOAuth(oauthEnabled, clientID, clientSecret); err != nil {
-			return err
-		}
-		ctx.EnsureGooglePhotosClient()
 		return nil
 	}},
 	{"prefer_5ghz_wifi", func(req *settingsRequest, ctx *Context) error {

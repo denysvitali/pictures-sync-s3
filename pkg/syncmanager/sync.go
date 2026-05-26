@@ -106,18 +106,6 @@ func (m *Manager) Sync(sourcePath, cardID string, totalFiles int, totalBytes int
 	}
 
 	log.Printf("Sync completed successfully")
-
-	// Upload JPG files to Google Photos if enabled
-	if m.googlePhotosEnabled && m.googlePhotosRemoteName != "" {
-		log.Printf("Starting Google Photos upload for JPG files...")
-		if err := m.uploadToGooglePhotosLocked(ctx, sourcePath, cardID); err != nil {
-			log.Printf("Warning: Google Photos upload failed: %v", err)
-			// Don't return error - main sync succeeded
-		} else {
-			log.Printf("Google Photos upload completed successfully")
-		}
-	}
-
 	return nil
 }
 

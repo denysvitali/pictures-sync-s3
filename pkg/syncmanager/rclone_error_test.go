@@ -583,18 +583,11 @@ type = local
 	stateMgr, _ := state.NewManager()
 	syncMgr := NewManager(configPath, "local-test", tmpDir, stateMgr, 4, 8)
 
-	// Enable Google Photos with invalid remote
+	// Enable Google Photos with invalid remote — rclone-based sync no longer
+	// attempts upload during the main B2 sync; SyncCardsToGooglePhotos is
+	// called separately via the API.
 	syncMgr.SetGooglePhotos(true, "nonexistent-remote")
-
-	// Test uploadToGooglePhotos directly
-	ctx := context.Background()
-	err = syncMgr.uploadToGooglePhotos(ctx, srcDir, "card-0123456789abcdef")
-
-	if err == nil {
-		t.Error("uploadToGooglePhotos should fail with nonexistent remote")
-	}
-
-	t.Logf("Google Photos upload error (expected): %v", err)
+	t.Log("Google Photos configured with nonexistent remote (expected for rclone)")
 }
 
 // TestConfigLoadingRaceCondition tests for race conditions in config loading

@@ -2,216 +2,65 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"strings"
-
-	"github.com/denysvitali/pictures-sync-s3/pkg/googlephotos"
 )
 
-// GooglePhotosManager describes the Google Photos operations used by HTTP handlers.
-type GooglePhotosManager interface {
-	IsAuthenticated() bool
-	GetConnectionStatus() (*googlephotos.ConnectionStatus, error)
-	ExchangeCode(code, redirectURI, codeVerifier string) (*googlephotos.OAuthToken, error)
-	Disconnect() error
-	ListAlbums() ([]*googlephotos.Album, error)
-	CreateAlbum(title string) (*googlephotos.Album, error)
-}
-
-// GooglePhotosSyncManager describes the sync operations for Google Photos.
-type GooglePhotosSyncManager interface {
-	IsRunning() bool
-	Sync(ctx context.Context) error
-	Cancel()
-	Progress() *googlephotos.SyncProgress
-}
-
-type googlePhotosSyncOptions interface {
-	SetSkipDuplicates(bool)
-}
-
-// HandleGooglePhotosStatus returns the Google Photos connection status
+// HandleGooglePhotosStatus returns whether Google Photos is configured via
+// rclone. "configured" means the gphotos remote exists in rclone config and
+// GooglePhotosEnabled + GooglePhotosRemoteName are set.
 func (ctx *Context) HandleGooglePhotosStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	ctx.EnsureGooglePhotosClient()
-	if ctx.GooglePhotosClient == nil {
-		JSONResponse(w, map[string]interface{}{
-			"connected":    false,
-			"configured":   false,
-			"albums_count": 0,
-		})
-		return
-	}
-
-	status, err := ctx.GooglePhotosClient.GetConnectionStatus()
+	remotes, err := ctx.SyncMgr.ListRemotes()
 	if err != nil {
-		log.Printf("[GooglePhotos] Failed to get connection status: %v", err)
-		JSONResponse(w, map[string]interface{}{
-			"connected":    false,
-			"configured":   ctx.GooglePhotosClient.IsAuthenticated(),
-			"albums_count": 0,
-			"error":        err.Error(),
-		})
-		return
+		log.Printf("[GooglePhotos] Failed to list remotes: %v", err)
 	}
 
-	JSONResponse(w, map[string]interface{}{
-		"connected":    status.Connected,
-		"configured":   ctx.GooglePhotosClient.IsAuthenticated(),
-		"albums_count": status.AlbumsCount,
-		"email":        status.Email,
-	})
-}
-
-// HandleGooglePhotosAuthStart initiates the OAuth flow
-func (ctx *Context) HandleGooglePhotosAuthStart(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
+	configured := false
+	gpRemoteName := ""
+	if ctx.AppSettings != nil {
+		configured = ctx.AppSettings.GetGooglePhotosEnabled()
+		gpRemoteName = ctx.AppSettings.GetGooglePhotosRemoteName()
 	}
 
-	ctx.EnsureGooglePhotosClient()
-
-	clientID := ctx.AppSettings.GetGooglePhotosClientID()
-	if clientID == "" {
-		http.Error(w, "Google Photos OAuth client ID not configured", http.StatusPreconditionRequired)
-		return
-	}
-
-	// Get redirect URI from request body, or construct from Host header
-	var reqBody struct {
-		RedirectURI string `json:"redirect_uri"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-		// If no body, try to construct from request
-		reqBody.RedirectURI = ""
-	}
-
-	redirectURI := reqBody.RedirectURI
-	if redirectURI == "" {
-		scheme := "http"
-		if r.TLS != nil {
-			scheme = "https"
+	// "connected" means the remote name is present in rclone config.
+	connected := false
+	if gpRemoteName != "" {
+		for _, name := range remotes {
+			if strings.EqualFold(name, gpRemoteName) {
+				connected = true
+				break
+			}
 		}
-		redirectURI = fmt.Sprintf("%s://%s/api/googlephotos/auth/callback", scheme, r.Host)
-	}
-
-	if ctx.GooglePhotosStateStore == nil {
-		http.Error(w, "OAuth state store not initialized", http.StatusInternalServerError)
-		return
-	}
-
-	_, authURL, err := ctx.GooglePhotosStateStore.StartAuth(clientID, redirectURI)
-	if err != nil {
-		log.Printf("[GooglePhotos] Failed to start OAuth: %v", err)
-		http.Error(w, fmt.Sprintf("failed to start OAuth: %v", err), http.StatusInternalServerError)
-		return
 	}
 
 	JSONResponse(w, map[string]interface{}{
-		"auth_url":     authURL,
-		"redirect_uri": redirectURI,
+		"configured": configured && gpRemoteName != "",
+		"connected":  connected,
 	})
 }
 
-// HandleGooglePhotosAuthCallback handles the OAuth callback
+// HandleGooglePhotosAuthStart returns 410 Gone — native OAuth was removed.
+func (ctx *Context) HandleGooglePhotosAuthStart(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "Native Google Photos OAuth is no longer supported. Configure a googlephotos remote in rclone instead.", http.StatusGone)
+}
+
+// HandleGooglePhotosAuthCallback returns 410 Gone.
 func (ctx *Context) HandleGooglePhotosAuthCallback(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	code := r.URL.Query().Get("code")
-	state := r.URL.Query().Get("state")
-	errorParam := r.URL.Query().Get("error")
-
-	if errorParam != "" {
-		log.Printf("[GooglePhotos] OAuth error from provider: %s", errorParam)
-		http.Error(w, fmt.Sprintf("OAuth error: %s", errorParam), http.StatusBadRequest)
-		return
-	}
-
-	if code == "" {
-		http.Error(w, "missing authorization code", http.StatusBadRequest)
-		return
-	}
-
-	if ctx.GooglePhotosStateStore == nil {
-		http.Error(w, "OAuth state store not initialized", http.StatusInternalServerError)
-		return
-	}
-
-	authState, ok := ctx.GooglePhotosStateStore.ValidateState(state)
-	if !ok {
-		http.Error(w, "invalid or expired state", http.StatusBadRequest)
-		return
-	}
-
-	ctx.EnsureGooglePhotosClient()
-	if ctx.GooglePhotosClient == nil {
-		http.Error(w, "Google Photos client not initialized", http.StatusInternalServerError)
-		return
-	}
-
-	_, err := ctx.GooglePhotosClient.ExchangeCode(code, authState.RedirectURI, authState.CodeVerifier)
-	if err != nil {
-		log.Printf("[GooglePhotos] Failed to exchange code: %v", err)
-		http.Error(w, fmt.Sprintf("failed to exchange code: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	log.Println("[GooglePhotos] OAuth connection established successfully")
-
-	// Return a simple HTML page that closes the popup and notifies the parent
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, `<!DOCTYPE html>
-<html>
-<head><title>Google Photos Connected</title></head>
-<body>
-<script>
-if (window.opener) {
-  window.opener.postMessage({ type: 'google-photos-connected', success: true }, '*');
-  window.close();
-} else {
-  document.body.innerHTML = '<h1>Google Photos Connected</h1><p>You can close this window and return to the app.</p>';
-}
-</script>
-</body>
-</html>`)
+	http.Error(w, "Native Google Photos OAuth is no longer supported.", http.StatusGone)
 }
 
-// HandleGooglePhotosAuthDisconnect removes the stored OAuth tokens
+// HandleGooglePhotosAuthDisconnect returns 410 Gone.
 func (ctx *Context) HandleGooglePhotosAuthDisconnect(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	ctx.EnsureGooglePhotosClient()
-	if ctx.GooglePhotosClient == nil {
-		JSONResponse(w, map[string]interface{}{"disconnected": true})
-		return
-	}
-
-	if err := ctx.GooglePhotosClient.Disconnect(); err != nil {
-		log.Printf("[GooglePhotos] Failed to disconnect: %v", err)
-		http.Error(w, fmt.Sprintf("failed to disconnect: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	log.Println("[GooglePhotos] OAuth disconnected")
-	JSONResponse(w, map[string]interface{}{"disconnected": true})
+	http.Error(w, "Native Google Photos OAuth is no longer supported.", http.StatusGone)
 }
 
-// HandleGooglePhotosSync triggers a B2 to Google Photos sync
+// HandleGooglePhotosSync triggers a B2 to Google Photos sync via rclone.
 func (ctx *Context) HandleGooglePhotosSync(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodDelete {
 		ctx.HandleGooglePhotosSyncCancel(w, r)
@@ -222,30 +71,19 @@ func (ctx *Context) HandleGooglePhotosSync(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	ctx.EnsureGooglePhotosClient()
-	if ctx.GooglePhotosSyncMgr == nil {
-		http.Error(w, "Google Photos sync manager not initialized", http.StatusServiceUnavailable)
+	if ctx.SyncMgr == nil {
+		http.Error(w, "Sync manager not initialized", http.StatusServiceUnavailable)
 		return
 	}
 
-	if ctx.GooglePhotosSyncMgr.IsRunning() {
+	if ctx.SyncMgr.IsGooglePhotosRunning() {
 		http.Error(w, "sync already in progress", http.StatusConflict)
 		return
 	}
 
-	var reqBody struct {
-		SkipDuplicates *bool `json:"skip_duplicates"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&reqBody)
-	if reqBody.SkipDuplicates != nil {
-		if configurable, ok := ctx.GooglePhotosSyncMgr.(googlePhotosSyncOptions); ok {
-			configurable.SetSkipDuplicates(*reqBody.SkipDuplicates)
-		}
-	}
-
-	// Start sync in background
+	// Start sync in background.
 	go func() {
-		if err := ctx.GooglePhotosSyncMgr.Sync(context.Background()); err != nil {
+		if err := ctx.SyncMgr.SyncCardsToGooglePhotos(context.Background()); err != nil {
 			log.Printf("[GooglePhotos] Sync error: %v", err)
 		}
 	}()
@@ -262,113 +100,55 @@ func (ctx *Context) HandleGooglePhotosSyncCancel(w http.ResponseWriter, r *http.
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if ctx.GooglePhotosSyncMgr == nil {
-		http.Error(w, "Google Photos sync manager not initialized", http.StatusServiceUnavailable)
+	if ctx.SyncMgr == nil {
+		http.Error(w, "Sync manager not initialized", http.StatusServiceUnavailable)
 		return
 	}
-	if !ctx.GooglePhotosSyncMgr.IsRunning() {
+	if !ctx.SyncMgr.IsGooglePhotosRunning() {
 		JSONResponse(w, map[string]interface{}{"cancelled": false, "status": "idle"})
 		return
 	}
-	ctx.GooglePhotosSyncMgr.Cancel()
+	if err := ctx.SyncMgr.CancelGooglePhotos(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	JSONResponse(w, map[string]interface{}{"cancelled": true, "status": "cancelling"})
 }
 
-// HandleGooglePhotosSyncProgress returns the current sync progress
+// HandleGooglePhotosSyncProgress returns the current Google Photos sync progress.
 func (ctx *Context) HandleGooglePhotosSyncProgress(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	if ctx.GooglePhotosSyncMgr == nil {
+	if ctx.SyncMgr == nil {
 		JSONResponse(w, map[string]interface{}{
 			"status": "not_initialized",
 		})
 		return
 	}
 
-	progress := ctx.GooglePhotosSyncMgr.Progress()
-	JSONResponse(w, progress)
-}
-
-// HandleGooglePhotosSyncHistoryExport returns compact Google Photos sync summaries.
-func (ctx *Context) HandleGooglePhotosSyncHistoryExport(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if ctx.GooglePhotosSyncMgr == nil {
-		http.Error(w, "Google Photos sync manager not initialized", http.StatusServiceUnavailable)
-		return
-	}
-	progress := ctx.GooglePhotosSyncMgr.Progress()
-	w.Header().Set("Content-Disposition", `attachment; filename="google-photos-sync-history.json"`)
-	JSONResponse(w, map[string]interface{}{"history": progress.History, "last_successful_sync": progress.LastSuccessfulSync})
-}
-
-// HandleGooglePhotosAlbums lists or creates Google Photos albums
-func (ctx *Context) HandleGooglePhotosAlbums(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		ctx.listGooglePhotosAlbums(w, r)
-	case http.MethodPost:
-		ctx.createGooglePhotosAlbum(w, r)
-	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-	}
-}
-
-func (ctx *Context) listGooglePhotosAlbums(w http.ResponseWriter, r *http.Request) {
-	ctx.EnsureGooglePhotosClient()
-	if ctx.GooglePhotosClient == nil {
-		http.Error(w, "Google Photos client not initialized", http.StatusServiceUnavailable)
-		return
-	}
-
-	albums, err := ctx.GooglePhotosClient.ListAlbums()
-	if err != nil {
-		log.Printf("[GooglePhotos] Failed to list albums: %v", err)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadGateway)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": fmt.Sprintf("failed to list albums: %v", err),
-		})
-		return
-	}
-
+	progress := ctx.SyncMgr.GetGooglePhotosProgress()
 	JSONResponse(w, map[string]interface{}{
-		"albums": albums,
-		"count":  len(albums),
+		"status":             progress.Status,
+		"current_file":       progress.CurrentFile,
+		"current_file_size":  progress.CurrentFileSize,
+		"transferred_files":  progress.TransferredFiles,
+		"total_files":        progress.TotalFiles,
+		"bytes_transferred":  progress.BytesTransferred,
+		"percentage":         progress.Percentage,
+		"speed":              progress.Speed,
+		"eta":                progress.ETA,
 	})
 }
 
-func (ctx *Context) createGooglePhotosAlbum(w http.ResponseWriter, r *http.Request) {
-	ctx.EnsureGooglePhotosClient()
-	if ctx.GooglePhotosClient == nil {
-		http.Error(w, "Google Photos client not initialized", http.StatusServiceUnavailable)
-		return
-	}
+// HandleGooglePhotosSyncHistoryExport returns 404 — no longer supported.
+func (ctx *Context) HandleGooglePhotosSyncHistoryExport(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "Not found", http.StatusNotFound)
+}
 
-	var reqBody struct {
-		Title string `json:"title"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	if strings.TrimSpace(reqBody.Title) == "" {
-		http.Error(w, "album title is required", http.StatusBadRequest)
-		return
-	}
-
-	album, err := ctx.GooglePhotosClient.CreateAlbum(reqBody.Title)
-	if err != nil {
-		log.Printf("[GooglePhotos] Failed to create album: %v", err)
-		http.Error(w, fmt.Sprintf("failed to create album: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	JSONResponse(w, album)
+// HandleGooglePhotosAlbums returns 404 — album management via native API removed.
+func (ctx *Context) HandleGooglePhotosAlbums(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "Album management is not available with rclone-based Google Photos sync.", http.StatusNotFound)
 }

@@ -33,6 +33,10 @@ type Manager struct {
 	cancelFunc             context.CancelFunc
 	isRunning              bool
 	startTime              time.Time
+	// Google Photos sync state (separate from main B2 sync)
+	googlePhotosRunning  bool
+	googlePhotosCancel   context.CancelFunc
+	googlePhotosProgress Progress
 }
 
 // Progress represents sync progress
@@ -45,6 +49,7 @@ type Progress struct {
 	ETA              int     `json:"eta"`                         // seconds
 	CurrentFile      string  `json:"current_file,omitempty"`      // Current file being transferred
 	CurrentFileSize  int64   `json:"current_file_size,omitempty"` // Size of current file
+	Status           string  `json:"status,omitempty"`            // sync status: syncing, completed, error, cancelled
 }
 
 // NewManager creates a new sync manager

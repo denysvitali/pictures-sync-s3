@@ -17,7 +17,6 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/auth"
 	"github.com/denysvitali/pictures-sync-s3/pkg/daemoncontrol"
 	"github.com/denysvitali/pictures-sync-s3/pkg/events"
-	"github.com/denysvitali/pictures-sync-s3/pkg/googlephotos"
 	"github.com/denysvitali/pictures-sync-s3/pkg/handlers"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ntpsync"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ota"
@@ -217,22 +216,6 @@ func main() {
 	// Update Google Photos settings
 	syncMgr.SetGooglePhotos(appSettings.GetGooglePhotosEnabled(), appSettings.GetGooglePhotosRemoteName())
 
-	// Initialize Google Photos native OAuth. The state store is always created
-	// (it's lightweight) so OAuth can be started after settings are updated.
-	// The client is created eagerly when credentials exist at startup, and
-	// lazily via EnsureGooglePhotosClient() when they arrive later.
-	gpStateStore := googlephotos.NewStateStore()
-	var gpClient *googlephotos.Client
-	var gpSyncMgr *googlephotos.SyncManager
-	clientID := appSettings.GetGooglePhotosClientID()
-	clientSecret := appSettings.GetGooglePhotosClientSecret()
-	if clientID != "" && clientSecret != "" {
-		tokenStore := googlephotos.NewTokenStore("")
-		gpClient = googlephotos.NewClient(clientID, clientSecret, tokenStore)
-		gpSyncMgr = googlephotos.NewSyncManager(gpClient, syncMgr)
-		log.Println("Google Photos native OAuth initialized")
-	}
-
 	// Initialize WiFi manager
 	wifiMgr, err := wifimanager.NewManager()
 	if err != nil {
@@ -255,17 +238,14 @@ func main() {
 
 	// Create handler context
 	ctx := &handlers.Context{
-		StateMgr:               stateMgr,
-		SyncMgr:                syncMgr,
-		Daemon:                 handlers.DaemonControlClient{},
-		WiFiMgr:                wifiMgr,
-		AppSettings:            appSettings,
-		SSRFValidator:          ssrfValidator,
-		OTAMgr:                 otaMgr,
-		PasswordMgr:            passwordMgr,
-		GooglePhotosClient:     gpClient,
-		GooglePhotosSyncMgr:    gpSyncMgr,
-		GooglePhotosStateStore: gpStateStore,
+		StateMgr:      stateMgr,
+		SyncMgr:       syncMgr,
+		Daemon:        handlers.DaemonControlClient{},
+		WiFiMgr:       wifiMgr,
+		AppSettings:   appSettings,
+		SSRFValidator: ssrfValidator,
+		OTAMgr:        otaMgr,
+		PasswordMgr:   passwordMgr,
 	}
 
 	allowedOrigins := configuredAllowedOrigins()
@@ -347,23 +327,11 @@ func main() {
 	// against Basic Auth get throttled and locked out (50 attempts / 15 min).
 	authLimiter := ratelimit.NewLimiter(ratelimit.AuthConfig())
 
-	// OAuth callbacks arrive from external redirects (Google -> us) and cannot
-	// carry Basic Auth credentials, so we skip auth for those paths. They are
-	// secured by PKCE + state validation instead.
-	authProtected := auth.BasicAuthMiddlewareWithProvider(passwordMgr, authLimiter)(http.DefaultServeMux)
-
 	// Wrap default mux with middleware chain: security headers -> CORS -> basic auth.
 	// Security headers are applied first so they're present on all responses (including auth failures).
+	authProtected := auth.BasicAuthMiddlewareWithProvider(passwordMgr, authLimiter)(http.DefaultServeMux)
 	handler := auth.SecurityHeadersMiddleware(
-		auth.CORSMiddleware(allowedOrigins, true)(
-			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == "/api/googlephotos/auth/callback" {
-					http.DefaultServeMux.ServeHTTP(w, r)
-					return
-				}
-				authProtected.ServeHTTP(w, r)
-			}),
-		),
+		auth.CORSMiddleware(allowedOrigins, true)(authProtected),
 	)
 	handler = requestTimeoutMiddleware(apiRequestTimeout)(handler)
 
