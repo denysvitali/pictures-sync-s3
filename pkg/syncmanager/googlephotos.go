@@ -26,6 +26,10 @@ func (m *Manager) SyncCardsToGooglePhotos(ctx context.Context) error {
 	}
 	m.googlePhotosRunning = true
 	m.mu.Unlock()
+	m.setGooglePhotosProgress(Progress{
+		Status:      "syncing",
+		CurrentFile: "Preparing Google Photos sync",
+	})
 
 	defer func() {
 		m.mu.Lock()
@@ -83,6 +87,10 @@ func (m *Manager) SyncCardsToGooglePhotos(ctx context.Context) error {
 
 	// Count total files and bytes across all cards first.
 	for _, card := range cards {
+		m.setGooglePhotosProgress(Progress{
+			Status:      "syncing",
+			CurrentFile: fmt.Sprintf("Counting card %s", card.Name),
+		})
 		srcPath := filepath.Join(m.remoteName+":"+m.remotePath, card.Name, "DCIM")
 		log.Printf("Google Photos sync: counting files for card %s", card.Name)
 		var srcFs fs.Fs

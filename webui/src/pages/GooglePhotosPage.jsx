@@ -461,6 +461,9 @@ export default function GooglePhotosPage() {
     }
 
     setProgress(data)
+    if (!data.status) {
+      return
+    }
     if (isActiveSyncStatus(data.status)) {
       setSyncing(true)
       return
@@ -513,7 +516,7 @@ export default function GooglePhotosPage() {
 
   useEffect(() => {
     if (!deviceUrl) return
-    const shouldPollProgress = isActiveSyncStatus(progress?.status)
+    const shouldPollProgress = syncing || isActiveSyncStatus(progress?.status)
 
     if (!shouldPollProgress) {
       if (progressIntervalRef.current) {
@@ -542,7 +545,7 @@ export default function GooglePhotosPage() {
         progressIntervalRef.current = null
       }
     }
-  }, [deviceUrl, progress?.status, loadSyncProgress, loadStatus])
+  }, [deviceUrl, syncing, progress?.status, loadSyncProgress, loadStatus])
 
   const openSettings = useCallback(() => {
     window.location.hash = '#/config'

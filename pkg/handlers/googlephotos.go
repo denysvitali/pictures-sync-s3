@@ -375,8 +375,12 @@ func (ctx *Context) HandleGooglePhotosSyncProgress(w http.ResponseWriter, r *htt
 	}
 
 	progress := ctx.SyncMgr.GetGooglePhotosProgress()
+	status := progress.Status
+	if status == "" && ctx.SyncMgr.IsGooglePhotosRunning() {
+		status = "syncing"
+	}
 	JSONResponse(w, map[string]interface{}{
-		"status":            progress.Status,
+		"status":            status,
 		"current_file":      progress.CurrentFile,
 		"current_file_size": progress.CurrentFileSize,
 		"transferred_files": progress.TransferredFiles,

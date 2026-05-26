@@ -26,17 +26,18 @@ import (
 
 // mockSyncManager implements syncmanager.Manager interface for testing
 type mockSyncManager struct {
-	isRunning      bool
-	cancelCalled   bool
-	syncError      error
-	files          []syncmanager.FileInfo
-	cardIDs        []syncmanager.FileInfo
-	publicLink     string
-	listRemotesFn  func() ([]string, error)
-	listFilesErr   error
-	listCardIDsErr error
-	listPagedErr   error
-	getFileFn      func(path string, w io.Writer) error
+	isRunning           bool
+	cancelCalled        bool
+	syncError           error
+	files               []syncmanager.FileInfo
+	cardIDs             []syncmanager.FileInfo
+	publicLink          string
+	listRemotesFn       func() ([]string, error)
+	listFilesErr        error
+	listCardIDsErr      error
+	listPagedErr        error
+	getFileFn           func(path string, w io.Writer) error
+	googlePhotosRunning bool
 }
 
 func (m *mockSyncManager) IsRunning() bool { return m.isRunning }
@@ -72,7 +73,7 @@ func (m *mockSyncManager) GetFile(path string, w io.Writer) error {
 	return nil
 }
 func (m *mockSyncManager) GetPublicLink(path string) (string, error)     { return m.publicLink, nil }
-func (m *mockSyncManager) IsGooglePhotosRunning() bool                   { return false }
+func (m *mockSyncManager) IsGooglePhotosRunning() bool                   { return m.googlePhotosRunning }
 func (m *mockSyncManager) CancelGooglePhotos() error                     { return nil }
 func (m *mockSyncManager) SyncCardsToGooglePhotos(context.Context) error { return nil }
 func (m *mockSyncManager) GetGooglePhotosProgress() syncmanager.Progress {
@@ -403,6 +404,31 @@ func TestHandleGooglePhotosStatusReadsConfigWithoutListRemotes(t *testing.T) {
 	}
 	if !response["connected"] {
 		t.Fatal("connected = false, want true")
+	}
+}
+
+func TestHandleGooglePhotosSyncProgressReportsRunningStatus(t *testing.T) {
+	ctx, cleanup := setupTestContext(t)
+	defer cleanup()
+
+	mockSync := ctx.SyncMgr.(*mockSyncManager)
+	mockSync.googlePhotosRunning = true
+
+	req := httptest.NewRequest(http.MethodGet, "/api/googlephotos/sync/progress", nil)
+	w := httptest.NewRecorder()
+
+	ctx.HandleGooglePhotosSyncProgress(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var response map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if response["status"] != "syncing" {
+		t.Fatalf("status = %v, want syncing", response["status"])
 	}
 }
 
