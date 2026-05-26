@@ -119,7 +119,8 @@ func TestHandleSystemServicesRestartRejectsUnknownService(t *testing.T) {
 }
 
 func TestHandleSystemPanicReadsAndClearsRecord(t *testing.T) {
-	restore := overridePanicLogPathForTest(t, filepath.Join(t.TempDir(), "panic.json"))
+	dir := t.TempDir()
+	restore := overridePanicLogPathsForTest(t, filepath.Join(dir, "panic.json"), filepath.Join(dir, "panic.log"))
 	defer restore()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/system/panic", nil)
@@ -201,13 +202,19 @@ func overrideServiceRestartForTest(t *testing.T) func() {
 	}
 }
 
-func overridePanicLogPathForTest(t *testing.T, path string) func() {
+func overridePanicLogPathsForTest(t *testing.T, recordPath, crashPath string) func() {
 	t.Helper()
 
 	oldPath := panicLogPath
-	panicLogPath = path
+	oldCrashPath := panicCrashPath
+	oldConfigureCrashOutput := configureCrashOutput
+	panicLogPath = recordPath
+	panicCrashPath = crashPath
+	configureCrashOutput = func(string) error { return nil }
 	return func() {
 		panicLogPath = oldPath
+		panicCrashPath = oldCrashPath
+		configureCrashOutput = oldConfigureCrashOutput
 	}
 }
 

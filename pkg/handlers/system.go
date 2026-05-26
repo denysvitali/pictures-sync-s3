@@ -18,9 +18,11 @@ import (
 )
 
 var (
-	setSystemTime = ntpsync.SetSystemTime
-	generateCert  = tlsconfig.GeneratePersistentSelfSignedCertificate
-	panicLogPath  = paniclog.DefaultPath
+	setSystemTime        = ntpsync.SetSystemTime
+	generateCert         = tlsconfig.GeneratePersistentSelfSignedCertificate
+	configureCrashOutput = paniclog.ConfigureCrashOutput
+	panicLogPath         = paniclog.DefaultPath
+	panicCrashPath       = paniclog.DefaultCrashPath
 )
 
 type systemTimeRequest struct {
@@ -95,7 +97,7 @@ func (ctx *Context) HandleSystemTLSCertificate(w http.ResponseWriter, r *http.Re
 func (ctx *Context) HandleSystemPanic(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		record, err := paniclog.Read(panicLogPath)
+		record, err := paniclog.ReadStored(panicLogPath, panicCrashPath)
 		if err != nil {
 			httputil.Error(w, http.StatusInternalServerError, fmt.Sprintf("Failed to read panic information: %v", err))
 			return
@@ -111,8 +113,12 @@ func (ctx *Context) HandleSystemPanic(w http.ResponseWriter, r *http.Request) {
 			"panic":  record,
 		})
 	case http.MethodDelete:
-		if err := paniclog.Clear(panicLogPath); err != nil {
+		if err := paniclog.ClearStored(panicLogPath, panicCrashPath); err != nil {
 			httputil.Error(w, http.StatusInternalServerError, fmt.Sprintf("Failed to clear panic information: %v", err))
+			return
+		}
+		if err := configureCrashOutput(panicCrashPath); err != nil {
+			httputil.Error(w, http.StatusInternalServerError, fmt.Sprintf("Failed to reset panic capture: %v", err))
 			return
 		}
 		httputil.JSON(w, http.StatusOK, map[string]any{

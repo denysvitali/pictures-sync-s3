@@ -145,6 +145,9 @@ func repairClockAndPersistentCertificateBeforeTLS() {
 func main() {
 	// Enable caller reporting in logs (file:line)
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	if err := paniclog.ConfigureCrashOutput(paniclog.DefaultCrashPath); err != nil {
+		log.Printf("Warning: Failed to configure persistent crash output: %v", err)
+	}
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			if err := paniclog.Capture(paniclog.DefaultPath, "webui-main", recovered); err != nil {
