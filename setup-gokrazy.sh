@@ -130,6 +130,12 @@ cat > "$CONFIG_FILE" <<EOF
 $(emit_packages_json '    ')
   ],
   "PackageConfig": {
+    "github.com/gokrazy/gokrazy/cmd/ntp": {
+      "CommandLineFlags": [
+        "162.159.200.1",
+        "162.159.200.123"
+      ]
+    },
     "github.com/gokrazy/wifi": {
       "DontStart": true
     },
