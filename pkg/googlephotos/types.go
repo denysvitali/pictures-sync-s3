@@ -42,20 +42,20 @@ type MediaMetadata struct {
 
 // Photo contains photo-specific metadata
 type Photo struct {
-	CameraMake      string `json:"cameraMake,omitempty"`
-	CameraModel     string `json:"cameraModel,omitempty"`
+	CameraMake      string  `json:"cameraMake,omitempty"`
+	CameraModel     string  `json:"cameraModel,omitempty"`
 	FocalLength     float64 `json:"focalLength,omitempty"`
 	ApertureFNumber float64 `json:"apertureFNumber,omitempty"`
-	IsoEquivalent   int    `json:"isoEquivalent,omitempty"`
-	ExposureTime    string `json:"exposureTime,omitempty"`
+	IsoEquivalent   int     `json:"isoEquivalent,omitempty"`
+	ExposureTime    string  `json:"exposureTime,omitempty"`
 }
 
 // Video contains video-specific metadata
 type Video struct {
-	CameraMake  string `json:"cameraMake,omitempty"`
-	CameraModel string `json:"cameraModel,omitempty"`
+	CameraMake  string  `json:"cameraMake,omitempty"`
+	CameraModel string  `json:"cameraModel,omitempty"`
 	FPS         float64 `json:"fps,omitempty"`
-	Status      string `json:"status,omitempty"`
+	Status      string  `json:"status,omitempty"`
 }
 
 // SimpleMediaItem is used for batch creation of media items
@@ -84,9 +84,9 @@ type BatchCreateResponse struct {
 
 // NewMediaItemResult represents the result of creating a single media item
 type NewMediaItemResult struct {
-	UploadToken  string      `json:"uploadToken"`
-	Status       *Status     `json:"status,omitempty"`
-	MediaItem    *MediaItem  `json:"mediaItem,omitempty"`
+	UploadToken string     `json:"uploadToken"`
+	Status      *Status    `json:"status,omitempty"`
+	MediaItem   *MediaItem `json:"mediaItem,omitempty"`
 }
 
 // Status represents the status of an API operation
@@ -125,10 +125,10 @@ type TokenResponse struct {
 
 // AuthState holds the PKCE state for OAuth flow
 type AuthState struct {
-	CodeVerifier  string
-	State         string
-	RedirectURI   string
-	ExpiresAt     time.Time
+	CodeVerifier string
+	State        string
+	RedirectURI  string
+	ExpiresAt    time.Time
 }
 
 // CardError tracks an error for a specific card during sync
@@ -139,25 +139,37 @@ type CardError struct {
 
 // SyncProgress tracks the progress of a B2 to Google Photos sync
 type SyncProgress struct {
-	TotalCards      int         `json:"total_cards"`
-	CurrentCard     int         `json:"current_card"`
-	CurrentCardID   string      `json:"current_card_id"`
-	TotalFiles      int         `json:"total_files"`
-	ProcessedFiles  int         `json:"processed_files"`
-	UploadedFiles   int         `json:"uploaded_files"`
-	SkippedFiles    int         `json:"skipped_files"`
-	FailedFiles     int         `json:"failed_files"`
-	CurrentFile     string      `json:"current_file,omitempty"`
-	Status          string      `json:"status"`
-	Error           string      `json:"error,omitempty"`
-	CardErrors      []CardError `json:"card_errors,omitempty"`
+	TotalCards               int         `json:"total_cards"`
+	CurrentCard              int         `json:"current_card"`
+	CurrentCardID            string      `json:"current_card_id"`
+	CurrentCardFiles         int         `json:"current_card_files"`
+	CurrentFileIndex         int         `json:"current_file_index"`
+	TotalFiles               int         `json:"total_files"`
+	ProcessedFiles           int         `json:"processed_files"`
+	UploadedFiles            int         `json:"uploaded_files"`
+	SkippedFiles             int         `json:"skipped_files"`
+	FailedFiles              int         `json:"failed_files"`
+	TotalBytes               int64       `json:"total_bytes"`
+	ProcessedBytes           int64       `json:"processed_bytes"`
+	CurrentFile              string      `json:"current_file,omitempty"`
+	CurrentFilePath          string      `json:"current_file_path,omitempty"`
+	CurrentFileSize          int64       `json:"current_file_size,omitempty"`
+	CurrentFileBytesUploaded int64       `json:"current_file_bytes_uploaded,omitempty"`
+	CurrentFilePercent       int         `json:"current_file_percent"`
+	CurrentPhase             string      `json:"current_phase,omitempty"`
+	BatchPendingFiles        int         `json:"batch_pending_files,omitempty"`
+	StartedAt                *time.Time  `json:"started_at,omitempty"`
+	UpdatedAt                *time.Time  `json:"updated_at,omitempty"`
+	Status                   string      `json:"status"`
+	Error                    string      `json:"error,omitempty"`
+	CardErrors               []CardError `json:"card_errors,omitempty"`
 }
 
 // ConnectionStatus represents the Google Photos connection status
 type ConnectionStatus struct {
-	Connected    bool   `json:"connected"`
-	AlbumsCount  int    `json:"albums_count"`
-	Email        string `json:"email,omitempty"`
+	Connected   bool   `json:"connected"`
+	AlbumsCount int    `json:"albums_count"`
+	Email       string `json:"email,omitempty"`
 }
 
 // IsPhotoOrVideo returns true if the file extension is a photo or video (not RAW)
@@ -182,16 +194,16 @@ func lowerExt(filename string) string {
 }
 
 var photoVideoExts = map[string]bool{
-	".jpg":  true, ".jpeg": true, ".png":  true, ".gif":  true,
-	".heic": true, ".heif": true, ".webp": true, ".bmp":  true,
-	".tiff": true, ".tif":  true, ".mp4":  true, ".mov":  true,
-	".avi":  true, ".mkv":  true, ".wmv":  true, ".flv":  true,
-	".m4v":  true, ".3gp":  true,
+	".jpg": true, ".jpeg": true, ".png": true, ".gif": true,
+	".heic": true, ".heif": true, ".webp": true, ".bmp": true,
+	".tiff": true, ".tif": true, ".mp4": true, ".mov": true,
+	".avi": true, ".mkv": true, ".wmv": true, ".flv": true,
+	".m4v": true, ".3gp": true,
 }
 
 var rawExts = map[string]bool{
-	".cr2":  true, ".cr3":  true, ".nef":  true, ".arw":  true,
-	".dng":  true, ".raf":  true, ".orf":  true, ".rw2":  true,
-	".pef":  true, ".srw":  true, ".3fr":  true, ".erf":  true,
-	".mef":  true, ".mos":  true, ".raw":  true, ".nrw":  true,
+	".cr2": true, ".cr3": true, ".nef": true, ".arw": true,
+	".dng": true, ".raf": true, ".orf": true, ".rw2": true,
+	".pef": true, ".srw": true, ".3fr": true, ".erf": true,
+	".mef": true, ".mos": true, ".raw": true, ".nrw": true,
 }

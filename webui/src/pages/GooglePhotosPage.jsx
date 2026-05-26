@@ -53,6 +53,38 @@ function CopyButton({ text }) {
 const activeSyncStatuses = new Set(['listing_cards', 'syncing'])
 const terminalSyncStatuses = new Set(['completed', 'error', 'cancelled'])
 
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let value = bytes
+  let unitIndex = 0
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024
+    unitIndex += 1
+  }
+  const decimals = value >= 10 || unitIndex === 0 ? 0 : 1
+  return `${value.toFixed(decimals)} ${units[unitIndex]}`
+}
+
+function clampPercent(value) {
+  if (!Number.isFinite(value)) return 0
+  return Math.min(100, Math.max(0, value))
+}
+
+function getOverallPercent(progress) {
+  if (progress?.total_bytes > 0) {
+    return clampPercent((progress.processed_bytes / progress.total_bytes) * 100)
+  }
+  if (progress?.total_files > 0) {
+    return clampPercent((progress.processed_files / progress.total_files) * 100)
+  }
+  return 0
+}
+
+function formatPhase(progress) {
+  return progress?.current_phase || progress?.status?.replace('_', ' ') || 'Syncing'
+}
+
 export default function GooglePhotosPage() {
   const { deviceUrl } = useDevice()
   const toast = useToast()
@@ -282,6 +314,8 @@ export default function GooglePhotosPage() {
 
   const isConnected = status?.connected
   const isConfigured = status?.configured
+  const overallPercent = getOverallPercent(progress)
+  const currentFilePercent = clampPercent(progress?.current_file_percent)
 
   return (
     <div className="space-y-6">
@@ -349,11 +383,16 @@ export default function GooglePhotosPage() {
         <Card>
           <CardHeader>
             <CardTitle>Sync Progress</CardTitle>
+            {progress.total_files > 0 && (
+              <span className="text-xs font-medium text-surface-300">
+                {overallPercent.toFixed(0)}%
+              </span>
+            )}
           </CardHeader>
           <div className="space-y-3">
             <div className="flex items-center justify-between text-sm">
-              <span className="text-surface-300">Status</span>
-              <span className="font-medium text-surface-100 capitalize">{progress.status?.replace('_', ' ')}</span>
+              <span className="text-surface-300">Phase</span>
+              <span className="font-medium text-surface-100">{formatPhase(progress)}</span>
             </div>
             {progress.total_cards > 0 && (
               <div className="flex items-center justify-between text-sm">
@@ -369,28 +408,62 @@ export default function GooglePhotosPage() {
                 <span className="text-surface-300">Files</span>
                 <span className="text-surface-100">
                   {progress.processed_files} / {progress.total_files}
+                  {progress.current_card_files > 0 && progress.current_file_index > 0
+                    ? ` (${progress.current_file_index}/${progress.current_card_files} on this card)`
+                    : ''}
+                </span>
+              </div>
+            )}
+            {progress.total_bytes > 0 && (
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-surface-300">Data</span>
+                <span className="text-surface-100">
+                  {formatBytes(progress.processed_bytes)} / {formatBytes(progress.total_bytes)}
                 </span>
               </div>
             )}
             {progress.current_file && (
-              <div className="text-xs text-surface-500 truncate">
-                Current: {progress.current_file}
+              <div className="rounded-lg bg-surface-900/50 p-3">
+                <div className="flex items-start justify-between gap-3 text-xs">
+                  <div className="min-w-0">
+                    <p className="font-medium text-surface-200 truncate">{progress.current_file}</p>
+                    {progress.current_file_path && (
+                      <p className="mt-0.5 text-surface-500 truncate">{progress.current_file_path}</p>
+                    )}
+                  </div>
+                  {progress.current_file_size > 0 && (
+                    <span className="shrink-0 text-surface-400">{formatBytes(progress.current_file_size)}</span>
+                  )}
+                </div>
+                {progress.current_file_size > 0 && (
+                  <div className="mt-2">
+                    <div className="mb-1 flex items-center justify-between text-xs text-surface-500">
+                      <span>{formatBytes(progress.current_file_bytes_uploaded || 0)} uploaded</span>
+                      <span>{currentFilePercent.toFixed(0)}%</span>
+                    </div>
+                    <div className="h-1.5 w-full rounded-full bg-surface-700 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-emerald-500 transition-all duration-300"
+                        style={{ width: `${currentFilePercent}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             )}
             {(progress.uploaded_files > 0 || progress.skipped_files > 0 || progress.failed_files > 0) && (
-              <div className="flex items-center gap-4 text-xs text-surface-400">
+              <div className="flex flex-wrap items-center gap-4 text-xs text-surface-400">
                 <span className="text-emerald-400">{progress.uploaded_files} uploaded</span>
                 {progress.skipped_files > 0 && <span className="text-amber-400">{progress.skipped_files} skipped</span>}
                 {progress.failed_files > 0 && <span className="text-rose-400">{progress.failed_files} failed</span>}
+                {progress.batch_pending_files > 0 && <span>{progress.batch_pending_files} waiting for album</span>}
               </div>
             )}
             {progress.total_files > 0 && (
               <div className="h-2 w-full rounded-full bg-surface-700 overflow-hidden">
                 <div
                   className="h-full rounded-full bg-brand-500 transition-all duration-300"
-                  style={{
-                    width: `${Math.min(100, (progress.processed_files / Math.max(1, progress.total_files)) * 100)}%`,
-                  }}
+                  style={{ width: `${overallPercent}%` }}
                 />
               </div>
             )}

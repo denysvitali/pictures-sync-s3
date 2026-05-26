@@ -41,6 +41,21 @@ type syncManagerWithDownloadTimeout interface {
 	GetFileWithTimeout(path string, w io.Writer, timeout time.Duration) error
 }
 
+type progressReader struct {
+	reader    io.Reader
+	onRead    func(int64)
+	readBytes int64
+}
+
+func (r *progressReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	if n > 0 {
+		r.readBytes += int64(n)
+		r.onRead(r.readBytes)
+	}
+	return n, err
+}
+
 // NewSyncManager creates a new sync manager for B2 to Google Photos
 func NewSyncManager(client *Client, syncMgr SyncManagerMinimal) *SyncManager {
 	return &SyncManager{
@@ -68,8 +83,11 @@ func (sm *SyncManager) Progress() *SyncProgress {
 
 // Cancel cancels the current sync operation
 func (sm *SyncManager) Cancel() {
-	if sm.cancel != nil {
-		sm.cancel()
+	sm.mu.RLock()
+	cancel := sm.cancel
+	sm.mu.RUnlock()
+	if cancel != nil {
+		cancel()
 	}
 }
 
@@ -81,13 +99,23 @@ func (sm *SyncManager) Sync(ctx context.Context) error {
 	defer sm.running.Store(false)
 
 	ctx, cancel := context.WithCancel(ctx)
+	sm.mu.Lock()
 	sm.cancel = cancel
-	defer func() { sm.cancel = nil }()
+	sm.mu.Unlock()
+	defer func() {
+		sm.mu.Lock()
+		sm.cancel = nil
+		sm.mu.Unlock()
+	}()
 
 	// Initialize progress
+	startedAt := time.Now()
 	sm.mu.Lock()
 	sm.progress = &SyncProgress{
-		Status: "listing_cards",
+		Status:       "listing_cards",
+		CurrentPhase: "Listing cards",
+		StartedAt:    &startedAt,
+		UpdatedAt:    &startedAt,
 	}
 	sm.mu.Unlock()
 
@@ -101,6 +129,8 @@ func (sm *SyncManager) Sync(ctx context.Context) error {
 	sm.mu.Lock()
 	sm.progress.TotalCards = len(cards)
 	sm.progress.Status = "syncing"
+	sm.progress.CurrentPhase = "Preparing cards"
+	sm.progress.UpdatedAt = timePtr(time.Now())
 	sm.mu.Unlock()
 
 	log.Printf("[GooglePhotos] Starting sync of %d cards to Google Photos", len(cards))
@@ -120,6 +150,15 @@ func (sm *SyncManager) Sync(ctx context.Context) error {
 		sm.progress.CurrentCard = i + 1
 		sm.progress.CurrentCardID = cardID
 		sm.progress.CurrentFile = ""
+		sm.progress.CurrentFilePath = ""
+		sm.progress.CurrentFileSize = 0
+		sm.progress.CurrentFileIndex = 0
+		sm.progress.CurrentFileBytesUploaded = 0
+		sm.progress.CurrentFilePercent = 0
+		sm.progress.CurrentCardFiles = 0
+		sm.progress.BatchPendingFiles = 0
+		sm.progress.CurrentPhase = "Listing files"
+		sm.progress.UpdatedAt = timePtr(time.Now())
 		sm.mu.Unlock()
 
 		// Extract actual card ID from "card-{id}" directory name
@@ -160,6 +199,13 @@ func (sm *SyncManager) Sync(ctx context.Context) error {
 		sm.progress.Error = ""
 	}
 	sm.progress.CurrentFile = ""
+	sm.progress.CurrentFilePath = ""
+	sm.progress.CurrentFileSize = 0
+	sm.progress.CurrentFileBytesUploaded = 0
+	sm.progress.CurrentFilePercent = 0
+	sm.progress.CurrentPhase = ""
+	sm.progress.BatchPendingFiles = 0
+	sm.progress.UpdatedAt = timePtr(time.Now())
 	sm.mu.Unlock()
 
 	log.Printf("[GooglePhotos] Sync complete: %d uploaded, %d skipped, %d failed", totalUploaded, totalSkipped, totalFailed)
@@ -182,6 +228,15 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 	}
 	sortMediaForUpload(mediaFiles)
 
+	cardBytes := totalFileSize(mediaFiles)
+	sm.mu.Lock()
+	sm.progress.CurrentCardFiles = len(mediaFiles)
+	sm.progress.TotalFiles += len(mediaFiles)
+	sm.progress.TotalBytes += cardBytes
+	sm.progress.CurrentPhase = "Preparing album"
+	sm.progress.UpdatedAt = timePtr(time.Now())
+	sm.mu.Unlock()
+
 	// Find or create album for this card only after there is something to upload.
 	albumTitle := "Card " + cardID
 	album, err := sm.client.FindAlbumByTitle(albumTitle)
@@ -197,10 +252,6 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 		}
 	}
 
-	sm.mu.Lock()
-	sm.progress.TotalFiles += len(mediaFiles)
-	sm.mu.Unlock()
-
 	log.Printf("[GooglePhotos] Syncing %d files from card %s to album %s", len(mediaFiles), cardID, albumTitle)
 
 	// Process files in batches
@@ -212,7 +263,13 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 
 		sm.mu.Lock()
 		sm.progress.CurrentFile = file.Name
-		sm.progress.ProcessedFiles++
+		sm.progress.CurrentFilePath = file.Path
+		sm.progress.CurrentFileSize = file.Size
+		sm.progress.CurrentFileIndex = fileIndex + 1
+		sm.progress.CurrentFileBytesUploaded = 0
+		sm.progress.CurrentFilePercent = 0
+		sm.progress.CurrentPhase = "Downloading"
+		sm.progress.UpdatedAt = timePtr(time.Now())
 		sm.mu.Unlock()
 
 		log.Printf("[GooglePhotos] Uploading file %d/%d from card %s: %s (%d bytes)", fileIndex+1, len(mediaFiles), cardID, file.Path, file.Size)
@@ -222,15 +279,24 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 		if err != nil {
 			log.Printf("[GooglePhotos] Failed to download %s: %v", file.Path, err)
 			failed++
+			sm.finishFileProgress(file.Size, uploaded, skipped, failed)
 			continue
 		}
 
 		// Upload to Google Photos
-		uploadToken, err := sm.client.UploadMediaReader(fileData, fileSize, file.Name)
+		sm.setUploadProgress(file.Name, file.Path, file.Size, 0)
+		uploadReader := &progressReader{
+			reader: fileData,
+			onRead: func(uploadedBytes int64) {
+				sm.setUploadProgress(file.Name, file.Path, file.Size, uploadedBytes)
+			},
+		}
+		uploadToken, err := sm.client.UploadMediaReader(uploadReader, fileSize, file.Name)
 		cleanup()
 		if err != nil {
 			log.Printf("[GooglePhotos] Failed to upload %s: %v", file.Name, err)
 			failed++
+			sm.finishFileProgress(file.Size, uploaded, skipped, failed)
 			continue
 		}
 
@@ -242,9 +308,12 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 		})
 
 		uploaded++
+		sm.finishFileProgress(file.Size, uploaded, skipped, failed)
+		sm.setBatchPending(len(batch))
 
 		// Batch create when we reach the limit
 		if len(batch) >= batchSize {
+			sm.setPhase("Adding to album")
 			successCount, failCount, err := sm.createBatch(album.ID, batch)
 			if err != nil {
 				log.Printf("[GooglePhotos] Failed to create batch in album %s: %v", albumTitle, err)
@@ -254,6 +323,8 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 			failed += failCount
 			_ = successCount
 			batch = batch[:0]
+			sm.setCounts(uploaded, skipped, failed)
+			sm.setBatchPending(0)
 
 			// Small delay to avoid rate limiting
 			time.Sleep(100 * time.Millisecond)
@@ -262,6 +333,7 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 
 	// Create remaining items in batch
 	if len(batch) > 0 {
+		sm.setPhase("Adding to album")
 		successCount, failCount, err := sm.createBatch(album.ID, batch)
 		if err != nil {
 			log.Printf("[GooglePhotos] Failed to create final batch in album %s: %v", albumTitle, err)
@@ -270,6 +342,8 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 		uploaded -= failCount
 		failed += failCount
 		_ = successCount
+		sm.setCounts(uploaded, skipped, failed)
+		sm.setBatchPending(0)
 	}
 
 	return uploaded, skipped, failed, nil
@@ -314,16 +388,29 @@ func (sm *SyncManager) listMediaFiles(ctx context.Context, path string) ([]syncm
 
 func sortMediaForUpload(files []syncmanager.FileInfo) {
 	sort.SliceStable(files, func(i, j int) bool {
-		iVideo := IsVideo(files[i].Name)
-		jVideo := IsVideo(files[j].Name)
-		if iVideo != jVideo {
-			return !iVideo
+		iModTime := files[i].ModTime
+		jModTime := files[j].ModTime
+		if !iModTime.IsZero() && !jModTime.IsZero() && !iModTime.Equal(jModTime) {
+			return iModTime.Before(jModTime)
 		}
-		if files[i].Size != files[j].Size {
-			return files[i].Size < files[j].Size
+		if iModTime.IsZero() != jModTime.IsZero() {
+			return !iModTime.IsZero()
 		}
-		return files[i].Path < files[j].Path
+		if files[i].Path != files[j].Path {
+			return files[i].Path < files[j].Path
+		}
+		return files[i].Name < files[j].Name
 	})
+}
+
+func totalFileSize(files []syncmanager.FileInfo) int64 {
+	var total int64
+	for _, file := range files {
+		if file.Size > 0 {
+			total += file.Size
+		}
+	}
+	return total
 }
 
 // downloadFile downloads a file from B2 using the sync manager. Native Google
@@ -408,6 +495,7 @@ func (sm *SyncManager) setError(err error) {
 	if sm.progress != nil {
 		sm.progress.Status = "error"
 		sm.progress.Error = err.Error()
+		sm.progress.UpdatedAt = timePtr(time.Now())
 	}
 }
 
@@ -416,5 +504,87 @@ func (sm *SyncManager) setStatus(status string) {
 	defer sm.mu.Unlock()
 	if sm.progress != nil {
 		sm.progress.Status = status
+		sm.progress.UpdatedAt = timePtr(time.Now())
 	}
+}
+
+func (sm *SyncManager) setPhase(phase string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if sm.progress != nil {
+		sm.progress.CurrentPhase = phase
+		sm.progress.UpdatedAt = timePtr(time.Now())
+	}
+}
+
+func (sm *SyncManager) setUploadProgress(name, path string, size, uploadedBytes int64) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if sm.progress == nil {
+		return
+	}
+	sm.progress.CurrentFile = name
+	sm.progress.CurrentFilePath = path
+	sm.progress.CurrentFileSize = size
+	if uploadedBytes > sm.progress.CurrentFileBytesUploaded {
+		sm.progress.ProcessedBytes += uploadedBytes - sm.progress.CurrentFileBytesUploaded
+	}
+	sm.progress.CurrentFileBytesUploaded = uploadedBytes
+	sm.progress.CurrentFilePercent = percent(uploadedBytes, size)
+	sm.progress.CurrentPhase = "Uploading to Google Photos"
+	sm.progress.UpdatedAt = timePtr(time.Now())
+}
+
+func (sm *SyncManager) finishFileProgress(size int64, uploaded, skipped, failed int) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if sm.progress == nil {
+		return
+	}
+	if size > sm.progress.CurrentFileBytesUploaded {
+		sm.progress.ProcessedBytes += size - sm.progress.CurrentFileBytesUploaded
+	}
+	sm.progress.ProcessedFiles++
+	sm.progress.UploadedFiles = uploaded
+	sm.progress.SkippedFiles = skipped
+	sm.progress.FailedFiles = failed
+	sm.progress.CurrentFileBytesUploaded = size
+	sm.progress.CurrentFilePercent = 100
+	sm.progress.CurrentPhase = "Queued for album"
+	sm.progress.UpdatedAt = timePtr(time.Now())
+}
+
+func (sm *SyncManager) setCounts(uploaded, skipped, failed int) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if sm.progress != nil {
+		sm.progress.UploadedFiles = uploaded
+		sm.progress.SkippedFiles = skipped
+		sm.progress.FailedFiles = failed
+		sm.progress.UpdatedAt = timePtr(time.Now())
+	}
+}
+
+func (sm *SyncManager) setBatchPending(pending int) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if sm.progress != nil {
+		sm.progress.BatchPendingFiles = pending
+		sm.progress.UpdatedAt = timePtr(time.Now())
+	}
+}
+
+func percent(part, total int64) int {
+	if total <= 0 || part <= 0 {
+		return 0
+	}
+	p := int((part * 100) / total)
+	if p > 100 {
+		return 100
+	}
+	return p
+}
+
+func timePtr(t time.Time) *time.Time {
+	return &t
 }
