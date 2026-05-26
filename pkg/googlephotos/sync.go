@@ -17,7 +17,8 @@ import (
 )
 
 const (
-	batchSize = 10 // Google Photos allows up to 50; smaller batches make album updates visible sooner.
+	batchSize                 = 10 // Google Photos allows up to 50; smaller batches make album updates visible sooner.
+	googlePhotosUploadWorkers = 3
 )
 
 // SyncManager orchestrates syncing photos from B2 to Google Photos
@@ -42,16 +43,15 @@ type syncManagerWithDownloadTimeout interface {
 }
 
 type mediaUploadResult struct {
-	file syncmanager.FileInfo
-	item *NewMediaItem
-	err  error
-	ack  chan struct{}
+	index int
+	file  syncmanager.FileInfo
+	item  *NewMediaItem
+	err   error
 }
 
-func (r mediaUploadResult) done() {
-	if r.ack != nil {
-		close(r.ack)
-	}
+type indexedMediaFile struct {
+	index int
+	file  syncmanager.FileInfo
 }
 
 type progressReader struct {
@@ -268,44 +268,55 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 	log.Printf("[GooglePhotos] Syncing %d files from card %s to album %s", len(mediaFiles), cardID, albumTitle)
 
 	var batch []*NewMediaItem
+	pendingResults := make(map[int]mediaUploadResult)
+	nextResult := 0
 	for result := range sm.uploadMediaItems(ctx, cardID, mediaFiles) {
-		if result.err != nil {
-			log.Printf("[GooglePhotos] Failed to upload %s: %v", result.file.Name, result.err)
-			failed++
-			sm.finishFileProgress(result.file.Size, uploaded, skipped, failed)
-			result.done()
-			continue
+		pendingResults[result.index] = result
+
+		for {
+			orderedResult, ok := pendingResults[nextResult]
+			if !ok {
+				break
+			}
+			delete(pendingResults, nextResult)
+			nextResult++
+
+			if orderedResult.err != nil {
+				log.Printf("[GooglePhotos] Failed to upload %s: %v", orderedResult.file.Name, orderedResult.err)
+				failed++
+				sm.finishFileProgress(orderedResult.file, uploaded, skipped, failed)
+				continue
+			}
+
+			batch = append(batch, orderedResult.item)
+			uploaded++
+			sm.finishFileProgress(orderedResult.file, uploaded, skipped, failed)
+			sm.setBatchPending(len(batch))
+
+			if ctx.Err() != nil {
+				return uploaded, skipped, failed, ctx.Err()
+			}
+
+			if len(batch) < batchSize {
+				continue
+			}
+
+			sm.setPhase("Adding to album")
+			successCount, failCount, err := sm.createBatch(album.ID, batch)
+			if err != nil {
+				log.Printf("[GooglePhotos] Failed to create batch in album %s: %v", albumTitle, err)
+			}
+			log.Printf("[GooglePhotos] Created media items in album %s: success=%d failed=%d", albumTitle, successCount, failCount)
+			uploaded -= failCount
+			failed += failCount
+			_ = successCount
+			batch = batch[:0]
+			sm.setCounts(uploaded, skipped, failed)
+			sm.setBatchPending(0)
+
+			// Small delay to avoid rate limiting
+			time.Sleep(100 * time.Millisecond)
 		}
-
-		batch = append(batch, result.item)
-		uploaded++
-		sm.finishFileProgress(result.file.Size, uploaded, skipped, failed)
-		sm.setBatchPending(len(batch))
-		result.done()
-
-		if ctx.Err() != nil {
-			return uploaded, skipped, failed, ctx.Err()
-		}
-
-		if len(batch) < batchSize {
-			continue
-		}
-
-		sm.setPhase("Adding to album")
-		successCount, failCount, err := sm.createBatch(album.ID, batch)
-		if err != nil {
-			log.Printf("[GooglePhotos] Failed to create batch in album %s: %v", albumTitle, err)
-		}
-		log.Printf("[GooglePhotos] Created media items in album %s: success=%d failed=%d", albumTitle, successCount, failCount)
-		uploaded -= failCount
-		failed += failCount
-		_ = successCount
-		batch = batch[:0]
-		sm.setCounts(uploaded, skipped, failed)
-		sm.setBatchPending(0)
-
-		// Small delay to avoid rate limiting
-		time.Sleep(100 * time.Millisecond)
 	}
 
 	if ctx.Err() != nil {
@@ -332,47 +343,75 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 
 func (sm *SyncManager) uploadMediaItems(ctx context.Context, cardID string, mediaFiles []syncmanager.FileInfo) <-chan mediaUploadResult {
 	results := make(chan mediaUploadResult)
+	jobs := make(chan indexedMediaFile)
+	workerCount := googlePhotosUploadWorkers
+	if len(mediaFiles) < workerCount {
+		workerCount = len(mediaFiles)
+	}
+
 	go func() {
-		defer close(results)
 		for fileIndex, file := range mediaFiles {
-			if ctx.Err() != nil {
-				return
-			}
-
-			sm.mu.Lock()
-			sm.progress.CurrentFile = file.Name
-			sm.progress.CurrentFilePath = file.Path
-			sm.progress.CurrentFileSize = file.Size
-			sm.progress.CurrentFileIndex = fileIndex + 1
-			sm.progress.CurrentFileBytesUploaded = 0
-			sm.progress.CurrentFilePercent = 0
-			sm.progress.CurrentPhase = "Downloading"
-			sm.progress.UpdatedAt = timePtr(time.Now())
-			sm.mu.Unlock()
-
-			log.Printf("[GooglePhotos] Uploading file %d/%d from card %s: %s (%d bytes)", fileIndex+1, len(mediaFiles), cardID, file.Path, file.Size)
-
-			item, err := sm.uploadMediaItem(file)
-			result := mediaUploadResult{
-				file: file,
-				item: item,
-				err:  err,
-				ack:  make(chan struct{}),
-			}
+			job := indexedMediaFile{index: fileIndex, file: file}
 			select {
-			case results <- result:
+			case jobs <- job:
 			case <-ctx.Done():
-				return
-			}
-
-			select {
-			case <-result.ack:
-			case <-ctx.Done():
+				close(jobs)
 				return
 			}
 		}
+		close(jobs)
 	}()
+
+	var wg sync.WaitGroup
+	wg.Add(workerCount)
+	for range workerCount {
+		go func() {
+			defer wg.Done()
+			for job := range jobs {
+				if ctx.Err() != nil {
+					return
+				}
+
+				file := job.file
+				sm.startFileProgress(job.index, len(mediaFiles), cardID, file)
+
+				item, err := sm.uploadMediaItem(file)
+				result := mediaUploadResult{
+					index: job.index,
+					file:  file,
+					item:  item,
+					err:   err,
+				}
+				select {
+				case results <- result:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
 	return results
+}
+
+func (sm *SyncManager) startFileProgress(fileIndex, totalFiles int, cardID string, file syncmanager.FileInfo) {
+	sm.mu.Lock()
+	sm.progress.CurrentFile = file.Name
+	sm.progress.CurrentFilePath = file.Path
+	sm.progress.CurrentFileSize = file.Size
+	sm.progress.CurrentFileIndex = fileIndex + 1
+	sm.progress.CurrentFileBytesUploaded = 0
+	sm.progress.CurrentFilePercent = 0
+	sm.progress.CurrentPhase = "Downloading"
+	sm.progress.UpdatedAt = timePtr(time.Now())
+	sm.mu.Unlock()
+
+	log.Printf("[GooglePhotos] Uploading file %d/%d from card %s: %s (%d bytes)", fileIndex+1, totalFiles, cardID, file.Path, file.Size)
 }
 
 func (sm *SyncManager) uploadMediaItem(file syncmanager.FileInfo) (*NewMediaItem, error) {
@@ -579,29 +618,29 @@ func (sm *SyncManager) setUploadProgress(name, path string, size, uploadedBytes 
 	sm.progress.CurrentFile = name
 	sm.progress.CurrentFilePath = path
 	sm.progress.CurrentFileSize = size
-	if uploadedBytes > sm.progress.CurrentFileBytesUploaded {
-		sm.progress.ProcessedBytes += uploadedBytes - sm.progress.CurrentFileBytesUploaded
-	}
 	sm.progress.CurrentFileBytesUploaded = uploadedBytes
 	sm.progress.CurrentFilePercent = percent(uploadedBytes, size)
 	sm.progress.CurrentPhase = "Uploading to Google Photos"
 	sm.progress.UpdatedAt = timePtr(time.Now())
 }
 
-func (sm *SyncManager) finishFileProgress(size int64, uploaded, skipped, failed int) {
+func (sm *SyncManager) finishFileProgress(file syncmanager.FileInfo, uploaded, skipped, failed int) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	if sm.progress == nil {
 		return
 	}
-	if size > sm.progress.CurrentFileBytesUploaded {
-		sm.progress.ProcessedBytes += size - sm.progress.CurrentFileBytesUploaded
+	if file.Size > 0 {
+		sm.progress.ProcessedBytes += file.Size
 	}
 	sm.progress.ProcessedFiles++
+	sm.progress.CurrentFile = file.Name
+	sm.progress.CurrentFilePath = file.Path
+	sm.progress.CurrentFileSize = file.Size
 	sm.progress.UploadedFiles = uploaded
 	sm.progress.SkippedFiles = skipped
 	sm.progress.FailedFiles = failed
-	sm.progress.CurrentFileBytesUploaded = size
+	sm.progress.CurrentFileBytesUploaded = file.Size
 	sm.progress.CurrentFilePercent = 100
 	sm.progress.CurrentPhase = "Queued for album"
 	sm.progress.UpdatedAt = timePtr(time.Now())

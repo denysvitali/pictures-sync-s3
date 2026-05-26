@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 )
 
 type fakeRemoteSyncManager struct {
+	mu        sync.Mutex
 	files     map[string][]syncmanager.FileInfo
 	contents  map[string]string
 	listed    []string
@@ -25,6 +27,8 @@ func (m *fakeRemoteSyncManager) ListCardIDs() ([]syncmanager.FileInfo, error) {
 }
 
 func (m *fakeRemoteSyncManager) ListFiles(path string) ([]syncmanager.FileInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.listed = append(m.listed, path)
 	files, ok := m.files[path]
 	if !ok {
@@ -34,8 +38,10 @@ func (m *fakeRemoteSyncManager) ListFiles(path string) ([]syncmanager.FileInfo, 
 }
 
 func (m *fakeRemoteSyncManager) GetFile(path string, w io.Writer) error {
+	m.mu.Lock()
 	m.downloads = append(m.downloads, path)
 	content, ok := m.contents[path]
+	m.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("unexpected download path %q", path)
 	}
@@ -241,6 +247,105 @@ func TestSyncCardAddsMediaToAlbumInModTimeOrder(t *testing.T) {
 		t.Fatalf("syncCard counts = uploaded %d skipped %d failed %d, want 3 0 0", uploaded, skipped, failed)
 	}
 	if got, want := strings.Join(batchFilenames, ","), "IMG_0001.JPG,IMG_0002.JPG,IMG_0003.JPG"; got != want {
+		t.Fatalf("batch create filenames = %q, want %q", got, want)
+	}
+}
+
+func TestSyncCardUploadsMediaInParallelAndAddsAlbumInModTimeOrder(t *testing.T) {
+	times := []time.Time{
+		time.Date(2026, 1, 2, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC),
+		time.Date(2026, 1, 2, 11, 0, 0, 0, time.UTC),
+		time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC),
+	}
+	remote := &fakeRemoteSyncManager{
+		files: map[string][]syncmanager.FileInfo{
+			"card-parallel/DCIM": {
+				{Name: "IMG_0004.JPG", Path: "card-parallel/DCIM/IMG_0004.JPG", ModTime: times[3]},
+				{Name: "IMG_0002.JPG", Path: "card-parallel/DCIM/IMG_0002.JPG", ModTime: times[1]},
+				{Name: "IMG_0001.JPG", Path: "card-parallel/DCIM/IMG_0001.JPG", ModTime: times[0]},
+				{Name: "IMG_0003.JPG", Path: "card-parallel/DCIM/IMG_0003.JPG", ModTime: times[2]},
+			},
+		},
+		contents: map[string]string{
+			"card-parallel/DCIM/IMG_0001.JPG": "jpeg 1",
+			"card-parallel/DCIM/IMG_0002.JPG": "jpeg 2",
+			"card-parallel/DCIM/IMG_0003.JPG": "jpeg 3",
+			"card-parallel/DCIM/IMG_0004.JPG": "jpeg 4",
+		},
+	}
+
+	uploadStarted := make(chan string, 4)
+	releaseUploads := make(chan struct{})
+	sawConcurrentUploads := make(chan struct{})
+	var once sync.Once
+	var batchMu sync.Mutex
+	var batchFilenames []string
+
+	client := newTestClient(t, func(req *http.Request) (*http.Response, error) {
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/v1/albums":
+			return jsonResponse(http.StatusOK, `{}`), nil
+		case req.Method == http.MethodPost && req.URL.Path == "/v1/albums":
+			return jsonResponse(http.StatusOK, `{"id":"album-1","title":"Card parallel"}`), nil
+		case req.Method == http.MethodPost && req.URL.Path == "/v1/uploads":
+			filename := req.Header.Get("X-Goog-Upload-File-Name")
+			uploadStarted <- filename
+			if len(uploadStarted) >= 2 {
+				once.Do(func() { close(sawConcurrentUploads) })
+			}
+			<-releaseUploads
+			return textResponse(http.StatusOK, "upload-token-"+filename), nil
+		case req.Method == http.MethodPost && req.URL.Path == "/v1/mediaItems:batchCreate":
+			var batch BatchCreateRequest
+			if err := json.NewDecoder(req.Body).Decode(&batch); err != nil {
+				t.Fatalf("failed to decode batch create request: %v", err)
+			}
+			batchMu.Lock()
+			for _, item := range batch.NewMediaItems {
+				batchFilenames = append(batchFilenames, item.SimpleMediaItem.FileName)
+			}
+			batchMu.Unlock()
+			return jsonResponse(http.StatusOK, `{"newMediaItemResults":[{"status":{"code":0}},{"status":{"code":0}},{"status":{"code":0}},{"status":{"code":0}}]}`), nil
+		default:
+			t.Fatalf("unexpected Google Photos request: %s %s", req.Method, req.URL.String())
+			return nil, nil
+		}
+	})
+
+	manager := NewSyncManager(client, remote)
+	manager.progress = &SyncProgress{}
+	done := make(chan error, 1)
+	go func() {
+		uploaded, skipped, failed, err := manager.syncCard(context.Background(), "parallel", "card-parallel")
+		if err != nil {
+			done <- err
+			return
+		}
+		if uploaded != 4 || skipped != 0 || failed != 0 {
+			done <- fmt.Errorf("syncCard counts = uploaded %d skipped %d failed %d, want 4 0 0", uploaded, skipped, failed)
+			return
+		}
+		done <- nil
+	}()
+
+	select {
+	case <-sawConcurrentUploads:
+	case err := <-done:
+		t.Fatalf("syncCard finished before concurrent uploads were observed: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for concurrent uploads")
+	}
+	close(releaseUploads)
+
+	if err := <-done; err != nil {
+		t.Fatalf("syncCard returned error: %v", err)
+	}
+
+	batchMu.Lock()
+	got := strings.Join(batchFilenames, ",")
+	batchMu.Unlock()
+	if want := "IMG_0001.JPG,IMG_0002.JPG,IMG_0003.JPG,IMG_0004.JPG"; got != want {
 		t.Fatalf("batch create filenames = %q, want %q", got, want)
 	}
 }
