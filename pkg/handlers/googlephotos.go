@@ -365,6 +365,7 @@ func (ctx *Context) HandleGooglePhotosSyncProgress(w http.ResponseWriter, r *htt
 		"percentage":        progress.Percentage,
 		"speed":             progress.Speed,
 		"eta":               progress.ETA,
+		"error":             progress.Error,
 	})
 }
 

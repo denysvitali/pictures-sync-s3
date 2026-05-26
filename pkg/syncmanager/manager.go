@@ -50,6 +50,7 @@ type Progress struct {
 	CurrentFile      string  `json:"current_file,omitempty"`      // Current file being transferred
 	CurrentFileSize  int64   `json:"current_file_size,omitempty"` // Size of current file
 	Status           string  `json:"status,omitempty"`            // sync status: syncing, completed, error, cancelled
+	Error            string  `json:"error,omitempty"`             // Error message when status is error
 }
 
 // NewManager creates a new sync manager

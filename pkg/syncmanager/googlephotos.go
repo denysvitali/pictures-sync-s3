@@ -41,6 +41,17 @@ func (m *Manager) SyncCardsToGooglePhotos(ctx context.Context) error {
 		return err
 	}
 
+	// Pre-flight: verify the Google Photos remote exists in rclone config.
+	gpRemote := m.googlePhotosRemoteName
+	if gpRemote == "" {
+		gpRemote = "gphotos"
+	}
+	_, err := fs.NewFs(ctx, gpRemote+":")
+	if err != nil {
+		m.setGooglePhotosProgress(Progress{Status: "error", Error: fmt.Sprintf("Google Photos remote %q is not configured. Complete the OAuth connection first.", gpRemote)})
+		return fmt.Errorf("google photos remote %q not configured: %w", gpRemote, err)
+	}
+
 	// List cards from the B2 remote.
 	cards, err := m.listCardIDsLocked(ctx)
 	if err != nil {
@@ -160,6 +171,7 @@ func (m *Manager) SyncCardsToGooglePhotos(ctx context.Context) error {
 			TransferredFiles: processedFiles,
 			TotalFiles:       totalFiles,
 			BytesTransferred: processedBytes,
+			Error:            lastErr.Error(),
 		})
 		return lastErr
 	}
@@ -257,15 +269,32 @@ func (m *Manager) listCardIDsLocked(ctx context.Context) ([]FileInfo, error) {
 	return cards, nil
 }
 
-// countFiles counts files and total bytes in a filesystem.
+// countFiles counts files and total bytes recursively in a filesystem.
 func (m *Manager) countFiles(ctx context.Context, f fs.Fs) (int, int64) {
-	entries, _ := f.List(ctx, "")
+	return m.countFilesInDir(ctx, f, "")
+}
+
+// countFilesInDir recursively counts files in a directory.
+func (m *Manager) countFilesInDir(ctx context.Context, f fs.Fs, dir string) (int, int64) {
+	entries, err := f.List(ctx, dir)
+	if err != nil {
+		return 0, 0
+	}
 	var count int
 	var bytes int64
 	for _, entry := range entries {
+		select {
+		case <-ctx.Done():
+			return count, bytes
+		default:
+		}
 		if _, ok := entry.(fs.Object); ok {
 			count++
 			bytes += entry.Size()
+		} else if dirEntry, ok := entry.(fs.Directory); ok {
+			subCount, subBytes := m.countFilesInDir(ctx, f, dirEntry.Remote())
+			count += subCount
+			bytes += subBytes
 		}
 	}
 	return count, bytes
