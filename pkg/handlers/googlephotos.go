@@ -18,17 +18,12 @@ import (
 )
 
 // HandleGooglePhotosStatus returns whether Google Photos is configured via
-// rclone. "configured" means the gphotos remote exists in rclone config and
-// GooglePhotosEnabled + GooglePhotosRemoteName are set.
+// rclone. This reads rclone.conf directly instead of going through rclone's
+// global config state, so it stays responsive while a long sync is running.
 func (ctx *Context) HandleGooglePhotosStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
-	}
-
-	remotes, err := ctx.SyncMgr.ListRemotes()
-	if err != nil {
-		log.Printf("[GooglePhotos] Failed to list remotes: %v", err)
 	}
 
 	configured := false
@@ -40,11 +35,10 @@ func (ctx *Context) HandleGooglePhotosStatus(w http.ResponseWriter, r *http.Requ
 
 	connected := false
 	if gpRemoteName != "" {
-		for _, name := range remotes {
-			if strings.EqualFold(name, gpRemoteName) {
-				connected = true
-				break
-			}
+		var err error
+		connected, err = rcloneConfigHasSection(gpRemoteName)
+		if err != nil {
+			log.Printf("[GooglePhotos] Failed to read rclone config: %v", err)
 		}
 	}
 
@@ -52,6 +46,32 @@ func (ctx *Context) HandleGooglePhotosStatus(w http.ResponseWriter, r *http.Requ
 		"configured": configured && gpRemoteName != "",
 		"connected":  connected,
 	})
+}
+
+func rcloneConfigHasSection(sectionName string) (bool, error) {
+	sectionName = strings.TrimSpace(sectionName)
+	if sectionName == "" {
+		return false, nil
+	}
+
+	data, err := os.ReadFile(state.GetRcloneConfigPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			name := strings.TrimSpace(trimmed[1 : len(trimmed)-1])
+			if strings.EqualFold(name, sectionName) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // HandleGooglePhotosAuthStart initiates the OAuth PKCE flow for Google Photos.

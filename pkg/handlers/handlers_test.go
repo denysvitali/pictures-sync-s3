@@ -32,6 +32,7 @@ type mockSyncManager struct {
 	files          []syncmanager.FileInfo
 	cardIDs        []syncmanager.FileInfo
 	publicLink     string
+	listRemotesFn  func() ([]string, error)
 	listFilesErr   error
 	listCardIDsErr error
 	listPagedErr   error
@@ -43,10 +44,15 @@ func (m *mockSyncManager) Cancel() error   { m.cancelCalled = true; return nil }
 func (m *mockSyncManager) Sync(string, string, int, int64) error {
 	return m.syncError
 }
-func (m *mockSyncManager) SetRemote(string, string)       {}
-func (m *mockSyncManager) SetGooglePhotos(bool, string)   {}
-func (m *mockSyncManager) ListRemotes() ([]string, error) { return []string{"local"}, nil }
-func (m *mockSyncManager) TestConnection() error          { return nil }
+func (m *mockSyncManager) SetRemote(string, string)     {}
+func (m *mockSyncManager) SetGooglePhotos(bool, string) {}
+func (m *mockSyncManager) ListRemotes() ([]string, error) {
+	if m.listRemotesFn != nil {
+		return m.listRemotesFn()
+	}
+	return []string{"local"}, nil
+}
+func (m *mockSyncManager) TestConnection() error { return nil }
 func (m *mockSyncManager) ListFiles(path string) ([]syncmanager.FileInfo, error) {
 	if m.listFilesErr != nil {
 		return nil, m.listFilesErr
@@ -65,11 +71,13 @@ func (m *mockSyncManager) GetFile(path string, w io.Writer) error {
 	}
 	return nil
 }
-func (m *mockSyncManager) GetPublicLink(path string) (string, error) { return m.publicLink, nil }
-func (m *mockSyncManager) IsGooglePhotosRunning() bool    { return false }
-func (m *mockSyncManager) CancelGooglePhotos() error      { return nil }
+func (m *mockSyncManager) GetPublicLink(path string) (string, error)     { return m.publicLink, nil }
+func (m *mockSyncManager) IsGooglePhotosRunning() bool                   { return false }
+func (m *mockSyncManager) CancelGooglePhotos() error                     { return nil }
 func (m *mockSyncManager) SyncCardsToGooglePhotos(context.Context) error { return nil }
-func (m *mockSyncManager) GetGooglePhotosProgress() syncmanager.Progress { return syncmanager.Progress{} }
+func (m *mockSyncManager) GetGooglePhotosProgress() syncmanager.Progress {
+	return syncmanager.Progress{}
+}
 func (m *mockSyncManager) ListFilesPaginated(path string, page, pageSize int) (*syncmanager.FileListResult, error) {
 	if m.listPagedErr != nil {
 		return nil, m.listPagedErr
@@ -349,6 +357,53 @@ func setupTestContext(t *testing.T) (*Context, func()) {
 	}
 
 	return ctx, cleanup
+}
+
+func TestHandleGooglePhotosStatusReadsConfigWithoutListRemotes(t *testing.T) {
+	ctx, cleanup := setupTestContext(t)
+	defer cleanup()
+
+	if err := ctx.AppSettings.SetGooglePhotos(true, "gphotos"); err != nil {
+		t.Fatalf("SetGooglePhotos() error = %v", err)
+	}
+
+	configPath := state.GetRcloneConfigPath()
+	if err := os.MkdirAll(filepath.Dir(configPath), 0750); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("[gphotos]\ntype = googlephotos\n"), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	mockSync := ctx.SyncMgr.(*mockSyncManager)
+	listRemotesCalled := false
+	mockSync.listRemotesFn = func() ([]string, error) {
+		listRemotesCalled = true
+		return []string{"gphotos"}, nil
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/googlephotos/status", nil)
+	w := httptest.NewRecorder()
+
+	ctx.HandleGooglePhotosStatus(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if listRemotesCalled {
+		t.Fatal("HandleGooglePhotosStatus called ListRemotes; this can block during an active sync")
+	}
+
+	var response map[string]bool
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if !response["configured"] {
+		t.Fatal("configured = false, want true")
+	}
+	if !response["connected"] {
+		t.Fatal("connected = false, want true")
+	}
 }
 
 // TestHandleStatus_GET tests status endpoint
