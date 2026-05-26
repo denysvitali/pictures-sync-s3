@@ -410,7 +410,6 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 
 			batch = append(batch, orderedResult.item)
 			batchFiles = append(batchFiles, orderedResult.file)
-			uploaded++
 			sm.finishFileProgress(orderedResult.file, uploaded, skipped, failed)
 			sm.setBatchPending(len(batch))
 			sm.setCardProgress(cardID, nextResult, len(mediaFiles), uploaded, skipped, failed, "Queued for album", len(mediaFiles)-nextResult)
@@ -430,7 +429,7 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 				log.Printf("[GooglePhotos] Failed to create batch in album %s: %v", albumTitle, err)
 			}
 			log.Printf("[GooglePhotos] Created media items in album %s: success=%d failed=%d", albumTitle, successCount, failCount)
-			uploaded -= failCount
+			uploaded += successCount
 			failed += failCount
 			if err == nil {
 				for _, file := range batchFiles {
@@ -463,7 +462,7 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 			log.Printf("[GooglePhotos] Failed to create final batch in album %s: %v", albumTitle, err)
 		}
 		log.Printf("[GooglePhotos] Created final media items in album %s: success=%d failed=%d", albumTitle, successCount, failCount)
-		uploaded -= failCount
+		uploaded += successCount
 		failed += failCount
 		if err == nil {
 			for _, file := range batchFiles {
