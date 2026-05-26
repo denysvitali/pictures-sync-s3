@@ -318,6 +318,14 @@ func TestStartWithReleaseSurvivesCanceledCallerContext(t *testing.T) {
 	if !bytes.Equal(installer.payload, payload) {
 		t.Fatalf("installer received %q, want %q", installer.payload, payload)
 	}
+
+	// Wait for the async goroutine to finish so t.Cleanup doesn't race with
+	// recordInstallHistory reading state.PermDir.
+	select {
+	case <-manager.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for run goroutine to finish")
+	}
 }
 
 // TestConcurrentProgressUpdatesAreAtomic exercises the read-modify-write

@@ -104,6 +104,7 @@ type Manager struct {
 	status         Status
 	installHistory []InstallHistoryEntry
 	subscribers    []*statusSubscriber
+	done           chan struct{} // closed when run() completes; for testing
 }
 
 type statusSubscriber struct {
@@ -319,8 +320,10 @@ func (m *Manager) StartWithRelease(ctx context.Context, release string) (Status,
 	// OTA installs must survive browser navigation and fetch/WebSocket
 	// disconnects after the start request is accepted.
 	runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Hour)
+	m.done = make(chan struct{})
 	go func() {
 		defer cancel()
+		defer close(m.done)
 		m.run(runCtx, release)
 	}()
 	return status, nil
