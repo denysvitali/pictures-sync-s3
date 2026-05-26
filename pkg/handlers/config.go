@@ -487,6 +487,10 @@ var settingsUpdaters = []fieldUpdater{
 		if req.GooglePhotosRemoteName != nil {
 			googlePhotosRemoteName = *req.GooglePhotosRemoteName
 		}
+		// Default remote name to "gphotos" when enabling without one.
+		if googlePhotosEnabled && strings.TrimSpace(googlePhotosRemoteName) == "" {
+			googlePhotosRemoteName = "gphotos"
+		}
 		if err := ctx.AppSettings.SetGooglePhotos(googlePhotosEnabled, googlePhotosRemoteName); err != nil {
 			return err
 		}
