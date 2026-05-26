@@ -233,6 +233,93 @@ func TestSubscribeReceivesStatusUpdates(t *testing.T) {
 	}
 }
 
+func TestStartWithReleaseSurvivesCanceledCallerContext(t *testing.T) {
+	usePermDir(t)
+
+	payload := []byte("payload-bytes-for-installer")
+	asset := gzipBytes(t, payload)
+	sum := sha256.Sum256(asset)
+	installer := &stubInstaller{}
+
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
+		case "/repos/owner/repo/releases/tags/v1.0.0":
+			return jsonResponse(mustJSON(t, Release{
+				TagName:     "v1.0.0",
+				PublishedAt: time.Now().UTC(),
+				Assets: []Asset{
+					{
+						Name:               "asset.gz",
+						BrowserDownloadURL: "https://download.example.invalid/asset.gz",
+						Size:               int64(len(asset)),
+					},
+					{
+						Name:               "asset.gz" + SHA256SidecarSuffix,
+						BrowserDownloadURL: "https://download.example.invalid/asset.gz" + SHA256SidecarSuffix,
+					},
+				},
+			})), nil
+		case "/asset.gz":
+			return &http.Response{
+				StatusCode:    http.StatusOK,
+				Status:        "200 OK",
+				ContentLength: int64(len(asset)),
+				Body:          io.NopCloser(bytes.NewReader(asset)),
+			}, nil
+		case "/asset.gz" + SHA256SidecarSuffix:
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Body:       io.NopCloser(bytes.NewReader([]byte(fmt.Sprintf("%x  asset.gz\n", sum)))),
+			}, nil
+		default:
+			t.Fatalf("unexpected OTA request path: %s", req.URL.Path)
+			return nil, nil
+		}
+	})}
+
+	manager := &Manager{
+		Owner:      "owner",
+		Repo:       "repo",
+		APIURL:     "https://api.example.invalid",
+		AssetName:  "asset.gz",
+		HTTPClient: client,
+		Installer:  installer,
+		status:     Status{State: "idle"},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := manager.StartWithRelease(ctx, "v1.0.0"); err != nil {
+		t.Fatalf("StartWithRelease returned error: %v", err)
+	}
+
+	deadline := time.After(2 * time.Second)
+	for {
+		status := manager.Status()
+		if status.State == "installed" {
+			break
+		}
+		if status.State == "failed" {
+			t.Fatalf("OTA install failed after caller context cancellation: %s", status.Error)
+		}
+
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for install; status = %+v", status)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	if got := installer.calls.Load(); got != 1 {
+		t.Fatalf("installer calls = %d, want 1", got)
+	}
+	if !bytes.Equal(installer.payload, payload) {
+		t.Fatalf("installer received %q, want %q", installer.payload, payload)
+	}
+}
+
 // TestConcurrentProgressUpdatesAreAtomic exercises the read-modify-write
 // progress callbacks from many goroutines at once. The download-progress and
 // install-progress callbacks share a Status struct: download writes
@@ -588,4 +675,13 @@ func jsonResponse(body []byte) *http.Response {
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
 		Body:       io.NopCloser(bytes.NewReader(body)),
 	}
+}
+
+func mustJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	body, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal JSON: %v", err)
+	}
+	return body
 }

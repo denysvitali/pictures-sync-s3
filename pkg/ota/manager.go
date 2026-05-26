@@ -316,7 +316,9 @@ func (m *Manager) StartWithRelease(ctx context.Context, release string) (Status,
 	m.mu.Unlock()
 	publishStatus(status, subscribers)
 
-	runCtx, cancel := context.WithTimeout(context.Background(), time.Hour)
+	// OTA installs must survive browser navigation and fetch/WebSocket
+	// disconnects after the start request is accepted.
+	runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Hour)
 	go func() {
 		defer cancel()
 		m.run(runCtx, release)
