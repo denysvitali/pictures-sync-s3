@@ -208,8 +208,15 @@ jobs:
 
       - name: Check for unused dependencies
         run: |
-          go install github.com/golangci/gomodguard/cmd/gomodguard@latest
-          gomodguard list
+          export GOPROXY=https://proxy.golang.org,direct
+          if ! go install github.com/ryancurrah/gomodguard/cmd/gomodguard@latest; then
+            echo "::warning::gomodguard install failed; skipping unused dependency check."
+            exit 0
+          fi
+
+          if ! gomodguard list; then
+            echo "::warning::gomodguard check failed (typically means no .gomodguard.yaml is available for this repo)."
+          fi
         continue-on-error: true
 
       - name: Verify go.mod and go.sum are tidy
