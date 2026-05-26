@@ -7,6 +7,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/utils"
@@ -228,10 +229,14 @@ func (m *Manager) syncCardToGooglePhotos(ctx context.Context, srcPath, dstPath s
 	}
 	log.Printf("Google Photos sync: destination fs ready (%s)", dstPath)
 
-	// Set up config with fewer parallel transfers for Google Photos rate limits.
+	workers := m.googlePhotosTransferCount()
+
+	// Keep rclone's config aligned with the explicit worker pool below.
 	ci := fs.GetConfig(ctx)
-	ci.Transfers = 1
-	ci.Checkers = 2
+	ci.Transfers = workers
+	if ci.Checkers < workers {
+		ci.Checkers = workers
+	}
 
 	// Copy files into the album root. Rclone's googlephotos backend treats
 	// subdirectories under album/<name> as part of the album title, so preserving
@@ -243,23 +248,106 @@ func (m *Manager) syncCardToGooglePhotos(ctx context.Context, srcPath, dstPath s
 	basenameCounts := googlePhotosBasenameCounts(objects)
 	usedNames := make(map[string]int, len(objects))
 	existingNames := listExistingObjectRemotes(ctx, dstFs)
+	jobs := make([]googlePhotosCopyJob, 0, len(objects))
 	for _, obj := range objects {
 		dstRemote := googlePhotosFlatRemote(obj.Remote(), basenameCounts, usedNames)
 		if _, exists := existingNames[dstRemote]; exists {
 			continue
 		}
-		err = retry(ctx, func(attempt int) error {
-			_, copyErr := operations.Copy(ctx, dstFs, nil, dstRemote, obj)
-			return copyErr
-		}, isRetryableError, fmt.Sprintf("Google Photos copy %s", obj.Remote()))
-		if err != nil {
-			return 0, 0, err
-		}
+		jobs = append(jobs, googlePhotosCopyJob{src: obj, dstRemote: dstRemote})
 		existingNames[dstRemote] = struct{}{}
+	}
+	if len(jobs) == 0 {
+		log.Printf("Google Photos sync: all %d file(s) already exist in %s", beforeCount, dstPath)
+		return beforeCount, beforeBytes, nil
+	}
+	if workers > len(jobs) {
+		workers = len(jobs)
+	}
+	log.Printf("Google Photos sync: copying %d new file(s) to %s with %d parallel transfer(s)", len(jobs), dstPath, workers)
+
+	copyCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	jobsCh := make(chan googlePhotosCopyJob)
+	var wg sync.WaitGroup
+	var errMu sync.Mutex
+	var firstErr error
+
+	recordErr := func(err error) {
+		if err == nil {
+			return
+		}
+		errMu.Lock()
+		if firstErr == nil {
+			firstErr = err
+			cancel()
+		}
+		errMu.Unlock()
+	}
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for job := range jobsCh {
+				if copyCtx.Err() != nil {
+					return
+				}
+				err := retry(copyCtx, func(attempt int) error {
+					_, copyErr := operations.Copy(copyCtx, dstFs, nil, job.dstRemote, job.src)
+					return copyErr
+				}, isRetryableError, fmt.Sprintf("Google Photos copy %s", job.src.Remote()))
+				if err != nil {
+					recordErr(err)
+					return
+				}
+			}
+		}()
+	}
+
+sendJobs:
+	for _, job := range jobs {
+		select {
+		case <-copyCtx.Done():
+			break sendJobs
+		case jobsCh <- job:
+		}
+	}
+	close(jobsCh)
+	wg.Wait()
+
+	if firstErr != nil {
+		return 0, 0, firstErr
+	}
+	if err := copyCtx.Err(); err != nil && err != context.Canceled {
+		return 0, 0, err
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, 0, err
 	}
 	log.Printf("Google Photos sync: upload completed for %s", dstPath)
 
 	return beforeCount, beforeBytes, nil
+}
+
+type googlePhotosCopyJob struct {
+	src       fs.Object
+	dstRemote string
+}
+
+func (m *Manager) googlePhotosTransferCount() int {
+	m.mu.Lock()
+	transfers := m.transfers
+	m.mu.Unlock()
+
+	if transfers < 1 {
+		return 4
+	}
+	if transfers > 16 {
+		return 16
+	}
+	return transfers
 }
 
 func listExistingObjectRemotes(ctx context.Context, f fs.Fs) map[string]struct{} {

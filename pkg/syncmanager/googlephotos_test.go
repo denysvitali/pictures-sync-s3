@@ -35,3 +35,24 @@ func TestGooglePhotosFlatRemoteDisambiguatesDuplicateBasenames(t *testing.T) {
 		t.Fatalf("flattened remotes must not contain slashes: %q %q", first, second)
 	}
 }
+
+func TestGooglePhotosTransferCount(t *testing.T) {
+	tests := []struct {
+		name      string
+		transfers int
+		want      int
+	}{
+		{name: "default", transfers: 0, want: 4},
+		{name: "configured", transfers: 8, want: 8},
+		{name: "capped", transfers: 64, want: 16},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &Manager{transfers: tt.transfers}
+			if got := m.googlePhotosTransferCount(); got != tt.want {
+				t.Fatalf("googlePhotosTransferCount() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
