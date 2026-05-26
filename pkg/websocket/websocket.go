@@ -43,7 +43,7 @@ func NewConnectionRateLimiter() *ConnectionRateLimiter {
 }
 
 // GetLimiter returns or creates a rate limiter for the given IP
-// Allows 5 connections per minute with burst of 2
+// Allows 10 connections per minute with burst of 3
 func (c *ConnectionRateLimiter) GetLimiter(ip string) *rate.Limiter {
 	now := time.Now()
 	c.mu.Lock()
@@ -106,8 +106,8 @@ var (
 	wsTokenMutex        sync.RWMutex
 	connRateLimiter     *ConnectionRateLimiter
 	connRateLimiterOnce sync.Once
-	connectionRateLimit = rate.Every(12 * time.Second)
-	connectionRateBurst = 2
+	connectionRateLimit = rate.Every(6 * time.Second)
+	connectionRateBurst = 3
 	// wsConfigMutex guards the mutable package-level config knobs above
 	// (connRateLimiter pointer, rate/burst, and authReadTimeout) which can be
 	// re-set in tests while connection handlers concurrently read them.

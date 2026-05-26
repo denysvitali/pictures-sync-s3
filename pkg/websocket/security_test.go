@@ -189,7 +189,7 @@ func TestIsPrivateIP(t *testing.T) {
 func TestRateLimiting(t *testing.T) {
 	limiter := NewConnectionRateLimiter()
 
-	// First 2 requests should succeed (burst)
+	// First 3 requests should succeed (burst)
 	ip := "192.168.1.100"
 	l := limiter.GetLimiter(ip)
 
@@ -199,10 +199,13 @@ func TestRateLimiting(t *testing.T) {
 	if !l.Allow() {
 		t.Error("Second request should be allowed (burst)")
 	}
+	if !l.Allow() {
+		t.Error("Third request should be allowed (burst)")
+	}
 
-	// Third request should be blocked
+	// Fourth request should be blocked
 	if l.Allow() {
-		t.Error("Third request should be rate limited")
+		t.Error("Fourth request should be rate limited")
 	}
 
 	l.SetLimit(rate.Every(time.Nanosecond))
@@ -223,6 +226,7 @@ func TestRateLimiter_DifferentIPs(t *testing.T) {
 	l2 := limiter.GetLimiter(ip2)
 
 	// Exhaust IP1's limit
+	l1.Allow()
 	l1.Allow()
 	l1.Allow()
 

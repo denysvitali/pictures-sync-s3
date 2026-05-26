@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/denysvitali/pictures-sync-s3/pkg/utils"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/accounting"
 	rcsync "github.com/rclone/rclone/fs/sync"
@@ -54,8 +55,9 @@ func (m *Manager) SyncCardsToGooglePhotos(ctx context.Context) error {
 
 	log.Printf("Starting Google Photos sync for %d card(s)", len(cards))
 
-	// Create cancellable context.
-	syncCtx, cancel := context.WithCancel(ctx)
+	// Create context with a generous overall timeout so a hung backend
+	// cannot block the sync forever.
+	syncCtx, cancel := context.WithTimeout(ctx, 2*time.Hour)
 	defer cancel()
 
 	m.mu.Lock()
@@ -70,12 +72,22 @@ func (m *Manager) SyncCardsToGooglePhotos(ctx context.Context) error {
 	// Count total files and bytes across all cards first.
 	for _, card := range cards {
 		srcPath := filepath.Join(m.remoteName+":"+m.remotePath, card.Name, "DCIM")
-		srcFs, err := fs.NewFs(syncCtx, srcPath)
+		log.Printf("Google Photos sync: counting files for card %s", card.Name)
+		var srcFs fs.Fs
+		err := retry(syncCtx, func(attempt int) error {
+			f, err := fs.NewFs(syncCtx, srcPath)
+			if err != nil {
+				return fmt.Errorf("failed to open source fs for card %s: %w", card.Name, err)
+			}
+			srcFs = f
+			return nil
+		}, utils.IsRetryableNetworkError, fmt.Sprintf("B2 fs for card %s", card.Name))
 		if err != nil {
 			log.Printf("Warning: failed to open source fs for card %s: %v", card.Name, err)
 			continue
 		}
 		count, bytes := m.countFiles(syncCtx, srcFs)
+		log.Printf("Google Photos sync: card %s has %d files (%s)", card.Name, count, formatBytes(bytes))
 		totalFiles += count
 		totalBytes += bytes
 	}
@@ -119,7 +131,7 @@ func (m *Manager) SyncCardsToGooglePhotos(ctx context.Context) error {
 		srcPath := filepath.Join(m.remoteName+":"+m.remotePath, card.Name, "DCIM")
 		dstPath := m.googlePhotosRemoteName + ":album/" + card.Name
 
-		log.Printf("Google Photos sync: card %d/%d (%s)", i+1, len(cards), card.Name)
+		log.Printf("Google Photos sync: card %d/%d (%s) — %s → %s", i+1, len(cards), card.Name, srcPath, dstPath)
 		m.setGooglePhotosProgress(Progress{
 			Status:           "syncing",
 			CurrentFile:      fmt.Sprintf("Card %s", card.Name),
@@ -165,15 +177,35 @@ func (m *Manager) SyncCardsToGooglePhotos(ctx context.Context) error {
 // syncCardToGooglePhotos syncs a single card's DCIM folder to Google Photos.
 // Returns the number of files transferred and bytes transferred for this card.
 func (m *Manager) syncCardToGooglePhotos(ctx context.Context, srcPath, dstPath string) (int, int64, error) {
-	srcFs, err := fs.NewFs(ctx, srcPath)
+	// Create source filesystem with retry.
+	var srcFs fs.Fs
+	err := retry(ctx, func(attempt int) error {
+		f, err := fs.NewFs(ctx, srcPath)
+		if err != nil {
+			return fmt.Errorf("failed to create source filesystem: %w", err)
+		}
+		srcFs = f
+		return nil
+	}, utils.IsRetryableNetworkError, "Source filesystem creation")
 	if err != nil {
-		return 0, 0, fmt.Errorf("failed to create source filesystem: %w", err)
+		return 0, 0, err
 	}
+	log.Printf("Google Photos sync: source fs ready (%s)", srcPath)
 
-	dstFs, err := fs.NewFs(ctx, dstPath)
+	// Create destination filesystem with retry.
+	var dstFs fs.Fs
+	err = retry(ctx, func(attempt int) error {
+		f, err := fs.NewFs(ctx, dstPath)
+		if err != nil {
+			return fmt.Errorf("failed to create destination filesystem: %w", err)
+		}
+		dstFs = f
+		return nil
+	}, utils.IsRetryableNetworkError, "Destination filesystem creation")
 	if err != nil {
-		return 0, 0, fmt.Errorf("failed to create destination filesystem: %w", err)
+		return 0, 0, err
 	}
+	log.Printf("Google Photos sync: destination fs ready (%s)", dstPath)
 
 	// Set up config with fewer parallel transfers for Google Photos rate limits.
 	ci := fs.GetConfig(ctx)
@@ -182,10 +214,16 @@ func (m *Manager) syncCardToGooglePhotos(ctx context.Context, srcPath, dstPath s
 
 	// Count files before sync.
 	beforeCount, beforeBytes := m.countFiles(ctx, srcFs)
+	log.Printf("Google Photos sync: %d files (%s) to upload", beforeCount, formatBytes(beforeBytes))
 
-	if err := rcsync.Sync(ctx, dstFs, srcFs, false); err != nil {
+	// Sync with retry.
+	err = retry(ctx, func(attempt int) error {
+		return rcsync.Sync(ctx, dstFs, srcFs, false)
+	}, isRetryableError, "Google Photos sync")
+	if err != nil {
 		return 0, 0, err
 	}
+	log.Printf("Google Photos sync: upload completed for %s", dstPath)
 
 	return beforeCount, beforeBytes, nil
 }

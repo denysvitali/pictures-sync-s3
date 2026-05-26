@@ -44,8 +44,8 @@ func resetWebSocketTestState(t *testing.T) {
 		wsConfigMutex.Lock()
 		connRateLimiter = nil
 		connRateLimiterOnce = sync.Once{}
-		connectionRateLimit = rate.Every(12 * time.Second)
-		connectionRateBurst = 2
+		connectionRateLimit = rate.Every(6 * time.Second)
+		connectionRateBurst = 3
 		authReadTimeout = 5 * time.Second
 		wsConfigMutex.Unlock()
 	})
