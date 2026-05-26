@@ -137,32 +137,99 @@ type CardError struct {
 	Error  string `json:"error"`
 }
 
+// StageProgress tracks a coarse sync-stage timeline for UI and logs.
+type StageProgress struct {
+	Name        string     `json:"name"`
+	Status      string     `json:"status"`
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	ETA         string     `json:"eta,omitempty"`
+	BytesPerSec float64    `json:"bytes_per_sec,omitempty"`
+}
+
+// CardProgress tracks per-card counters for live status.
+type CardProgress struct {
+	CardID       string `json:"card_id"`
+	Position     int    `json:"position"`
+	TotalFiles   int    `json:"total_files"`
+	Processed    int    `json:"processed"`
+	Uploaded     int    `json:"uploaded"`
+	Skipped      int    `json:"skipped"`
+	Failed       int    `json:"failed"`
+	QueueDepth   int    `json:"queue_depth"`
+	CurrentPhase string `json:"current_phase,omitempty"`
+}
+
+// BackendMetrics exposes lightweight auto-tuning and latency data.
+type BackendMetrics struct {
+	UploadWorkers        int     `json:"upload_workers"`
+	BatchSize            int     `json:"batch_size"`
+	QueueDepth           int     `json:"queue_depth"`
+	InFlightJobs         int     `json:"in_flight_jobs"`
+	AverageUploadLatency string  `json:"average_upload_latency,omitempty"`
+	AverageAPILatency    string  `json:"average_api_latency,omitempty"`
+	UploadBytesPerSec    float64 `json:"upload_bytes_per_sec,omitempty"`
+}
+
+// RetryStatus describes active retry backoff, if any.
+type RetryStatus struct {
+	Count       int        `json:"count"`
+	NextRetryAt *time.Time `json:"next_retry_at,omitempty"`
+	Reason      string     `json:"reason,omitempty"`
+}
+
+// SyncRunSummary is a compact persisted summary for Google Photos runs.
+type SyncRunSummary struct {
+	StartedAt      time.Time `json:"started_at"`
+	CompletedAt    time.Time `json:"completed_at"`
+	Duration       string    `json:"duration"`
+	Status         string    `json:"status"`
+	CardID         string    `json:"card_id,omitempty"`
+	UploadedFiles  int       `json:"uploaded_files"`
+	SkippedFiles   int       `json:"skipped_files"`
+	FailedFiles    int       `json:"failed_files"`
+	ProcessedBytes int64     `json:"processed_bytes"`
+	Error          string    `json:"error,omitempty"`
+}
+
 // SyncProgress tracks the progress of a B2 to Google Photos sync
 type SyncProgress struct {
-	TotalCards               int         `json:"total_cards"`
-	CurrentCard              int         `json:"current_card"`
-	CurrentCardID            string      `json:"current_card_id"`
-	CurrentCardFiles         int         `json:"current_card_files"`
-	CurrentFileIndex         int         `json:"current_file_index"`
-	TotalFiles               int         `json:"total_files"`
-	ProcessedFiles           int         `json:"processed_files"`
-	UploadedFiles            int         `json:"uploaded_files"`
-	SkippedFiles             int         `json:"skipped_files"`
-	FailedFiles              int         `json:"failed_files"`
-	TotalBytes               int64       `json:"total_bytes"`
-	ProcessedBytes           int64       `json:"processed_bytes"`
-	CurrentFile              string      `json:"current_file,omitempty"`
-	CurrentFilePath          string      `json:"current_file_path,omitempty"`
-	CurrentFileSize          int64       `json:"current_file_size,omitempty"`
-	CurrentFileBytesUploaded int64       `json:"current_file_bytes_uploaded,omitempty"`
-	CurrentFilePercent       int         `json:"current_file_percent"`
-	CurrentPhase             string      `json:"current_phase,omitempty"`
-	BatchPendingFiles        int         `json:"batch_pending_files,omitempty"`
-	StartedAt                *time.Time  `json:"started_at,omitempty"`
-	UpdatedAt                *time.Time  `json:"updated_at,omitempty"`
-	Status                   string      `json:"status"`
-	Error                    string      `json:"error,omitempty"`
-	CardErrors               []CardError `json:"card_errors,omitempty"`
+	TotalCards               int              `json:"total_cards"`
+	CurrentCard              int              `json:"current_card"`
+	CurrentCardID            string           `json:"current_card_id"`
+	CurrentCardFiles         int              `json:"current_card_files"`
+	CurrentFileIndex         int              `json:"current_file_index"`
+	TotalFiles               int              `json:"total_files"`
+	ProcessedFiles           int              `json:"processed_files"`
+	UploadedFiles            int              `json:"uploaded_files"`
+	SkippedFiles             int              `json:"skipped_files"`
+	FailedFiles              int              `json:"failed_files"`
+	TotalBytes               int64            `json:"total_bytes"`
+	ProcessedBytes           int64            `json:"processed_bytes"`
+	CurrentFile              string           `json:"current_file,omitempty"`
+	CurrentFilePath          string           `json:"current_file_path,omitempty"`
+	CurrentFileSize          int64            `json:"current_file_size,omitempty"`
+	CurrentFileBytesUploaded int64            `json:"current_file_bytes_uploaded,omitempty"`
+	CurrentFilePercent       int              `json:"current_file_percent"`
+	CurrentPhase             string           `json:"current_phase,omitempty"`
+	BatchPendingFiles        int              `json:"batch_pending_files,omitempty"`
+	SortDescription          string           `json:"sort_description,omitempty"`
+	SkipDuplicates           bool             `json:"skip_duplicates"`
+	DuplicatesSkipped        int              `json:"duplicates_skipped"`
+	StageTimeline            []StageProgress  `json:"stage_timeline,omitempty"`
+	CardProgress             []CardProgress   `json:"card_progress,omitempty"`
+	BackendMetrics           BackendMetrics   `json:"backend_metrics,omitempty"`
+	RetryStatus              *RetryStatus     `json:"retry_status,omitempty"`
+	LastSuccessfulSync       *SyncRunSummary  `json:"last_successful_sync,omitempty"`
+	History                  []SyncRunSummary `json:"history,omitempty"`
+	CancellationSummary      string           `json:"cancellation_summary,omitempty"`
+	DebugDetails             []string         `json:"debug_details,omitempty"`
+	Warning                  string           `json:"warning,omitempty"`
+	StartedAt                *time.Time       `json:"started_at,omitempty"`
+	UpdatedAt                *time.Time       `json:"updated_at,omitempty"`
+	Status                   string           `json:"status"`
+	Error                    string           `json:"error,omitempty"`
+	CardErrors               []CardError      `json:"card_errors,omitempty"`
 }
 
 // ConnectionStatus represents the Google Photos connection status

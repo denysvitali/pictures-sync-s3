@@ -326,7 +326,9 @@ func main() {
 	http.HandleFunc("/api/googlephotos/auth/callback", ctx.HandleGooglePhotosAuthCallback)
 	http.HandleFunc("/api/googlephotos/auth/disconnect", ctx.HandleGooglePhotosAuthDisconnect)
 	http.HandleFunc("/api/googlephotos/sync", ctx.HandleGooglePhotosSync)
+	http.HandleFunc("/api/googlephotos/sync/cancel", ctx.HandleGooglePhotosSyncCancel)
 	http.HandleFunc("/api/googlephotos/sync/progress", ctx.HandleGooglePhotosSyncProgress)
+	http.HandleFunc("/api/googlephotos/sync/history/export", ctx.HandleGooglePhotosSyncHistoryExport)
 	http.HandleFunc("/api/googlephotos/albums", ctx.HandleGooglePhotosAlbums)
 	http.HandleFunc("/ws", websocket.HandleWebSocket(stateMgr, eventMgr, otaMgr))
 

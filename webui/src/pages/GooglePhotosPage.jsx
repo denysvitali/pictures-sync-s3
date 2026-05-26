@@ -10,7 +10,9 @@ import {
   startGooglePhotosAuth,
   disconnectGooglePhotos,
   startGooglePhotosSync,
+  cancelGooglePhotosSync,
   getGooglePhotosSyncProgress,
+  getGooglePhotosSyncHistoryExportUrl,
   getGooglePhotosAlbums,
 } from '../api.js'
 
@@ -85,6 +87,18 @@ function formatPhase(progress) {
   return progress?.current_phase || progress?.status?.replace('_', ' ') || 'Syncing'
 }
 
+function formatDuration(value) {
+  if (!value) return 'n/a'
+  return value
+}
+
+function formatTimestamp(value) {
+  if (!value) return 'n/a'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'n/a'
+  return date.toLocaleString()
+}
+
 export default function GooglePhotosPage() {
   const { deviceUrl } = useDevice()
   const toast = useToast()
@@ -94,6 +108,7 @@ export default function GooglePhotosPage() {
   const [loading, setLoading] = useState(true)
   const [connecting, setConnecting] = useState(false)
   const [syncing, setSyncing] = useState(false)
+  const [skipDuplicates, setSkipDuplicates] = useState(true)
   const [progress, setProgress] = useState(null)
   const [lastSyncResult, setLastSyncResult] = useState(null)
   const [albumsLoading, setAlbumsLoading] = useState(false)
@@ -288,7 +303,7 @@ export default function GooglePhotosPage() {
   const handleSync = useCallback(async () => {
     if (!deviceUrl) return
     try {
-      await startGooglePhotosSync(deviceUrl)
+      await startGooglePhotosSync(deviceUrl, { skip_duplicates: skipDuplicates })
       setSyncing(true)
       loadSyncProgress({ preserveSyncing: true })
       toast.success('Sync to Google Photos started')
@@ -301,6 +316,17 @@ export default function GooglePhotosPage() {
       } else {
         toast.error(`Failed to start sync: ${msg}`)
       }
+    }
+  }, [deviceUrl, loadSyncProgress, skipDuplicates, toast])
+
+  const handleCancelSync = useCallback(async () => {
+    if (!deviceUrl) return
+    try {
+      await cancelGooglePhotosSync(deviceUrl)
+      toast.info('Cancel requested')
+      loadSyncProgress({ preserveSyncing: true })
+    } catch (err) {
+      toast.error(`Failed to cancel sync: ${describeError(err)}`)
     }
   }, [deviceUrl, loadSyncProgress, toast])
 
@@ -355,6 +381,12 @@ export default function GooglePhotosPage() {
               <p className="mt-1 text-xs text-amber-200">{statusError}</p>
             </div>
           )}
+          {(progress?.warning || lastSyncResult?.warning) && (
+            <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-3">
+              <p className="text-xs font-medium text-amber-300">Backend behavior note</p>
+              <p className="mt-1 text-xs text-amber-200">{progress?.warning || lastSyncResult?.warning}</p>
+            </div>
+          )}
 
           <div className="flex flex-wrap gap-2">
             {!isConfigured ? (
@@ -368,6 +400,22 @@ export default function GooglePhotosPage() {
                   <Icon name="arrow-up-tray" className="w-4 h-4" />
                   {syncing ? 'Syncing...' : 'Sync to Google Photos'}
                 </Button>
+                {syncing && (
+                  <Button variant="secondary" onClick={handleCancelSync}>
+                    <Icon name="x" className="w-4 h-4" />
+                    Cancel sync
+                  </Button>
+                )}
+                <label className="inline-flex items-center gap-2 rounded-md border border-surface-700 px-3 py-2 text-sm text-surface-200">
+                  <input
+                    type="checkbox"
+                    checked={skipDuplicates}
+                    onChange={(event) => setSkipDuplicates(event.target.checked)}
+                    disabled={syncing}
+                    className="h-4 w-4 accent-brand-500"
+                  />
+                  Skip duplicates
+                </label>
                 <Button variant="danger" onClick={handleDisconnect}>
                   <Icon name="x" className="w-4 h-4" />
                   Disconnect
@@ -394,6 +442,31 @@ export default function GooglePhotosPage() {
               <span className="text-surface-300">Phase</span>
               <span className="font-medium text-surface-100">{formatPhase(progress)}</span>
             </div>
+            {progress.sort_description && (
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-surface-300">Order</span>
+                <span className="text-surface-100">{progress.sort_description}</span>
+              </div>
+            )}
+            {progress.stage_timeline?.length > 0 && (
+              <div className="grid gap-2 sm:grid-cols-5">
+                {progress.stage_timeline.map((stage) => (
+                  <div
+                    key={stage.name}
+                    className={`rounded-md border px-2.5 py-2 text-xs ${
+                      stage.status === 'completed'
+                        ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300'
+                        : stage.status === 'active'
+                          ? 'border-brand-500/30 bg-brand-500/10 text-brand-200'
+                          : 'border-surface-700 bg-surface-900/40 text-surface-400'
+                    }`}
+                  >
+                    <p className="font-medium">{stage.name.replace('_', ' ')}</p>
+                    <p className="mt-0.5">{stage.status}</p>
+                  </div>
+                ))}
+              </div>
+            )}
             {progress.total_cards > 0 && (
               <div className="flex items-center justify-between text-sm">
                 <span className="text-surface-300">Cards</span>
@@ -455,8 +528,32 @@ export default function GooglePhotosPage() {
               <div className="flex flex-wrap items-center gap-4 text-xs text-surface-400">
                 <span className="text-emerald-400">{progress.uploaded_files} uploaded</span>
                 {progress.skipped_files > 0 && <span className="text-amber-400">{progress.skipped_files} skipped</span>}
+                {progress.duplicates_skipped > 0 && <span className="text-amber-300">{progress.duplicates_skipped} duplicates skipped</span>}
                 {progress.failed_files > 0 && <span className="text-rose-400">{progress.failed_files} failed</span>}
                 {progress.batch_pending_files > 0 && <span>{progress.batch_pending_files} waiting for album</span>}
+              </div>
+            )}
+            {progress.card_progress?.length > 0 && (
+              <div className="space-y-2">
+                {progress.card_progress.map((card) => (
+                  <div key={card.card_id} className="rounded-md bg-surface-900/50 px-3 py-2 text-xs text-surface-300">
+                    Card {card.card_id}: {card.processed}/{card.total_files} files, {card.failed} failed
+                    {card.queue_depth > 0 ? `, ${card.queue_depth} queued` : ''}
+                  </div>
+                ))}
+              </div>
+            )}
+            {progress.retry_status && (
+              <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-200">
+                Retry {progress.retry_status.count}; next attempt at {formatTimestamp(progress.retry_status.next_retry_at)}.
+                {progress.retry_status.reason ? ` ${progress.retry_status.reason}` : ''}
+              </div>
+            )}
+            {progress.backend_metrics && (
+              <div className="grid gap-2 text-xs text-surface-400 sm:grid-cols-3">
+                <span>{progress.backend_metrics.upload_workers || 0} upload workers</span>
+                <span>{progress.backend_metrics.queue_depth || 0} queued</span>
+                <span>{formatBytes(progress.backend_metrics.upload_bytes_per_sec || 0)}/s</span>
               </div>
             )}
             {progress.total_files > 0 && (
@@ -475,6 +572,12 @@ export default function GooglePhotosPage() {
                 </div>
                 <p className="mt-1 text-xs text-rose-300">{progress.error}</p>
               </div>
+            )}
+            {progress.debug_details?.length > 0 && (
+              <details className="rounded-lg border border-surface-700 bg-surface-900/40 p-3">
+                <summary className="cursor-pointer text-xs font-medium text-surface-300">Debug details</summary>
+                <pre className="mt-2 whitespace-pre-wrap text-xs text-surface-400">{progress.debug_details.join('\n')}</pre>
+              </details>
             )}
           </div>
         </Card>
@@ -508,6 +611,15 @@ export default function GooglePhotosPage() {
                 Processed {lastSyncResult.total_cards} card{lastSyncResult.total_cards !== 1 ? 's' : ''}
               </div>
             )}
+            {lastSyncResult.last_successful_sync && (
+              <div className="text-xs text-surface-400">
+                Last successful sync: {formatTimestamp(lastSyncResult.last_successful_sync.completed_at)}
+                {' '}({formatDuration(lastSyncResult.last_successful_sync.duration)})
+              </div>
+            )}
+            {lastSyncResult.cancellation_summary && (
+              <div className="text-xs text-amber-300">{lastSyncResult.cancellation_summary}</div>
+            )}
             {lastSyncResult.error && (
               <div className="rounded-lg border border-rose-500/20 bg-rose-500/10 p-3">
                 <div className="flex items-center justify-between">
@@ -537,6 +649,46 @@ export default function GooglePhotosPage() {
             <Button variant="secondary" size="sm" onClick={() => setLastSyncResult(null)}>
               Dismiss
             </Button>
+          </div>
+        </Card>
+      )}
+
+      {(progress?.history?.length > 0 || lastSyncResult?.history?.length > 0) && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Sync History</CardTitle>
+            <a
+              href={getGooglePhotosSyncHistoryExportUrl(deviceUrl)}
+              className="text-xs text-brand-400 hover:text-brand-300"
+            >
+              Export
+            </a>
+          </CardHeader>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="text-surface-400">
+                <tr>
+                  <th className="py-2 pr-3 font-medium">Time</th>
+                  <th className="py-2 pr-3 font-medium">Card</th>
+                  <th className="py-2 pr-3 font-medium">Uploaded</th>
+                  <th className="py-2 pr-3 font-medium">Skipped</th>
+                  <th className="py-2 pr-3 font-medium">Failed</th>
+                  <th className="py-2 pr-3 font-medium">Bytes</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-surface-800 text-surface-200">
+                {(progress?.history || lastSyncResult?.history || []).slice(0, 8).map((entry) => (
+                  <tr key={`${entry.started_at}-${entry.status}`}>
+                    <td className="py-2 pr-3">{formatTimestamp(entry.completed_at || entry.started_at)}</td>
+                    <td className="py-2 pr-3">{entry.card_id || 'all'}</td>
+                    <td className="py-2 pr-3 text-emerald-400">{entry.uploaded_files || 0}</td>
+                    <td className="py-2 pr-3 text-amber-400">{entry.skipped_files || 0}</td>
+                    <td className="py-2 pr-3 text-rose-400">{entry.failed_files || 0}</td>
+                    <td className="py-2 pr-3">{formatBytes(entry.processed_bytes || 0)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </Card>
       )}

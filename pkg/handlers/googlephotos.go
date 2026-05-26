@@ -29,6 +29,10 @@ type GooglePhotosSyncManager interface {
 	Progress() *googlephotos.SyncProgress
 }
 
+type googlePhotosSyncOptions interface {
+	SetSkipDuplicates(bool)
+}
+
 // HandleGooglePhotosStatus returns the Google Photos connection status
 func (ctx *Context) HandleGooglePhotosStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -209,6 +213,10 @@ func (ctx *Context) HandleGooglePhotosAuthDisconnect(w http.ResponseWriter, r *h
 
 // HandleGooglePhotosSync triggers a B2 to Google Photos sync
 func (ctx *Context) HandleGooglePhotosSync(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodDelete {
+		ctx.HandleGooglePhotosSyncCancel(w, r)
+		return
+	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -225,6 +233,16 @@ func (ctx *Context) HandleGooglePhotosSync(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	var reqBody struct {
+		SkipDuplicates *bool `json:"skip_duplicates"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&reqBody)
+	if reqBody.SkipDuplicates != nil {
+		if configurable, ok := ctx.GooglePhotosSyncMgr.(googlePhotosSyncOptions); ok {
+			configurable.SetSkipDuplicates(*reqBody.SkipDuplicates)
+		}
+	}
+
 	// Start sync in background
 	go func() {
 		if err := ctx.GooglePhotosSyncMgr.Sync(context.Background()); err != nil {
@@ -236,6 +254,24 @@ func (ctx *Context) HandleGooglePhotosSync(w http.ResponseWriter, r *http.Reques
 		"started": true,
 		"status":  "syncing",
 	})
+}
+
+// HandleGooglePhotosSyncCancel cancels the current Google Photos sync.
+func (ctx *Context) HandleGooglePhotosSyncCancel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if ctx.GooglePhotosSyncMgr == nil {
+		http.Error(w, "Google Photos sync manager not initialized", http.StatusServiceUnavailable)
+		return
+	}
+	if !ctx.GooglePhotosSyncMgr.IsRunning() {
+		JSONResponse(w, map[string]interface{}{"cancelled": false, "status": "idle"})
+		return
+	}
+	ctx.GooglePhotosSyncMgr.Cancel()
+	JSONResponse(w, map[string]interface{}{"cancelled": true, "status": "cancelling"})
 }
 
 // HandleGooglePhotosSyncProgress returns the current sync progress
@@ -254,6 +290,21 @@ func (ctx *Context) HandleGooglePhotosSyncProgress(w http.ResponseWriter, r *htt
 
 	progress := ctx.GooglePhotosSyncMgr.Progress()
 	JSONResponse(w, progress)
+}
+
+// HandleGooglePhotosSyncHistoryExport returns compact Google Photos sync summaries.
+func (ctx *Context) HandleGooglePhotosSyncHistoryExport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if ctx.GooglePhotosSyncMgr == nil {
+		http.Error(w, "Google Photos sync manager not initialized", http.StatusServiceUnavailable)
+		return
+	}
+	progress := ctx.GooglePhotosSyncMgr.Progress()
+	w.Header().Set("Content-Disposition", `attachment; filename="google-photos-sync-history.json"`)
+	JSONResponse(w, map[string]interface{}{"history": progress.History, "last_successful_sync": progress.LastSuccessfulSync})
 }
 
 // HandleGooglePhotosAlbums lists or creates Google Photos albums

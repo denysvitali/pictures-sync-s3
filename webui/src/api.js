@@ -233,10 +233,14 @@ export const startGooglePhotosAuth = (d, redirectUri) =>
   apiRequest('/api/googlephotos/auth/start', { deviceUrl: d, method: 'POST', body: { redirect_uri: redirectUri } })
 export const disconnectGooglePhotos = (d) =>
   apiRequest('/api/googlephotos/auth/disconnect', { deviceUrl: d, method: 'POST' })
-export const startGooglePhotosSync = (d) =>
-  apiRequest('/api/googlephotos/sync', { deviceUrl: d, method: 'POST' })
+export const startGooglePhotosSync = (d, options = {}) =>
+  apiRequest('/api/googlephotos/sync', { deviceUrl: d, method: 'POST', body: options })
+export const cancelGooglePhotosSync = (d) =>
+  apiRequest('/api/googlephotos/sync/cancel', { deviceUrl: d, method: 'POST' })
 export const getGooglePhotosSyncProgress = (d) =>
   apiRequest('/api/googlephotos/sync/progress', { deviceUrl: d })
+export const getGooglePhotosSyncHistoryExportUrl = (d) =>
+  `${normalizeBaseUrl(d)}/api/googlephotos/sync/history/export`
 export const getGooglePhotosAlbums = (d) => apiRequest('/api/googlephotos/albums', { deviceUrl: d, timeoutMs: 15000 })
 export const createGooglePhotosAlbum = (d, title) =>
   apiRequest('/api/googlephotos/albums', { deviceUrl: d, method: 'POST', body: { title } })
