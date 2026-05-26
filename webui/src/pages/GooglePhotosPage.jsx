@@ -137,7 +137,7 @@ function formatPhase(progress) {
 
 function formatStatusSummary(status) {
   if (status?.connected) return 'Connected and ready'
-  if (status?.configured) return 'Configured, waiting for account verification'
+  if (status?.configured) return 'OAuth setup saved; account not connected'
   return 'Not connected'
 }
 
@@ -146,7 +146,7 @@ function formatStatusHint(status) {
     return 'Your Google Photos account is connected and remote synchronization can run.'
   }
   if (status?.configured) {
-    return 'Google Photos remote exists, but the account could not be verified in this check. You can still try syncing.'
+    return 'Complete the OAuth connection to create the Google Photos rclone remote before syncing.'
   }
   return 'Connect your Google Photos account to sync from your B2 storage. Configure OAuth credentials in Settings first.'
 }
@@ -239,6 +239,7 @@ function StatusPanel({ status, statusError }) {
 }
 
 function ActionPanel({
+  connected,
   configured,
   loading,
   syncing,
@@ -250,11 +251,11 @@ function ActionPanel({
   onDisconnect,
   onOpenSettings,
 }) {
-  const primaryMessage = configured
+  const primaryMessage = connected
     ? syncing
       ? 'Sync in progress'
       : 'Sync to Google Photos'
-    : 'Connect your account'
+    : 'Connect Google Photos'
 
   const disablePrimary = loading || syncing || connecting
 
@@ -266,13 +267,15 @@ function ActionPanel({
 
       <div className="space-y-3">
         <p className="text-sm text-surface-300">
-          {configured
+          {connected
             ? 'Start a sync to upload photos from all detected cards into album folders in Google Photos.'
-            : 'Connect Google Photos first to start syncing your photos.'}
+            : configured
+              ? 'Complete the Google Photos OAuth connection before syncing your photos.'
+              : 'Connect Google Photos first to start syncing your photos.'}
         </p>
 
         <div className="flex flex-wrap gap-2">
-          {!configured ? (
+          {!connected ? (
             <>
               <Button onClick={onConnect} loading={connecting} disabled={connecting || loading}>
                 <Icon name="lock" className="w-4 h-4" />
@@ -621,6 +624,10 @@ export default function GooglePhotosPage() {
 
   const handleSync = useCallback(async () => {
     if (!deviceUrl) return
+    if (!status?.connected) {
+      toast.error('Connect Google Photos before starting a sync')
+      return
+    }
     try {
       await startGooglePhotosSync(deviceUrl)
       setSyncing(true)
@@ -636,7 +643,7 @@ export default function GooglePhotosPage() {
       }
       toast.error(`Failed to start sync: ${msg}`)
     }
-  }, [deviceUrl, toast, loadSyncProgress])
+  }, [deviceUrl, status?.connected, toast, loadSyncProgress])
 
   const handleCancelSync = useCallback(async () => {
     if (!deviceUrl) return
@@ -652,7 +659,8 @@ export default function GooglePhotosPage() {
     }
   }, [deviceUrl, toast, loadSyncProgress])
 
-  const isConfigured = status?.configured
+  const isConnected = Boolean(status?.connected)
+  const isConfigured = Boolean(status?.configured)
   const showProgress =
     syncing ||
     (progress && ['completed', 'error', 'cancelled'].includes(progress.status || ''))
@@ -670,6 +678,7 @@ export default function GooglePhotosPage() {
       <StatusPanel status={status} statusError={statusError} />
 
       <ActionPanel
+        connected={isConnected}
         configured={isConfigured}
         loading={loading}
         syncing={syncing}
