@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/denysvitali/pictures-sync-s3/pkg/paniclog"
 	"github.com/denysvitali/pictures-sync-s3/pkg/tlsconfig"
 )
 
@@ -116,6 +118,73 @@ func TestHandleSystemServicesRestartRejectsUnknownService(t *testing.T) {
 	}
 }
 
+func TestHandleSystemPanicReadsAndClearsRecord(t *testing.T) {
+	restore := overridePanicLogPathForTest(t, filepath.Join(t.TempDir(), "panic.json"))
+	defer restore()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/system/panic", nil)
+	rr := httptest.NewRecorder()
+
+	(&Context{}).HandleSystemPanic(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("initial GET status = %d, want %d; body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	var initial struct {
+		Exists bool `json:"exists"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&initial); err != nil {
+		t.Fatalf("Decode initial response: %v", err)
+	}
+	if initial.Exists {
+		t.Fatal("initial exists = true, want false")
+	}
+
+	if err := paniclog.Write(panicLogPath, paniclog.Record{
+		Time:    "2026-05-26T00:00:00Z",
+		Source:  "webui-http",
+		Message: "boom",
+		Stack:   "stack",
+	}); err != nil {
+		t.Fatalf("write panic record: %v", err)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/system/panic", nil)
+	rr = httptest.NewRecorder()
+
+	(&Context{}).HandleSystemPanic(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, want %d; body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	var got struct {
+		Exists bool             `json:"exists"`
+		Panic  *paniclog.Record `json:"panic"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
+		t.Fatalf("Decode response: %v", err)
+	}
+	if !got.Exists || got.Panic == nil || got.Panic.Message != "boom" {
+		t.Fatalf("unexpected panic response: %+v", got)
+	}
+
+	req = httptest.NewRequest(http.MethodDelete, "/api/system/panic", nil)
+	rr = httptest.NewRecorder()
+
+	(&Context{}).HandleSystemPanic(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("DELETE status = %d, want %d; body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	record, err := paniclog.Read(panicLogPath)
+	if err != nil {
+		t.Fatalf("Read() after clear error = %v", err)
+	}
+	if record != nil {
+		t.Fatalf("record after clear = %#v, want nil", record)
+	}
+}
+
 func overrideServiceRestartForTest(t *testing.T) func() {
 	t.Helper()
 
@@ -129,6 +198,16 @@ func overrideServiceRestartForTest(t *testing.T) func() {
 		signalService = oldSignal
 		currentPID = oldCurrentPID
 		scheduleServiceSignal = oldSchedule
+	}
+}
+
+func overridePanicLogPathForTest(t *testing.T, path string) func() {
+	t.Helper()
+
+	oldPath := panicLogPath
+	panicLogPath = path
+	return func() {
+		panicLogPath = oldPath
 	}
 }
 

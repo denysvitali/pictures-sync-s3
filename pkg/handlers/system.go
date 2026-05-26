@@ -13,12 +13,14 @@ import (
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/httputil"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ntpsync"
+	"github.com/denysvitali/pictures-sync-s3/pkg/paniclog"
 	"github.com/denysvitali/pictures-sync-s3/pkg/tlsconfig"
 )
 
 var (
 	setSystemTime = ntpsync.SetSystemTime
 	generateCert  = tlsconfig.GeneratePersistentSelfSignedCertificate
+	panicLogPath  = paniclog.DefaultPath
 )
 
 type systemTimeRequest struct {
@@ -88,6 +90,37 @@ func (ctx *Context) HandleSystemTLSCertificate(w http.ResponseWriter, r *http.Re
 		"generated":       true,
 		"tls_certificate": certificateInfoResponse(info),
 	}))
+}
+
+func (ctx *Context) HandleSystemPanic(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		record, err := paniclog.Read(panicLogPath)
+		if err != nil {
+			httputil.Error(w, http.StatusInternalServerError, fmt.Sprintf("Failed to read panic information: %v", err))
+			return
+		}
+		if record == nil {
+			httputil.JSON(w, http.StatusOK, map[string]any{
+				"exists": false,
+			})
+			return
+		}
+		httputil.JSON(w, http.StatusOK, map[string]any{
+			"exists": true,
+			"panic":  record,
+		})
+	case http.MethodDelete:
+		if err := paniclog.Clear(panicLogPath); err != nil {
+			httputil.Error(w, http.StatusInternalServerError, fmt.Sprintf("Failed to clear panic information: %v", err))
+			return
+		}
+		httputil.JSON(w, http.StatusOK, map[string]any{
+			"success": true,
+		})
+	default:
+		httputil.MethodNotAllowed(w)
+	}
 }
 
 func systemStatusResponse(r *http.Request, extra map[string]any) map[string]any {

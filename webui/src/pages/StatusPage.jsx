@@ -12,6 +12,8 @@ import {
   selectDevice,
   formatSDCard,
   redetectSDCard,
+  getSystemPanic,
+  clearSystemPanic,
 } from '../api.js'
 import { Card, CardHeader, CardTitle } from '../components/Card.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
@@ -580,6 +582,57 @@ function SyncHistoryCard({ history }) {
   )
 }
 
+function PanicInfoCard({ panicInfo, onClear, clearing }) {
+  if (!panicInfo?.exists || !panicInfo?.panic) return null
+
+  const record = panicInfo.panic
+  const occurredAt = record.time ? new Date(record.time).toLocaleString() : 'Unknown time'
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Icon name="exclamation-triangle" className="w-5 h-5 text-danger" />
+          <CardTitle>Saved Panic</CardTitle>
+        </div>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={onClear}
+          loading={clearing}
+          aria-label="Clear saved panic information"
+        >
+          <Icon name="trash" className="w-4 h-4" aria-hidden="true" />
+          Clear
+        </Button>
+      </CardHeader>
+
+      <div className="space-y-3">
+        <div className="grid gap-2 text-xs text-surface-400 sm:grid-cols-2">
+          <div>
+            <p className="text-surface-500">Time</p>
+            <p className="font-medium text-surface-200">{occurredAt}</p>
+          </div>
+          <div>
+            <p className="text-surface-500">Source</p>
+            <p className="font-medium text-surface-200">{record.source || '--'}</p>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-danger/25 bg-danger/10 p-3">
+          <p className="text-sm font-medium text-danger break-words">{record.message || 'panic'}</p>
+        </div>
+
+        {record.stack && (
+          <pre className="max-h-64 overflow-auto rounded-lg border border-surface-700 bg-surface-950 p-3 text-xs leading-relaxed text-surface-300">
+            {record.stack}
+          </pre>
+        )}
+      </div>
+    </Card>
+  )
+}
+
 function FormatSDCardModal({ open, onClose, devicePath, onConfirm, loading }) {
   const [confirmation, setConfirmation] = useState('')
   const [label, setLabel] = useState('')
@@ -682,6 +735,8 @@ export default function StatusPage() {
   const [selectionLoading, setSelectionLoading] = useState(false)
   const [formatLoading, setFormatLoading] = useState(false)
   const [redetectLoading, setRedetectLoading] = useState(false)
+  const [panicInfo, setPanicInfo] = useState(null)
+  const [panicClearLoading, setPanicClearLoading] = useState(false)
   const [error, setError] = useState(null)
   const [formatModal, setFormatModal] = useState({ open: false, devicePath: '' })
   const [wsConnected, setWsConnected] = useState(false)
@@ -707,6 +762,11 @@ export default function StatusPage() {
         setDevices(Array.isArray(devicesData) ? devicesData : [])
       } catch {
         setDevices([])
+      }
+      try {
+        setPanicInfo(await getSystemPanic(deviceUrl))
+      } catch {
+        setPanicInfo(null)
       }
       consecutiveErrorsRef.current = 0
     } catch (err) {
@@ -914,6 +974,20 @@ export default function StatusPage() {
     }
   }, [deviceUrl, toast, fetchData])
 
+  const handleClearPanic = useCallback(async () => {
+    if (!deviceUrl) return
+    setPanicClearLoading(true)
+    try {
+      await clearSystemPanic(deviceUrl)
+      setPanicInfo({ exists: false })
+      toast.success('Saved panic information cleared')
+    } catch (err) {
+      toast.error(`Failed to clear panic information: ${describeError(err)}`)
+    } finally {
+      setPanicClearLoading(false)
+    }
+  }, [deviceUrl, toast])
+
   if (loading && !status) {
     return <PageLoader />
   }
@@ -962,6 +1036,12 @@ export default function StatusPage() {
           </div>
         </div>
       )}
+
+      <PanicInfoCard
+        panicInfo={panicInfo}
+        onClear={handleClearPanic}
+        clearing={panicClearLoading}
+      />
 
       {/* Sync controls */}
       {status && (

@@ -21,6 +21,7 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/handlers"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ntpsync"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ota"
+	"github.com/denysvitali/pictures-sync-s3/pkg/paniclog"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ratelimit"
 	"github.com/denysvitali/pictures-sync-s3/pkg/settings"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ssrf"
@@ -144,6 +145,14 @@ func repairClockAndPersistentCertificateBeforeTLS() {
 func main() {
 	// Enable caller reporting in logs (file:line)
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			if err := paniclog.Capture(paniclog.DefaultPath, "webui-main", recovered); err != nil {
+				log.Printf("Failed to persist panic information: %v", err)
+			}
+			panic(recovered)
+		}
+	}()
 
 	log.Println("Photo Backup Station WebUI - Starting...")
 
@@ -168,17 +177,21 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
 	defer signal.Stop(sigChan)
-	go func() {
+	go recoverAndPersistPanic("webui-signal-handler", func() {
 		sig := <-sigChan
 		log.Printf("Received signal %v, initiating graceful shutdown...", sig)
 		shutdownCancel() // Cancel context to stop cleanup goroutines
-	}()
+	})
 
 	// Start WebSocket token cleanup goroutine with context for proper shutdown
-	go websocket.CleanupExpiredWSTokens(shutdownCtx)
+	go recoverAndPersistPanic("webui-ws-token-cleanup", func() {
+		websocket.CleanupExpiredWSTokens(shutdownCtx)
+	})
 
 	// Start WebSocket rate limiter cleanup goroutine
-	go websocket.StartRateLimiterCleanup(shutdownCtx)
+	go recoverAndPersistPanic("webui-ws-rate-limiter-cleanup", func() {
+		websocket.StartRateLimiterCleanup(shutdownCtx)
+	})
 
 	// Initialize event manager. In the webui process this only acts as a
 	// local pub/sub cache: every event it emits originates from the daemon's
@@ -197,7 +210,9 @@ func main() {
 	// Spawn the long-lived subscription consumer that keeps stateMgr/eventMgr
 	// in sync with the daemon over the control socket. Reconnects with
 	// exponential backoff on failure.
-	go startDaemonSubscription(shutdownCtx, stateMgr, eventMgr)
+	go recoverAndPersistPanic("webui-daemon-subscription", func() {
+		startDaemonSubscription(shutdownCtx, stateMgr, eventMgr)
+	})
 
 	// Load settings
 	appSettings, err := settings.Load()
@@ -303,6 +318,7 @@ func main() {
 	http.HandleFunc("/api/system/time", ctx.HandleSystemTime)
 	http.HandleFunc("/api/system/tls-certificate", ctx.HandleSystemTLSCertificate)
 	http.HandleFunc("/api/system/services/restart", ctx.HandleSystemServicesRestart)
+	http.HandleFunc("/api/system/panic", ctx.HandleSystemPanic)
 	http.HandleFunc("/api/googlephotos/status", ctx.HandleGooglePhotosStatus)
 	http.HandleFunc("/api/googlephotos/auth/start", ctx.HandleGooglePhotosAuthStart)
 	http.HandleFunc("/api/googlephotos/auth/callback", ctx.HandleGooglePhotosAuthCallback)
@@ -336,6 +352,7 @@ func main() {
 		auth.CORSMiddleware(allowedOrigins, true)(authProtected),
 	)
 	handler = requestTimeoutMiddleware(apiRequestTimeout)(handler)
+	handler = panicPersistenceMiddleware(paniclog.DefaultPath)(handler)
 
 	// Start server (HTTPS if certificates are available, HTTP for development)
 	addr := ":" + port
@@ -472,6 +489,18 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 	}
 }
 
+func recoverAndPersistPanic(source string, fn func()) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			if err := paniclog.Capture(paniclog.DefaultPath, source, recovered); err != nil {
+				log.Printf("Failed to persist panic information: %v", err)
+			}
+			panic(recovered)
+		}
+	}()
+	fn()
+}
+
 func serveWithShutdown(ctx context.Context, server *http.Server, serve func() error) error {
 	errCh := make(chan error, 1)
 	go func() {
@@ -509,6 +538,23 @@ func requestTimeoutMiddleware(timeout time.Duration) func(http.Handler) http.Han
 			ctx, cancel := context.WithTimeout(r.Context(), timeout)
 			defer cancel()
 			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+func panicPersistenceMiddleware(path string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					if err := paniclog.Capture(path, "webui-http", recovered); err != nil {
+						log.Printf("Failed to persist HTTP panic information: %v", err)
+					}
+					log.Printf("Recovered HTTP panic: %v", recovered)
+					http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				}
+			}()
+			next.ServeHTTP(w, r)
 		})
 	}
 }
