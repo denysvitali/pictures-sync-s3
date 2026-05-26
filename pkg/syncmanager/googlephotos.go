@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -11,7 +12,7 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/utils"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/accounting"
-	rcsync "github.com/rclone/rclone/fs/sync"
+	"github.com/rclone/rclone/fs/operations"
 )
 
 // SyncCardsToGooglePhotos syncs all card directories from the B2 remote to
@@ -224,20 +225,78 @@ func (m *Manager) syncCardToGooglePhotos(ctx context.Context, srcPath, dstPath s
 	ci.Transfers = 1
 	ci.Checkers = 2
 
-	// Count files before sync.
-	beforeCount, beforeBytes := m.countFiles(ctx, srcFs)
+	// Copy files into the album root. Rclone's googlephotos backend treats
+	// subdirectories under album/<name> as part of the album title, so preserving
+	// source paths like DJI_001/file.jpg would create album "<name>/DJI_001".
+	objects, beforeBytes := m.listObjects(ctx, srcFs)
+	beforeCount := len(objects)
 	log.Printf("Google Photos sync: %d files (%s) to upload", beforeCount, formatBytes(beforeBytes))
 
-	// Sync with retry.
-	err = retry(ctx, func(attempt int) error {
-		return rcsync.Sync(ctx, dstFs, srcFs, false)
-	}, isRetryableError, "Google Photos sync")
-	if err != nil {
-		return 0, 0, err
+	basenameCounts := googlePhotosBasenameCounts(objects)
+	usedNames := make(map[string]int, len(objects))
+	existingNames := listExistingObjectRemotes(ctx, dstFs)
+	for _, obj := range objects {
+		dstRemote := googlePhotosFlatRemote(obj.Remote(), basenameCounts, usedNames)
+		if _, exists := existingNames[dstRemote]; exists {
+			continue
+		}
+		err = retry(ctx, func(attempt int) error {
+			_, copyErr := operations.Copy(ctx, dstFs, nil, dstRemote, obj)
+			return copyErr
+		}, isRetryableError, fmt.Sprintf("Google Photos copy %s", obj.Remote()))
+		if err != nil {
+			return 0, 0, err
+		}
+		existingNames[dstRemote] = struct{}{}
 	}
 	log.Printf("Google Photos sync: upload completed for %s", dstPath)
 
 	return beforeCount, beforeBytes, nil
+}
+
+func listExistingObjectRemotes(ctx context.Context, f fs.Fs) map[string]struct{} {
+	remotes := make(map[string]struct{})
+	entries, err := f.List(ctx, "")
+	if err != nil {
+		return remotes
+	}
+	for _, entry := range entries {
+		if _, ok := entry.(fs.Object); ok {
+			remote := entry.Remote()
+			remotes[remote] = struct{}{}
+			remotes[path.Base(strings.Trim(remote, "/"))] = struct{}{}
+		}
+	}
+	return remotes
+}
+
+func googlePhotosBasenameCounts(objects []fs.Object) map[string]int {
+	counts := make(map[string]int, len(objects))
+	for _, obj := range objects {
+		counts[path.Base(strings.Trim(obj.Remote(), "/"))]++
+	}
+	return counts
+}
+
+func googlePhotosFlatRemote(srcRemote string, basenameCounts map[string]int, usedNames map[string]int) string {
+	cleaned := strings.Trim(strings.TrimSpace(srcRemote), "/")
+	name := path.Base(cleaned)
+	if name == "." || name == "/" || name == "" {
+		name = "photo"
+	}
+	if basenameCounts[name] > 1 {
+		name = strings.ReplaceAll(cleaned, "/", "_")
+	}
+	if name == "." || name == "/" || name == "" {
+		name = "photo"
+	}
+	if used := usedNames[name]; used > 0 {
+		ext := path.Ext(name)
+		base := strings.TrimSuffix(name, ext)
+		name = fmt.Sprintf("%s_%d%s", base, used+1, ext)
+	}
+	usedNames[name]++
+	return name
 }
 
 // listCardIDsLocked lists card directories from the B2 remote.
@@ -298,6 +357,36 @@ func (m *Manager) countFilesInDir(ctx context.Context, f fs.Fs, dir string) (int
 		}
 	}
 	return count, bytes
+}
+
+func (m *Manager) listObjects(ctx context.Context, f fs.Fs) ([]fs.Object, int64) {
+	return m.listObjectsInDir(ctx, f, "")
+}
+
+func (m *Manager) listObjectsInDir(ctx context.Context, f fs.Fs, dir string) ([]fs.Object, int64) {
+	entries, err := f.List(ctx, dir)
+	if err != nil {
+		return nil, 0
+	}
+
+	var objects []fs.Object
+	var bytes int64
+	for _, entry := range entries {
+		select {
+		case <-ctx.Done():
+			return objects, bytes
+		default:
+		}
+		if obj, ok := entry.(fs.Object); ok {
+			objects = append(objects, obj)
+			bytes += obj.Size()
+		} else if dirEntry, ok := entry.(fs.Directory); ok {
+			subObjects, subBytes := m.listObjectsInDir(ctx, f, dirEntry.Remote())
+			objects = append(objects, subObjects...)
+			bytes += subBytes
+		}
+	}
+	return objects, bytes
 }
 
 // monitorGooglePhotosProgress monitors Google Photos sync progress.
