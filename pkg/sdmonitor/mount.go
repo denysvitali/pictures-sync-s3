@@ -1,6 +1,7 @@
 package sdmonitor
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -84,13 +85,13 @@ func (m *Monitor) unmount() error {
 
 	// First attempt: normal unmount
 	if err := unix.Unmount(m.mountPath, 0); err != nil {
-		if err == unix.EINVAL {
+		if errors.Is(err, unix.EINVAL) {
 			// Not mounted, that's fine
 			log.Printf("Unmount: %s is not mounted (EINVAL)", m.mountPath)
 			return nil
 		}
 
-		if err == unix.EBUSY {
+		if errors.Is(err, unix.EBUSY) {
 			log.Printf("Unmount: Device busy at %s, attempting lazy unmount", m.mountPath)
 			// Second attempt: lazy unmount (MNT_DETACH)
 			// This detaches the filesystem from the hierarchy now, and cleans up
@@ -120,7 +121,7 @@ func (m *Monitor) forceUnmount() error {
 
 	// Try lazy unmount immediately
 	if err := unix.Unmount(m.mountPath, unix.MNT_DETACH); err != nil {
-		if err != unix.EINVAL {
+		if !errors.Is(err, unix.EINVAL) {
 			log.Printf("ForceUnmount: ERROR: Failed to force unmount %s: %v", m.mountPath, err)
 			return err
 		}
