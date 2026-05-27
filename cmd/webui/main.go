@@ -27,6 +27,7 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/ssrf"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 	"github.com/denysvitali/pictures-sync-s3/pkg/syncmanager"
+	"github.com/denysvitali/pictures-sync-s3/pkg/systeminfo"
 	"github.com/denysvitali/pictures-sync-s3/pkg/tlsconfig"
 	"github.com/denysvitali/pictures-sync-s3/pkg/websocket"
 	"github.com/denysvitali/pictures-sync-s3/pkg/webui"
@@ -196,6 +197,14 @@ func main() {
 		websocket.StartRateLimiterCleanup(shutdownCtx)
 	})
 
+	// Start system stats collector
+	statsCollector := systeminfo.NewStatsCollector()
+	statsCollector.Start()
+	go func() {
+		<-shutdownCtx.Done()
+		statsCollector.Stop()
+	}()
+
 	// Initialize event manager. In the webui process this only acts as a
 	// local pub/sub cache: every event it emits originates from the daemon's
 	// subscribe stream (see startDaemonSubscription below), and nothing in
@@ -322,6 +331,7 @@ func main() {
 	http.HandleFunc("/api/system/tls-certificate", ctx.HandleSystemTLSCertificate)
 	http.HandleFunc("/api/system/services/restart", ctx.HandleSystemServicesRestart)
 	http.HandleFunc("/api/system/panic", ctx.HandleSystemPanic)
+	http.HandleFunc("/api/system/stats", ctx.HandleSystemStats)
 	http.HandleFunc("/api/googlephotos/status", ctx.HandleGooglePhotosStatus)
 	http.HandleFunc("/api/googlephotos/auth/start", ctx.HandleGooglePhotosAuthStart)
 	http.HandleFunc("/api/googlephotos/auth/callback", ctx.HandleGooglePhotosAuthCallback)

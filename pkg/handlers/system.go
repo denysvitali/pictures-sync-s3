@@ -14,6 +14,7 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/httputil"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ntpsync"
 	"github.com/denysvitali/pictures-sync-s3/pkg/paniclog"
+	"github.com/denysvitali/pictures-sync-s3/pkg/systeminfo"
 	"github.com/denysvitali/pictures-sync-s3/pkg/tlsconfig"
 )
 
@@ -129,6 +130,47 @@ func (ctx *Context) HandleSystemPanic(w http.ResponseWriter, r *http.Request) {
 	default:
 		httputil.MethodNotAllowed(w)
 	}
+}
+
+func (ctx *Context) HandleSystemStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		httputil.MethodNotAllowed(w)
+		return
+	}
+
+	hours := httputil.QueryParamIntRange(r, "hours", 24, 1, 168)
+	until := time.Now()
+	since := until.Add(-time.Duration(hours) * time.Hour)
+
+	records, err := systeminfo.ReadStats(since, until)
+	if err != nil {
+		httputil.InternalError(w, err)
+		return
+	}
+
+	type point struct {
+		Timestamp     int64   `json:"timestamp"`
+		CPUPercent    float32 `json:"cpu_percent"`
+		RSSBytes      uint64  `json:"rss_bytes"`
+		TotalMemBytes uint64  `json:"total_mem_bytes"`
+	}
+
+	points := make([]point, len(records))
+	for i, r := range records {
+		points[i] = point{
+			Timestamp:     r.Timestamp,
+			CPUPercent:    r.CPUPercent,
+			RSSBytes:      r.RSSBytes,
+			TotalMemBytes: r.TotalMemBytes,
+		}
+	}
+
+	httputil.JSON(w, http.StatusOK, map[string]any{
+		"since":   since.Unix(),
+		"until":   until.Unix(),
+		"interval": 5,
+		"points":  points,
+	})
 }
 
 func systemStatusResponse(r *http.Request, extra map[string]any) map[string]any {

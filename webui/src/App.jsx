@@ -136,6 +136,7 @@ export default function App() {
     history: 'Sync History',
     gallery: 'Gallery',
     googlephotos: 'Google Photos',
+    stats: 'System Stats',
     config: 'Settings',
   }
 
