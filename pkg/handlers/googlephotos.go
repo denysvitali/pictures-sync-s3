@@ -439,10 +439,10 @@ func (ctx *Context) handleGooglePhotosAlbumList(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// Only return app-managed albums (Card {id}).
+	// Only return app-managed albums (card-00000).
 	var managed []*googlephotos.Album
 	for _, a := range albums {
-		if strings.HasPrefix(a.Title, "Card ") {
+		if strings.HasPrefix(a.Title, "card-") {
 			managed = append(managed, a)
 		}
 	}

@@ -69,7 +69,7 @@ func TestSyncCardListsDCIMRecursivelyBeforeCreatingAlbum(t *testing.T) {
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/albums":
 			return jsonResponse(http.StatusOK, `{}`), nil
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/albums":
-			return jsonResponse(http.StatusOK, `{"id":"album-1","title":"Card abc"}`), nil
+			return jsonResponse(http.StatusOK, `{"id":"album-1","title":"card-abc"}`), nil
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/uploads":
 			return textResponse(http.StatusOK, "upload-token-1"), nil
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/mediaItems:batchCreate":
@@ -142,7 +142,7 @@ func TestSyncCardPopulatesDetailedProgress(t *testing.T) {
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/albums":
 			return jsonResponse(http.StatusOK, `{}`), nil
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/albums":
-			return jsonResponse(http.StatusOK, `{"id":"album-1","title":"Card abc"}`), nil
+			return jsonResponse(http.StatusOK, `{"id":"album-1","title":"card-abc"}`), nil
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/uploads":
 			if _, err := io.Copy(io.Discard, req.Body); err != nil {
 				t.Fatalf("failed to read upload body: %v", err)
@@ -218,7 +218,7 @@ func TestSyncCardAddsMediaToAlbumInModTimeOrder(t *testing.T) {
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/albums":
 			return jsonResponse(http.StatusOK, `{}`), nil
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/albums":
-			return jsonResponse(http.StatusOK, `{"id":"album-1","title":"Card time"}`), nil
+			return jsonResponse(http.StatusOK, `{"id":"album-1","title":"card-time"}`), nil
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/uploads":
 			filename := req.Header.Get("X-Goog-Upload-File-Name")
 			return textResponse(http.StatusOK, "upload-token-"+filename), nil
@@ -287,7 +287,7 @@ func TestSyncCardUploadsMediaInParallelAndAddsAlbumInModTimeOrder(t *testing.T) 
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/albums":
 			return jsonResponse(http.StatusOK, `{}`), nil
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/albums":
-			return jsonResponse(http.StatusOK, `{"id":"album-1","title":"Card parallel"}`), nil
+			return jsonResponse(http.StatusOK, `{"id":"album-1","title":"card-parallel"}`), nil
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/uploads":
 			filename := req.Header.Get("X-Goog-Upload-File-Name")
 			uploadStarted <- filename
@@ -379,7 +379,7 @@ func TestSyncCardCreatesMultipleBatchesBeyondGoogleLimit(t *testing.T) {
 		case req.Method == http.MethodGet && req.URL.Path == "/v1/albums":
 			return jsonResponse(http.StatusOK, `{}`), nil
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/albums":
-			return jsonResponse(http.StatusOK, `{"id":"album-1","title":"Card many"}`), nil
+			return jsonResponse(http.StatusOK, `{"id":"album-1","title":"card-many"}`), nil
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/uploads":
 			return textResponse(http.StatusOK, "upload-token-"+req.Header.Get("X-Goog-Upload-File-Name")), nil
 		case req.Method == http.MethodPost && req.URL.Path == "/v1/mediaItems:batchCreate":

@@ -213,7 +213,7 @@ func (m *Manager) SyncCardsToGooglePhotos(ctx context.Context) error {
 		log.Printf("Google Photos sync: card %d/%d (%s) — %s → %s", i+1, len(cards), card.Name, srcPath, dstPath)
 		m.setGooglePhotosProgress(Progress{
 			Status:           "syncing",
-			CurrentFile:      fmt.Sprintf("Card %s", card.Name),
+			CurrentFile:      card.Name,
 			TransferredFiles: processedFiles,
 			TotalFiles:       totalFiles,
 			BytesTransferred: processedBytes,

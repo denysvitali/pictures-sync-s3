@@ -349,7 +349,7 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 	sm.setCardProgress(cardID, 0, len(mediaFiles), uploaded, skipped, failed, "Preparing album", 0)
 
 	// Find or create album for this card only after there is something to upload.
-	albumTitle := "Card " + cardID
+	albumTitle := "card-" + cardID
 	var album *Album
 	if cachedID, ok := sm.store.albumID(cardID); ok {
 		album = &Album{ID: cachedID, Title: albumTitle}
