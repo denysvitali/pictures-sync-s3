@@ -147,6 +147,210 @@ function getOverviewCardID(status) {
   return null
 }
 
+/* ─── Animated counter hook ─── */
+function useAnimatedNumber(target, duration = 600) {
+  const [display, setDisplay] = useState(target)
+  const startRef = useRef(null)
+  const fromRef = useRef(target)
+
+  useEffect(() => {
+    fromRef.current = display
+    startRef.current = null
+    let raf
+    const animate = (ts) => {
+      if (startRef.current === null) startRef.current = ts
+      const elapsed = ts - startRef.current
+      const progress = Math.min(1, elapsed / duration)
+      const eased = 1 - Math.pow(1 - progress, 3)
+      const current = Math.round(fromRef.current + (target - fromRef.current) * eased)
+      setDisplay(current)
+      if (progress < 1) raf = requestAnimationFrame(animate)
+    }
+    raf = requestAnimationFrame(animate)
+    return () => cancelAnimationFrame(raf)
+  }, [target, duration])
+
+  return display
+}
+
+/* ─── Circular progress ring ─── */
+function CircularProgress({ percent, size = 160, stroke = 10, children }) {
+  const r = (size - stroke) / 2
+  const c = 2 * Math.PI * r
+  const offset = c - (percent / 100) * c
+
+  return (
+    <div className="relative inline-flex items-center justify-center" style={{ width: size, height: size }}>
+      <svg width={size} height={size} className="-rotate-90">
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="currentColor" strokeWidth={stroke}
+          className="text-surface-700/60" />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="currentColor" strokeWidth={stroke}
+          strokeLinecap="round"
+          className="text-brand-500 transition-all duration-500"
+          style={{ strokeDasharray: c, strokeDashoffset: offset }} />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        {children}
+      </div>
+    </div>
+  )
+}
+
+/* ─── Hero sync progress section ─── */
+function SyncHero({ sync }) {
+  const percent = getProgressPercent(sync)
+  const animatedPercent = useAnimatedNumber(percent, 400)
+  const animatedFiles = useAnimatedNumber(sync?.files_synced || 0, 400)
+  const totalFiles = sync?.files_total || 0
+  const speed = formatSpeed(sync?.transfer_speed)
+  const eta = sync?.eta || '--'
+  const currentFile = sync?.current_file
+
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-brand-500/20 bg-gradient-to-br from-surface-800/80 to-surface-900/90 p-6 md:p-8">
+      {/* Animated pulse ring */}
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div className="w-40 h-40 rounded-full border border-brand-500/10 animate-ping" style={{ animationDuration: '3s' }} />
+      </div>
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div className="w-56 h-56 rounded-full border border-brand-500/5 animate-ping" style={{ animationDuration: '4s', animationDelay: '1s' }} />
+      </div>
+
+      <div className="relative flex flex-col md:flex-row items-center gap-6 md:gap-10">
+        {/* Circular progress */}
+        <div className="shrink-0">
+          <CircularProgress percent={percent} size={160} stroke={10}>
+            <span className="text-3xl font-bold text-surface-100">{animatedPercent}%</span>
+            <span className="text-xs text-surface-500 mt-0.5">{getProgressLabel(sync)}</span>
+          </CircularProgress>
+        </div>
+
+        {/* Stats grid */}
+        <div className="flex-1 w-full">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="rounded-xl bg-surface-900/60 border border-surface-700/40 p-4 text-center">
+              <div className="flex items-center justify-center gap-1.5 mb-1">
+                <Icon name="arrow-up-tray" className="w-4 h-4 text-brand-400" />
+                <span className="text-xs text-surface-500 uppercase tracking-wider">Files</span>
+              </div>
+              <p className="text-xl font-bold text-surface-100">
+                {animatedFiles.toLocaleString()}<span className="text-sm text-surface-500 font-normal"> / {totalFiles.toLocaleString()}</span>
+              </p>
+            </div>
+
+            <div className="rounded-xl bg-surface-900/60 border border-surface-700/40 p-4 text-center">
+              <div className="flex items-center justify-center gap-1.5 mb-1">
+                <Icon name="activity" className="w-4 h-4 text-brand-400" />
+                <span className="text-xs text-surface-500 uppercase tracking-wider">Speed</span>
+              </div>
+              <p className="text-xl font-bold text-surface-100">{speed}</p>
+            </div>
+
+            <div className="rounded-xl bg-surface-900/60 border border-surface-700/40 p-4 text-center">
+              <div className="flex items-center justify-center gap-1.5 mb-1">
+                <Icon name="clock" className="w-4 h-4 text-brand-400" />
+                <span className="text-xs text-surface-500 uppercase tracking-wider">ETA</span>
+              </div>
+              <p className="text-xl font-bold text-surface-100">{eta}</p>
+            </div>
+
+            <div className="rounded-xl bg-surface-900/60 border border-surface-700/40 p-4 text-center">
+              <div className="flex items-center justify-center gap-1.5 mb-1">
+                <Icon name="image" className="w-4 h-4 text-brand-400" />
+                <span className="text-xs text-surface-500 uppercase tracking-wider">Size</span>
+              </div>
+              <p className="text-xl font-bold text-surface-100">{formatBytes(sync?.bytes_synced || 0)}</p>
+            </div>
+          </div>
+
+          {currentFile && (
+            <p className="mt-4 text-xs text-surface-500 truncate text-center md:text-left">
+              {currentFile}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ─── Gradient border card wrapper ─── */
+function GradientCard({ children, className = '', delay = 0 }) {
+  return (
+    <div
+      className={`relative rounded-lg p-[1px] bg-gradient-to-br from-brand-500/20 via-surface-700/40 to-brand-500/10 animate-in fade-in slide-in-from-bottom-2 fill-mode-backwards ${className}`}
+      style={{ animationDelay: `${delay}ms`, animationDuration: '500ms' }}
+    >
+      <div className="relative bg-surface-800/55 rounded-lg p-4 shadow-sm shadow-black/10 h-full">
+        {children}
+      </div>
+    </div>
+  )
+}
+
+/* ─── Icon background circle ─── */
+function IconCircle({ icon, colorClass = 'text-brand-400', bgClass = 'bg-brand-500/10' }) {
+  return (
+    <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${bgClass}`}>
+      <Icon name={icon} className={`w-5 h-5 ${colorClass}`} />
+    </div>
+  )
+}
+
+/* ─── System status dot ─── */
+function StatusDot({ variant = 'success', pulse = false }) {
+  const colorMap = {
+    success: 'bg-success',
+    warning: 'bg-warning',
+    danger: 'bg-danger',
+    info: 'bg-info',
+    neutral: 'bg-surface-500',
+  }
+  return (
+    <span className={`relative flex h-2.5 w-2.5 ${pulse ? '' : ''}`}>
+      {pulse && <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${colorMap[variant]} opacity-60`} style={{ animationDuration: '2s' }} />}
+      <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${colorMap[variant]}`} />
+    </span>
+  )
+}
+
+/* ─── Sparkline bar for history entries ─── */
+function SparklineBar({ percent, variant = 'success' }) {
+  const colorMap = {
+    success: 'bg-success',
+    warning: 'bg-warning',
+    danger: 'bg-danger',
+    info: 'bg-info',
+    neutral: 'bg-surface-500',
+  }
+  return (
+    <div className="w-16 h-1.5 bg-surface-700/60 rounded-full overflow-hidden shrink-0">
+      <div className={`h-full rounded-full ${colorMap[variant]}`} style={{ width: `${percent}%` }} />
+    </div>
+  )
+}
+
+/* ─── Stat mini-card ─── */
+function StatMiniCard({ icon, label, value, delay = 0 }) {
+  return (
+    <div
+      className="relative overflow-hidden rounded-xl border border-surface-700/40 bg-surface-800/50 p-4 animate-in fade-in slide-in-from-bottom-2 fill-mode-backwards"
+      style={{ animationDelay: `${delay}ms`, animationDuration: '400ms' }}
+    >
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-xl bg-brand-500/10 flex items-center justify-center shrink-0">
+          <Icon name={icon} className="w-5 h-5 text-brand-400" />
+        </div>
+        <div className="min-w-0">
+          <p className="text-xs text-surface-500 uppercase tracking-wider">{label}</p>
+          <p className="text-sm font-bold text-surface-100 truncate">{value}</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ─── System Status Card ─── */
 function SystemStatusCard({ status }) {
   const statusConf = SYNC_STATUS_CONFIG[status.status] || SYNC_STATUS_CONFIG.idle
   const cardInfo = getOverviewCardID(status)
@@ -155,61 +359,22 @@ function SystemStatusCard({ status }) {
   const cgroup = runtime?.cgroup || {}
 
   return (
-    <Card>
+    <GradientCard delay={100}>
       <CardHeader>
-        <CardTitle>System Status</CardTitle>
-        <StatusBadge variant={statusConf.variant} pulse={statusConf.pulse}>
-          {statusConf.label}
-        </StatusBadge>
+        <div className="flex items-center gap-2.5">
+          <IconCircle icon="activity" />
+          <CardTitle>System Status</CardTitle>
+        </div>
+        <div className="flex items-center gap-2">
+          <StatusDot variant={statusConf.variant} pulse={statusConf.pulse} />
+          <StatusBadge variant={statusConf.variant} pulse={statusConf.pulse}>
+            {statusConf.label}
+          </StatusBadge>
+        </div>
       </CardHeader>
 
       <div className="space-y-3">
-        {/* Active sync progress */}
-        {status.current_sync && (
-          <div
-            className="bg-surface-900/50 rounded-lg p-3"
-            role="region"
-            aria-label="Sync progress"
-            aria-live="polite"
-            aria-atomic="true"
-          >
-            <div className="flex items-center justify-between mb-2">
-              <span id="sync-progress-label" className="text-xs text-surface-400">
-                {getProgressLabel(status.current_sync)}
-              </span>
-              <span className="text-xs font-medium text-brand-400">
-                {getProgressPercent(status.current_sync)}%
-              </span>
-            </div>
-            <div
-              className="w-full h-1.5 bg-surface-700 rounded-full overflow-hidden"
-              role="progressbar"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={getProgressPercent(status.current_sync)}
-              aria-labelledby={status.current_sync.current_file ? 'sync-current-file sync-progress-label' : 'sync-progress-label'}
-            >
-              <div
-                className="h-full bg-brand-500 rounded-full transition-all duration-150"
-                style={{ width: `${getProgressPercent(status.current_sync)}%` }}
-              />
-            </div>
-            {status.current_sync.current_file && (
-              <p id="sync-current-file" className="text-xs text-surface-500 mt-2 truncate">
-                {status.current_sync.current_file}
-              </p>
-            )}
-            <div className="grid grid-cols-2 gap-2 mt-2 text-xs text-surface-500">
-              <p>
-                Speed: {formatSpeed(status.current_sync.transfer_speed)}
-              </p>
-              <p className="text-right">
-                ETA: {status.current_sync.eta || '--'}
-              </p>
-            </div>
-          </div>
-        )}
-
+        {/* Error state */}
         {status.status === 'error' && status.error && (
           <div className="bg-danger/10 border border-danger/30 rounded-lg p-3">
             <div className="flex items-start gap-2">
@@ -290,7 +455,7 @@ function SystemStatusCard({ status }) {
           </p>
         )}
       </div>
-    </Card>
+    </GradientCard>
   )
 }
 
@@ -304,6 +469,65 @@ function StatusRow({ icon, label, value, ok }) {
         <p className="text-xs text-surface-500">{label}</p>
         <p className="text-sm font-medium text-surface-200 truncate">{value}</p>
       </div>
+    </div>
+  )
+}
+
+/* ─── SD Card visual graphic ─── */
+function SDCardGraphic({ usedPercent, label }) {
+  return (
+    <div className="relative">
+      <div className="flex items-stretch gap-0 rounded-lg overflow-hidden border border-surface-600/50 bg-surface-900/50 h-10">
+        {/* SD card shape left side */}
+        <div className="w-3 bg-surface-600/40 shrink-0 relative">
+          <div className="absolute top-1 left-0.5 w-1.5 h-1.5 bg-surface-500/50 rounded-sm" />
+          <div className="absolute top-3 left-0.5 w-1.5 h-1.5 bg-surface-500/50 rounded-sm" />
+          <div className="absolute top-5 left-0.5 w-1.5 h-1.5 bg-surface-500/50 rounded-sm" />
+        </div>
+        <div className="flex-1 flex items-center px-3">
+          <div className="w-full">
+            <div className="flex justify-between text-[11px] text-surface-500 mb-1">
+              <span>{label || 'SD Card'}</span>
+              <span>{usedPercent}% used</span>
+            </div>
+            <div className="w-full h-1.5 bg-surface-700/60 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${usedPercent > 90 ? 'bg-danger' : usedPercent > 70 ? 'bg-warning' : 'bg-success'}`}
+                style={{ width: `${usedPercent}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ─── File type breakdown ─── */
+function FileTypeBreakdown({ photos = 0, videos = 0, raw = 0 }) {
+  const total = photos + videos + raw
+  if (total === 0) return null
+
+  return (
+    <div className="flex items-center gap-3 pt-2">
+      {photos > 0 && (
+        <div className="flex items-center gap-1.5 rounded-full bg-surface-700/40 px-2.5 py-1">
+          <Icon name="image" className="w-3.5 h-3.5 text-brand-400" />
+          <span className="text-xs text-surface-300">{photos.toLocaleString()}</span>
+        </div>
+      )}
+      {videos > 0 && (
+        <div className="flex items-center gap-1.5 rounded-full bg-surface-700/40 px-2.5 py-1">
+          <Icon name="play" className="w-3.5 h-3.5 text-info" />
+          <span className="text-xs text-surface-300">{videos.toLocaleString()}</span>
+        </div>
+      )}
+      {raw > 0 && (
+        <div className="flex items-center gap-1.5 rounded-full bg-surface-700/40 px-2.5 py-1">
+          <Icon name="folder" className="w-3.5 h-3.5 text-warning" />
+          <span className="text-xs text-surface-300">{raw.toLocaleString()}</span>
+        </div>
+      )}
     </div>
   )
 }
@@ -340,10 +564,18 @@ function DeviceInfoCard({
   const canFormat = hasCard && devicePath && status.status !== 'syncing' && status.status !== 'cancelling'
   const partitions = selectedDevice?.partitions || []
 
+  // Estimate used space (we don't have exact used bytes, so approximate from photo count)
+  const usedPercent = selectedDevice?.size > 0 && selectedDevice?.used_bytes > 0
+    ? Math.min(100, Math.round((selectedDevice.used_bytes / selectedDevice.size) * 100))
+    : 0
+
   return (
-    <Card>
+    <GradientCard delay={150}>
       <CardHeader>
-        <CardTitle>Device Info</CardTitle>
+        <div className="flex items-center gap-2.5">
+          <IconCircle icon="sd-card" />
+          <CardTitle>Device Info</CardTitle>
+        </div>
       </CardHeader>
 
       {device || hasCard ? (
@@ -363,24 +595,51 @@ function DeviceInfoCard({
             </div>
           </div>
 
+          {/* SD Card visual */}
           {hasCard && selectedDevice?.size > 0 && (
+            <SDCardGraphic usedPercent={usedPercent || Math.min(100, Math.round((photoCount / 5000) * 100))} label={deviceSize} />
+          )}
+
+          {/* Free/used segmented bar */}
+          {hasCard && selectedDevice?.size > 0 && selectedDevice?.used_bytes > 0 && (
             <div>
-              <div className="flex justify-between text-xs mb-1">
-                <span className="text-surface-400">Card capacity</span>
-                <span className="text-surface-300">{formatBytes(selectedDevice.size)}</span>
+              <div className="flex justify-between text-[11px] mb-1.5">
+                <span className="text-surface-500">
+                  <span className="text-success">{formatBytes(selectedDevice.size - selectedDevice.used_bytes)}</span> free
+                </span>
+                <span className="text-surface-500">
+                  <span className="text-brand-400">{formatBytes(selectedDevice.used_bytes)}</span> used
+                </span>
+              </div>
+              <div className="flex h-2 rounded-full overflow-hidden gap-0.5">
+                <div
+                  className="bg-brand-500/70 rounded-l-full transition-all duration-500"
+                  style={{ width: `${usedPercent}%` }}
+                />
+                <div
+                  className="bg-surface-700/60 rounded-r-full flex-1"
+                />
               </div>
             </div>
           )}
 
+          {/* File type breakdown */}
           {photoCount > 0 && (
-            <div className="flex items-center justify-between py-2 border-t border-surface-700/50">
-              <div className="flex items-center gap-2">
-                <Icon name="image" className="w-4 h-4 text-surface-400" />
-                <span className="text-sm text-surface-300">Photos</span>
+            <div className="py-2 border-t border-surface-700/50">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <Icon name="image" className="w-4 h-4 text-surface-400" />
+                  <span className="text-sm text-surface-300">Photos</span>
+                </div>
+                <span className="text-sm font-semibold text-surface-100">
+                  {photoCount.toLocaleString()}
+                </span>
               </div>
-              <span className="text-sm font-semibold text-surface-100">
-                {photoCount.toLocaleString()}
-              </span>
+              <FileTypeBreakdown
+                photos={photoCount}
+                videos={status.current_sync?.video_count || 0}
+                raw={status.current_sync?.raw_count || 0}
+              />
             </div>
           )}
 
@@ -478,7 +737,7 @@ function DeviceInfoCard({
           )}
         </div>
       )}
-    </Card>
+    </GradientCard>
   )
 }
 
@@ -522,70 +781,101 @@ function SyncControls({ status, onSync, onCancel, loading }) {
   )
 }
 
+/* ─── Timeline-style Sync History ─── */
 function SyncHistoryCard({ history }) {
   if (!history || history.length === 0) {
     return (
-      <Card>
+      <GradientCard delay={300}>
         <CardHeader>
-          <CardTitle>Recent Syncs</CardTitle>
+          <div className="flex items-center gap-2.5">
+            <IconCircle icon="clock" />
+            <CardTitle>Recent Syncs</CardTitle>
+          </div>
         </CardHeader>
         <div className="text-center py-6">
           <Icon name="clock" className="w-8 h-8 text-surface-600 mx-auto mb-2" />
           <p className="text-sm text-surface-400">No sync history yet</p>
         </div>
-      </Card>
+      </GradientCard>
     )
   }
 
   const recent = history.slice(-5).reverse()
 
   return (
-    <Card>
+    <GradientCard delay={300}>
       <CardHeader>
-        <CardTitle>Recent Syncs</CardTitle>
+        <div className="flex items-center gap-2.5">
+          <IconCircle icon="clock" />
+          <CardTitle>Recent Syncs</CardTitle>
+        </div>
         <span className="text-xs text-surface-500">{history.length} total</span>
       </CardHeader>
 
-      <div className="space-y-2">
-        {recent.map((entry, i) => {
-          const entryStatus = SYNC_STATUS_CONFIG[entry.status] || SYNC_STATUS_CONFIG.idle
-          const duration = entry.end_time && entry.start_time
-            ? (new Date(entry.end_time) - new Date(entry.start_time)) / 1000
-            : null
+      <div className="relative">
+        {/* Vertical timeline line */}
+        <div className="absolute left-[11px] top-2 bottom-2 w-px bg-surface-700/50" />
 
-          return (
-            <div
-              key={entry.id || i}
-              className="flex items-center gap-3 py-2.5 px-3 rounded-lg bg-surface-900/30"
-            >
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-0.5">
-                  <StatusBadge variant={entryStatus.variant}>
-                    {entry.status}
-                  </StatusBadge>
-                  <span className="text-xs text-surface-500">
-                    {formatTimeAgo(entry.start_time)}
-                  </span>
+        <div className="space-y-1">
+          {recent.map((entry, i) => {
+            const entryStatus = SYNC_STATUS_CONFIG[entry.status] || SYNC_STATUS_CONFIG.idle
+            const duration = entry.end_time && entry.start_time
+              ? (new Date(entry.end_time) - new Date(entry.start_time)) / 1000
+              : null
+            const completion = entry.files_total > 0
+              ? Math.min(100, Math.round((entry.files_synced / entry.files_total) * 100))
+              : entry.status === 'success' ? 100 : 0
+            const exactTime = entry.start_time
+              ? new Date(entry.start_time).toLocaleString('en-US', {
+                  month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                })
+              : '--'
+
+            return (
+              <div
+                key={entry.id || i}
+                className="flex items-start gap-3 py-2.5 px-1 relative"
+              >
+                {/* Timeline dot */}
+                <div className="relative z-10 mt-1.5 shrink-0">
+                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${entryStatus.variant === 'success' ? 'border-success bg-success/20' : entryStatus.variant === 'danger' ? 'border-danger bg-danger/20' : entryStatus.variant === 'warning' ? 'border-warning bg-warning/20' : 'border-surface-500 bg-surface-800'}`}>
+                    <div className={`w-1.5 h-1.5 rounded-full ${entryStatus.variant === 'success' ? 'bg-success' : entryStatus.variant === 'danger' ? 'bg-danger' : entryStatus.variant === 'warning' ? 'bg-warning' : 'bg-surface-500'}`} />
+                  </div>
                 </div>
-                <p className="text-sm text-surface-300">
-                  {entry.files_synced || 0} files synced
-                  {duration != null && (
-                    <span className="text-surface-500"> in {formatDuration(duration)}</span>
+
+                <div className="flex-1 min-w-0 rounded-lg bg-surface-900/30 px-3 py-2.5">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <StatusBadge variant={entryStatus.variant}>
+                      {entry.status}
+                    </StatusBadge>
+                    <span className="text-xs text-surface-500" title={exactTime}>
+                      {formatTimeAgo(entry.start_time)}
+                    </span>
+                    <SparklineBar percent={completion} variant={entryStatus.variant} />
+                  </div>
+                  <p className="text-sm text-surface-300">
+                    {entry.files_synced || 0} files synced
+                    {duration != null && (
+                      <span className="text-surface-500"> in {formatDuration(duration)}</span>
+                    )}
+                    {entry.bytes_synced > 0 && (
+                      <span className="text-surface-500"> · {formatBytes(entry.bytes_synced)}</span>
+                    )}
+                  </p>
+                  {entry.error && (
+                    <p className="text-xs text-danger mt-1 truncate">{entry.error}</p>
                   )}
-                </p>
-                {entry.error && (
-                  <p className="text-xs text-danger mt-1 truncate">{entry.error}</p>
-                )}
+                </div>
               </div>
-              <Icon name="chevron-right" className="w-4 h-4 text-surface-600 shrink-0" />
-            </div>
-          )
-        })}
+            )
+          })}
+        </div>
       </div>
-    </Card>
+    </GradientCard>
   )
 }
 
+/* ─── Panic card with collapsible stack traces ─── */
 function PanicInfoCard({ panicInfo, onClear, clearing }) {
   const records = Array.isArray(panicInfo?.panics)
     ? panicInfo.panics
@@ -595,60 +885,203 @@ function PanicInfoCard({ panicInfo, onClear, clearing }) {
   const title = records.length === 1 ? 'Saved Panic' : 'Saved Panics'
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <Icon name="exclamation-triangle" className="w-5 h-5 text-danger" />
-          <CardTitle>{title}</CardTitle>
-          <span className="rounded-full bg-danger/10 px-2 py-0.5 text-xs font-medium text-danger">
-            {records.length}
-          </span>
-        </div>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={onClear}
-          loading={clearing}
-          aria-label="Clear saved panic information"
-        >
-          <Icon name="trash" className="w-4 h-4" aria-hidden="true" />
-          Clear
-        </Button>
-      </CardHeader>
-
-      <div className="space-y-4">
-        {records.map((record, index) => {
-          const occurredAt = record.time ? new Date(record.time).toLocaleString() : 'Unknown time'
-          return (
-            <div
-              key={`${record.time || 'unknown'}-${record.source || 'panic'}-${index}`}
-              className="space-y-3 border-t border-surface-700/60 pt-4 first:border-t-0 first:pt-0"
-            >
-              <div className="grid gap-2 text-xs text-surface-400 sm:grid-cols-2">
-                <div>
-                  <p className="text-surface-500">Time</p>
-                  <p className="font-medium text-surface-200">{occurredAt}</p>
-                </div>
-                <div>
-                  <p className="text-surface-500">Source</p>
-                  <p className="font-medium text-surface-200">{record.source || '--'}</p>
-                </div>
-              </div>
-
-              <div className="rounded-lg border border-danger/25 bg-danger/10 p-3">
-                <p className="text-sm font-medium text-danger break-words">{record.message || 'panic'}</p>
-              </div>
-
-              {record.stack && (
-                <pre className="max-h-64 overflow-auto rounded-lg border border-surface-700 bg-surface-950 p-3 text-xs leading-relaxed text-surface-300">
-                  {record.stack}
-                </pre>
-              )}
+    <div
+      className="relative rounded-lg border-l-4 border-l-danger border-y border-r border-surface-700/60 bg-surface-800/55 shadow-sm shadow-black/10 animate-in fade-in slide-in-from-bottom-2 fill-mode-backwards"
+      style={{ animationDelay: '0ms', animationDuration: '400ms' }}
+    >
+      <div className="p-4">
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <Icon name="exclamation-triangle" className="w-5 h-5 text-danger" />
+              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-danger animate-ping" style={{ animationDuration: '2s' }} />
             </div>
-          )
-        })}
+            <h3 className="text-sm font-semibold text-surface-200 uppercase tracking-wide">{title}</h3>
+            <span className="rounded-full bg-danger/10 px-2 py-0.5 text-xs font-medium text-danger">
+              {records.length}
+            </span>
+          </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={onClear}
+            loading={clearing}
+            aria-label="Clear saved panic information"
+          >
+            <Icon name="trash" className="w-4 h-4" aria-hidden="true" />
+            Clear
+          </Button>
+        </div>
+
+        <div className="space-y-4">
+          {records.map((record, index) => (
+            <PanicRecord key={`${record.time || 'unknown'}-${record.source || 'panic'}-${index}`} record={record} />
+          ))}
+        </div>
       </div>
-    </Card>
+    </div>
+  )
+}
+
+function PanicRecord({ record }) {
+  const [expanded, setExpanded] = useState(false)
+  const occurredAt = record.time ? new Date(record.time).toLocaleString() : 'Unknown time'
+
+  return (
+    <div className="space-y-3 border-t border-surface-700/60 pt-4 first:border-t-0 first:pt-0">
+      <div className="grid gap-2 text-xs text-surface-400 sm:grid-cols-2">
+        <div>
+          <p className="text-surface-500">Time</p>
+          <p className="font-medium text-surface-200">{occurredAt}</p>
+        </div>
+        <div>
+          <p className="text-surface-500">Source</p>
+          <p className="font-medium text-surface-200">{record.source || '--'}</p>
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-danger/25 bg-danger/10 p-3">
+        <p className="text-sm font-medium text-danger break-words">{record.message || 'panic'}</p>
+      </div>
+
+      {record.stack && (
+        <div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setExpanded((v) => !v)}
+            className="text-xs"
+          >
+            <Icon name={expanded ? 'arrow-down' : 'chevron-right'} className="w-3 h-3" />
+            {expanded ? 'Hide stack trace' : 'Show stack trace'}
+          </Button>
+          {expanded && (
+            <pre className="mt-2 max-h-64 overflow-auto rounded-lg border border-surface-700 bg-surface-950 p-3 text-xs leading-relaxed text-surface-300">
+              {record.stack}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ─── Stats mini-cards row ─── */
+function StatsRow({ history }) {
+  const stats = computeStats(history)
+
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <StatMiniCard icon="image" label="Photos Synced" value={stats.totalPhotos.toLocaleString()} delay={50} />
+      <StatMiniCard icon="arrow-up-tray" label="Data Transferred" value={formatBytes(stats.totalBytes)} delay={100} />
+      <StatMiniCard icon="activity" label="Avg Speed" value={stats.avgSpeed} delay={150} />
+      <StatMiniCard icon="clock" label="Uptime" value={stats.uptime} delay={200} />
+    </div>
+  )
+}
+
+function computeStats(history) {
+  if (!history || history.length === 0) {
+    return { totalPhotos: 0, totalBytes: 0, avgSpeed: '--', uptime: '--' }
+  }
+
+  const completed = history.filter((h) => h.status === 'success')
+  const totalPhotos = completed.reduce((sum, h) => sum + (h.files_synced || 0), 0)
+  const totalBytes = completed.reduce((sum, h) => sum + (h.bytes_synced || 0), 0)
+
+  // Average speed from entries that have speed data
+  const speeds = history
+    .filter((h) => h.transfer_speed > 0)
+    .map((h) => h.transfer_speed)
+  const avgSpeed = speeds.length > 0
+    ? formatSpeed(speeds.reduce((a, b) => a + b, 0) / speeds.length)
+    : '--'
+
+  // Uptime: time since first sync
+  const firstStart = history
+    .map((h) => h.start_time)
+    .filter(Boolean)
+    .sort()[0]
+  const uptime = firstStart
+    ? formatDuration(Math.floor((Date.now() - new Date(firstStart).getTime()) / 1000))
+    : '--'
+
+  return { totalPhotos, totalBytes, avgSpeed, uptime }
+}
+
+/* ─── Connection banner with retry countdown ─── */
+function ConnectionBanner({ error, consecutiveErrors, onRetry, wsConnected, wsError }) {
+  const [countdown, setCountdown] = useState(5)
+  const timerRef = useRef(null)
+
+  useEffect(() => {
+    if (!error || wsConnected) return
+    setCountdown(5)
+    timerRef.current = window.setInterval(() => {
+      setCountdown((c) => {
+        if (c <= 1) {
+          onRetry()
+          return 5
+        }
+        return c - 1
+      })
+    }, 1000)
+    return () => {
+      if (timerRef.current) window.clearInterval(timerRef.current)
+    }
+  }, [error, wsConnected, onRetry])
+
+  if (!error) return null
+
+  return (
+    <div className="flex items-start gap-3 px-4 py-3 rounded-xl bg-warning/10 border border-warning/20 animate-in fade-in">
+      <Icon name="exclamation-triangle" className="w-5 h-5 text-warning shrink-0 mt-0.5" />
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium text-warning">Connection issues detected</p>
+        <p className="text-xs text-surface-400 mt-1">{error}</p>
+        {!wsConnected && (
+          <p className="text-xs text-surface-500 mt-1">
+            Retrying in {countdown}s…
+          </p>
+        )}
+      </div>
+      <Button variant="ghost" size="sm" onClick={onRetry}>
+        <Icon name="arrow-path" className="w-4 h-4" />
+        Retry
+      </Button>
+    </div>
+  )
+}
+
+/* ─── Connection status indicator (header) ─── */
+function ConnectionIndicator({ wsConnected, wsError }) {
+  if (wsConnected) {
+    return (
+      <div className="flex items-center gap-1.5 rounded-full bg-success/10 border border-success/30 px-2.5 py-1">
+        <span className="relative flex h-2 w-2">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-60" style={{ animationDuration: '2s' }} />
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-success" />
+        </span>
+        <span className="text-[11px] font-medium text-success uppercase tracking-wider">Live</span>
+      </div>
+    )
+  }
+  if (wsError) {
+    return (
+      <div className="flex items-center gap-1.5 rounded-full bg-danger/10 border border-danger/30 px-2.5 py-1">
+        <span className="relative flex h-2 w-2">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-danger opacity-60" style={{ animationDuration: '2s' }} />
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-danger" />
+        </span>
+        <span className="text-[11px] font-medium text-danger uppercase tracking-wider">Offline</span>
+      </div>
+    )
+  }
+  return (
+    <div className="flex items-center gap-1.5 rounded-full bg-surface-700/50 border border-surface-600/50 px-2.5 py-1">
+      <span className="w-2 h-2 rounded-full bg-surface-500" />
+      <span className="text-[11px] font-medium text-surface-500 uppercase tracking-wider">Connecting</span>
+    </div>
   )
 }
 
@@ -773,7 +1206,6 @@ export default function StatusPage() {
         getHistory(deviceUrl),
       ])
       setStatus((currentStatus) => {
-        // Simple merge: prefer fetched data but preserve progress during sync
         if (!currentStatus || !statusData) return statusData
         if (currentStatus.status === 'syncing' && statusData.status === 'syncing') {
           const prevFiles = Number(currentStatus.current_sync?.files_synced || 0)
@@ -816,7 +1248,6 @@ export default function StatusPage() {
     fetchData()
   }, [fetchData])
 
-  // Refresh history and devices when sync completes or card mounts
   useEffect(() => {
     if (!status || !deviceUrl) return
 
@@ -837,7 +1268,6 @@ export default function StatusPage() {
     }
   }, [status, deviceUrl])
 
-  // Fallback polling: only while the WebSocket is disconnected.
   useEffect(() => {
     if (!deviceUrl || wsConnected) return undefined
 
@@ -856,7 +1286,6 @@ export default function StatusPage() {
     }
   }, [deviceUrl, wsConnected, fetchData])
 
-  // Sync wsError into local error state when we have no status yet
   useEffect(() => {
     if (wsError && !status) {
       setError(wsError)
@@ -977,11 +1406,16 @@ export default function StatusPage() {
     )
   }
 
+  const isSyncing = status?.status === 'syncing'
+
   return (
     <div className="space-y-4">
-      {/* Refresh button */}
+      {/* Header with connection indicator */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold text-surface-100">Overview</h2>
+        <div className="flex items-center gap-3">
+          <h2 className="text-lg font-semibold text-surface-100">Overview</h2>
+          <ConnectionIndicator wsConnected={wsConnected} wsError={wsError} />
+        </div>
         <Button
           variant="ghost"
           size="sm"
@@ -994,16 +1428,14 @@ export default function StatusPage() {
         </Button>
       </div>
 
-      {/* Warning when auto-refresh keeps failing */}
-      {error && consecutiveErrorsRef.current > 0 && (
-        <div className="flex items-start gap-3 px-4 py-3 rounded-lg bg-warning/10 border border-warning/20">
-          <Icon name="exclamation-triangle" className="w-5 h-5 text-warning shrink-0 mt-0.5" />
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-warning">Connection issues detected</p>
-            <p className="text-xs text-surface-400 mt-1">{error}</p>
-          </div>
-        </div>
-      )}
+      {/* Connection banner */}
+      <ConnectionBanner
+        error={error}
+        consecutiveErrors={consecutiveErrorsRef.current}
+        onRetry={() => fetchData()}
+        wsConnected={wsConnected}
+        wsError={wsError}
+      />
 
       <PanicInfoCard
         panicInfo={panicInfo}
@@ -1020,6 +1452,14 @@ export default function StatusPage() {
           loading={actionLoading}
         />
       )}
+
+      {/* Hero sync progress */}
+      {isSyncing && status?.current_sync && (
+        <SyncHero sync={status.current_sync} />
+      )}
+
+      {/* Stats mini-cards */}
+      {history.length > 0 && <StatsRow history={history} />}
 
       {/* Status cards */}
       {status && (
