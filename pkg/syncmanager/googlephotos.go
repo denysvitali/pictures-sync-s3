@@ -10,11 +10,50 @@ import (
 	"sync"
 	"time"
 
+	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 	"github.com/denysvitali/pictures-sync-s3/pkg/utils"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/accounting"
 	"github.com/rclone/rclone/fs/operations"
 )
+
+var photoVideoExts = map[string]bool{
+	".jpg": true, ".jpeg": true, ".png": true, ".gif": true,
+	".heic": true, ".heif": true, ".webp": true, ".bmp": true,
+	".tiff": true, ".tif": true, ".mp4": true, ".mov": true,
+	".avi": true, ".mkv": true, ".wmv": true, ".flv": true,
+	".m4v": true, ".3gp": true,
+}
+
+func isPhotoOrVideo(filename string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+	return photoVideoExts[ext]
+}
+
+const googlePhotosRcloneStateFile = "google-photos-rclone-state.json"
+
+type googlePhotosRcloneState struct {
+	Uploaded map[string]googlePhotosUploadedFile `json:"uploaded"`
+}
+
+type googlePhotosUploadedFile struct {
+	Size       int64     `json:"size"`
+	UploadedAt time.Time `json:"uploaded_at"`
+}
+
+func loadGooglePhotosRcloneState() googlePhotosRcloneState {
+	var s googlePhotosRcloneState
+	defaultState := googlePhotosRcloneState{Uploaded: make(map[string]googlePhotosUploadedFile)}
+	_ = utils.LoadJSON(filepath.Join(state.PermDir, googlePhotosRcloneStateFile), &s, defaultState)
+	if s.Uploaded == nil {
+		s.Uploaded = make(map[string]googlePhotosUploadedFile)
+	}
+	return s
+}
+
+func saveGooglePhotosRcloneState(s googlePhotosRcloneState) error {
+	return utils.SaveJSON(filepath.Join(state.PermDir, googlePhotosRcloneStateFile), &s, 0600)
+}
 
 // SyncCardsToGooglePhotos syncs all card directories from the B2 remote to
 // Google Photos using rclone's googlephotos backend. It lists cards from the
@@ -242,20 +281,49 @@ func (m *Manager) syncCardToGooglePhotos(ctx context.Context, srcPath, dstPath s
 	// subdirectories under album/<name> as part of the album title, so preserving
 	// source paths like DJI_001/file.jpg would create album "<name>/DJI_001".
 	objects, beforeBytes := m.listObjects(ctx, srcFs)
+	origCount := len(objects)
+
+	// Filter to photo/video only — skip RAW files and other unsupported formats.
+	var filtered []fs.Object
+	var filteredBytes int64
+	for _, obj := range objects {
+		if isPhotoOrVideo(obj.Remote()) {
+			filtered = append(filtered, obj)
+			filteredBytes += obj.Size()
+		}
+	}
+	objects = filtered
+	beforeBytes = filteredBytes
 	beforeCount := len(objects)
-	log.Printf("Google Photos sync: %d files (%s) to upload", beforeCount, formatBytes(beforeBytes))
+	rawSkipped := origCount - beforeCount
+	log.Printf("Google Photos sync: %d files (%s) to upload (%d RAW/non-media skipped)", beforeCount, formatBytes(beforeBytes), rawSkipped)
+
+	// Load persistent upload state to avoid re-uploading files that Google Photos
+	// may not list while processing (especially videos).
+	uploadState := loadGooglePhotosRcloneState()
+	albumName := path.Base(strings.Trim(dstPath, "/"))
 
 	basenameCounts := googlePhotosBasenameCounts(objects)
 	usedNames := make(map[string]int, len(objects))
 	existingNames := listExistingObjectRemotes(ctx, dstFs)
 	jobs := make([]googlePhotosCopyJob, 0, len(objects))
+	stateSkipped := 0
 	for _, obj := range objects {
 		dstRemote := googlePhotosFlatRemote(obj.Remote(), basenameCounts, usedNames)
 		if _, exists := existingNames[dstRemote]; exists {
 			continue
 		}
-		jobs = append(jobs, googlePhotosCopyJob{src: obj, dstRemote: dstRemote})
+		// Skip if already uploaded per local state (path + size match).
+		stateKey := albumName + "/" + obj.Remote()
+		if entry, ok := uploadState.Uploaded[stateKey]; ok && entry.Size == obj.Size() {
+			stateSkipped++
+			continue
+		}
+		jobs = append(jobs, googlePhotosCopyJob{src: obj, dstRemote: dstRemote, albumName: albumName})
 		existingNames[dstRemote] = struct{}{}
+	}
+	if stateSkipped > 0 {
+		log.Printf("Google Photos sync: skipped %d file(s) already tracked in local state", stateSkipped)
 	}
 	if len(jobs) == 0 {
 		log.Printf("Google Photos sync: all %d file(s) already exist in %s", beforeCount, dstPath)
@@ -273,6 +341,7 @@ func (m *Manager) syncCardToGooglePhotos(ctx context.Context, srcPath, dstPath s
 	var wg sync.WaitGroup
 	var errMu sync.Mutex
 	var firstErr error
+	var stateMu sync.Mutex
 
 	recordErr := func(err error) {
 		if err == nil {
@@ -302,6 +371,14 @@ func (m *Manager) syncCardToGooglePhotos(ctx context.Context, srcPath, dstPath s
 					recordErr(err)
 					return
 				}
+				// Mark as uploaded in local state.
+				stateKey := job.albumName + "/" + job.src.Remote()
+				stateMu.Lock()
+				uploadState.Uploaded[stateKey] = googlePhotosUploadedFile{
+					Size:       job.src.Size(),
+					UploadedAt: time.Now(),
+				}
+				stateMu.Unlock()
 			}
 		}()
 	}
@@ -316,6 +393,11 @@ sendJobs:
 	}
 	close(jobsCh)
 	wg.Wait()
+
+	// Persist upload state so subsequent runs skip already-uploaded files.
+	if err := saveGooglePhotosRcloneState(uploadState); err != nil {
+		log.Printf("Google Photos sync: failed to save upload state: %v", err)
+	}
 
 	if firstErr != nil {
 		return 0, 0, firstErr
@@ -334,6 +416,7 @@ sendJobs:
 type googlePhotosCopyJob struct {
 	src       fs.Object
 	dstRemote string
+	albumName string
 }
 
 func (m *Manager) googlePhotosTransferCount() int {
@@ -443,9 +526,11 @@ func (m *Manager) countFilesInDir(ctx context.Context, f fs.Fs, dir string) (int
 			return count, bytes
 		default:
 		}
-		if _, ok := entry.(fs.Object); ok {
-			count++
-			bytes += entry.Size()
+		if obj, ok := entry.(fs.Object); ok {
+			if isPhotoOrVideo(obj.Remote()) {
+				count++
+				bytes += obj.Size()
+			}
 		} else if dirEntry, ok := entry.(fs.Directory); ok {
 			subCount, subBytes := m.countFilesInDir(ctx, f, dirEntry.Remote())
 			count += subCount
