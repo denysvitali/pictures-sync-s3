@@ -3,7 +3,6 @@ package state
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"sync"
 	"testing"
@@ -113,7 +112,7 @@ func TestIntegrationFullSyncLifecycle(t *testing.T) {
 	}
 
 	// Verify history file exists and is valid JSON
-	historyData, err := ioutil.ReadFile(HistoryFile)
+	historyData, err := os.ReadFile(HistoryFile)
 	if err != nil {
 		t.Errorf("Failed to read history file: %v", err)
 	}
@@ -129,7 +128,7 @@ func TestIntegrationFullSyncLifecycle(t *testing.T) {
 	}
 
 	// Verify state file exists and is valid
-	stateData, err := ioutil.ReadFile(StateFile)
+	stateData, err := os.ReadFile(StateFile)
 	if err != nil {
 		t.Errorf("Failed to read state file: %v", err)
 	}
@@ -448,7 +447,7 @@ secret_access_key = test_secret
 region = us-east-1
 endpoint = https://s3.amazonaws.com
 `
-	err = ioutil.WriteFile(ConfigFile, []byte(configContent), 0600)
+	err = os.WriteFile(ConfigFile, []byte(configContent), 0600)
 	if err != nil {
 		t.Fatalf("Failed to create test config: %v", err)
 	}
