@@ -346,8 +346,12 @@ endpoint = https://s3.us-west-004.backblazeb2.com
 	if strings.Contains(redacted, "application-key") {
 		t.Fatalf("redacted config leaked secret: %s", redacted)
 	}
-	if !strings.Contains(redacted, "account = account-id") {
-		t.Fatalf("redacted config should keep non-secret fields: %s", redacted)
+	// account is an identifier field and must now be redacted.
+	if strings.Contains(redacted, "account-id") {
+		t.Fatalf("redacted config leaked account identifier: %s", redacted)
+	}
+	if !strings.Contains(redacted, "account = [redacted]") {
+		t.Fatalf("redacted config should redact account field: %s", redacted)
 	}
 	if !strings.Contains(redacted, "key = [redacted]") {
 		t.Fatalf("redacted config missing redacted key: %s", redacted)

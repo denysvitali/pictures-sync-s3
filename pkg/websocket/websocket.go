@@ -245,6 +245,16 @@ func isPrivateIP(ip string) bool {
 	return false
 }
 
+// sanitizeForLog strips control characters (\r, \n, \t) and truncates the
+// string to 256 characters to prevent log injection from user-supplied values.
+func sanitizeForLog(s string) string {
+	s = strings.NewReplacer("\r", "", "\n", "", "\t", " ").Replace(s)
+	if len(s) > 256 {
+		s = s[:256] + "…"
+	}
+	return s
+}
+
 // checkOriginStrict performs strict origin validation
 func checkOriginStrict(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
@@ -259,7 +269,7 @@ func checkOriginStrict(r *http.Request) bool {
 	// Parse the origin URL
 	u, err := url.Parse(origin)
 	if err != nil {
-		log.Printf("WebSocket: Rejected connection with invalid Origin '%s' from %s: %v", origin, r.RemoteAddr, err)
+		log.Printf("WebSocket: Rejected connection with invalid Origin '%s' from %s: %v", sanitizeForLog(origin), r.RemoteAddr, err)
 		return false
 	}
 
@@ -276,7 +286,7 @@ func checkOriginStrict(r *http.Request) bool {
 		allowedOriginsMutex.RUnlock()
 
 		if !allowed {
-			log.Printf("WebSocket: Rejected connection from non-whitelisted origin '%s' (from %s)", origin, r.RemoteAddr)
+			log.Printf("WebSocket: Rejected connection from non-whitelisted origin '%s' (from %s)", sanitizeForLog(origin), r.RemoteAddr)
 		}
 		return allowed
 	}
@@ -291,7 +301,7 @@ func checkOriginStrict(r *http.Request) bool {
 	// Beyond same-host, LAN/private-IP origins are only honored when the
 	// operator has explicitly opted in. Default is closed.
 	if !lanOriginsTrusted() {
-		log.Printf("WebSocket: Rejected cross-origin '%s' from %s (LAN auto-trust disabled; use allowlist)", origin, r.RemoteAddr)
+		log.Printf("WebSocket: Rejected cross-origin '%s' from %s (LAN auto-trust disabled; use allowlist)", sanitizeForLog(origin), r.RemoteAddr)
 		return false
 	}
 
@@ -328,7 +338,7 @@ func checkOriginStrict(r *http.Request) bool {
 
 			if port != requestPort {
 				log.Printf("WebSocket: Rejected private IP origin with mismatched port: %s (expected %s) from %s",
-					origin, requestPort, r.RemoteAddr)
+					sanitizeForLog(origin), requestPort, r.RemoteAddr)
 				return false
 			}
 		}
@@ -336,7 +346,7 @@ func checkOriginStrict(r *http.Request) bool {
 	}
 
 	// All other origins are rejected
-	log.Printf("WebSocket: Rejected non-private origin '%s' from %s", origin, r.RemoteAddr)
+	log.Printf("WebSocket: Rejected non-private origin '%s' from %s", sanitizeForLog(origin), r.RemoteAddr)
 	return false
 }
 

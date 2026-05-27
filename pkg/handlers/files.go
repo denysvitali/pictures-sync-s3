@@ -302,8 +302,18 @@ func (ctx *Context) HandleThumbnail(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[Gallery] thumbnail start path=%q remote=%s", requestedPath, r.RemoteAddr)
 
-	if _, err := httputil.ValidatePath(sdCardMountPath, requestedPath); err != nil {
+	resolvedPath, err := httputil.ValidatePath(sdCardMountPath, requestedPath)
+	if err != nil {
 		log.Printf("[Gallery] thumbnail rejected path=%q error=%v", requestedPath, err)
+		http.Error(w, "access denied", http.StatusForbidden)
+		return
+	}
+	// Symlink-safe secondary check: re-evaluate symlinks on the already-resolved
+	// path and confirm the result is still under the SD card mount root. This
+	// catches any intermediate symlink chains that could escape the root between
+	// the initial ValidatePath call and actual filesystem access.
+	if err := verifyNoSymlinkEscape(sdCardMountPath, resolvedPath); err != nil {
+		log.Printf("[Gallery] thumbnail symlink escape rejected path=%q error=%v", requestedPath, err)
 		http.Error(w, "access denied", http.StatusForbidden)
 		return
 	}
@@ -497,8 +507,14 @@ func (ctx *Context) HandleSDCardPreview(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "path parameter required", http.StatusBadRequest)
 		return
 	}
-	if _, err := httputil.ValidatePath(sdCardMountPath, requestedPath); err != nil {
+	resolvedPreviewPath, err := httputil.ValidatePath(sdCardMountPath, requestedPath)
+	if err != nil {
 		log.Printf("[Gallery] sdcard preview rejected path=%q error=%v", requestedPath, err)
+		http.Error(w, "access denied", http.StatusForbidden)
+		return
+	}
+	if err := verifyNoSymlinkEscape(sdCardMountPath, resolvedPreviewPath); err != nil {
+		log.Printf("[Gallery] sdcard preview symlink escape rejected path=%q error=%v", requestedPath, err)
 		http.Error(w, "access denied", http.StatusForbidden)
 		return
 	}
@@ -551,6 +567,26 @@ func (ctx *Context) HandleSDCardFile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`%s; filename=%q`, disposition, filepath.Base(requestedPath)))
 	w.Header().Set("Cache-Control", "no-store")
 	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
+}
+
+// verifyNoSymlinkEscape performs a secondary symlink-safety check after
+// httputil.ValidatePath. It re-evaluates symlinks on the already-resolved path
+// and confirms the result still lives under sdRoot. This guards against TOCTOU
+// races or multi-hop symlink chains where an intermediate directory is itself a
+// symlink that was created between the initial check and filesystem access.
+func verifyNoSymlinkEscape(sdRoot, resolvedPath string) error {
+	// Re-resolve the path to catch any newly-created or changed symlinks.
+	reResolved, err := filepath.EvalSymlinks(resolvedPath)
+	if err != nil {
+		// If the path no longer exists (e.g. card was unmounted) treat as escape.
+		return fmt.Errorf("re-eval symlinks failed: %w", err)
+	}
+	sep := string(os.PathSeparator)
+	cleanRoot := filepath.Clean(sdRoot)
+	if reResolved != cleanRoot && !strings.HasPrefix(reResolved+sep, cleanRoot+sep) {
+		return fmt.Errorf("path %q escapes SD card root after symlink re-evaluation", reResolved)
+	}
+	return nil
 }
 
 func sdcardFileHTTPStatus(err error) int {

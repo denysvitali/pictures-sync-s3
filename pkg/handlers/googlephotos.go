@@ -4,19 +4,83 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/googlephotos"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 	"github.com/denysvitali/pictures-sync-s3/pkg/syncmanager"
 	"github.com/denysvitali/pictures-sync-s3/pkg/utils"
 	"github.com/denysvitali/pictures-sync-s3/pkg/validation"
+	"golang.org/x/time/rate"
 )
+
+// oauthStartRateLimiters tracks per-IP rate limits for the OAuth start endpoint.
+// Allows up to 5 auth-start attempts per minute with a burst of 3.
+var (
+	oauthStartLimiters     = make(map[string]*oauthRateLimitEntry)
+	oauthStartLimitersMu   sync.Mutex
+	oauthStartIdleTimeout  = 15 * time.Minute
+)
+
+type oauthRateLimitEntry struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
+}
+
+// allowOAuthStart returns true when the given IP is within rate limits for
+// starting a Google Photos OAuth flow (5 attempts/min, burst 3).
+func allowOAuthStart(ip string) bool {
+	now := time.Now()
+	oauthStartLimitersMu.Lock()
+	defer oauthStartLimitersMu.Unlock()
+
+	// Evict idle entries opportunistically.
+	for k, e := range oauthStartLimiters {
+		if now.Sub(e.lastSeen) > oauthStartIdleTimeout {
+			delete(oauthStartLimiters, k)
+		}
+	}
+
+	entry, ok := oauthStartLimiters[ip]
+	if !ok {
+		entry = &oauthRateLimitEntry{
+			limiter:  rate.NewLimiter(rate.Every(12*time.Second), 3), // 5/min, burst 3
+			lastSeen: now,
+		}
+		oauthStartLimiters[ip] = entry
+	} else {
+		entry.lastSeen = now
+	}
+	return entry.limiter.Allow()
+}
+
+// oauthErrorType extracts a safe, non-sensitive error category string from an
+// OAuth error. Raw error messages are suppressed because network-level errors
+// may reflect the outgoing request body (which contains client_secret).
+func oauthErrorType(err error) string {
+	if err == nil {
+		return "none"
+	}
+	// Categorise by well-known sentinel types without exposing message text.
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		if netErr.Timeout() {
+			return "network_timeout"
+		}
+		return "network_error"
+	}
+	// Generic fallback: just the Go type name, not the message.
+	return fmt.Sprintf("%T", errors.Unwrap(err))
+}
 
 // HandleGooglePhotosStatus returns whether Google Photos is configured via
 // rclone. This reads rclone.conf directly instead of going through rclone's
@@ -79,6 +143,17 @@ func rcloneConfigHasSection(sectionName string) (bool, error) {
 func (ctx *Context) HandleGooglePhotosAuthStart(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Rate-limit OAuth start per client IP (5/min) to prevent abuse.
+	clientIP := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(clientIP); err == nil {
+		clientIP = host
+	}
+	if !allowOAuthStart(clientIP) {
+		log.Printf("[GooglePhotos] OAuth start rate limit exceeded for IP %s", clientIP)
+		http.Error(w, "Too many requests. Please try again later.", http.StatusTooManyRequests)
 		return
 	}
 
@@ -149,8 +224,10 @@ func (ctx *Context) HandleGooglePhotosAuthCallback(w http.ResponseWriter, r *htt
 	client := googlephotos.NewClient(clientID, clientSecret, tokenStore)
 	token, err := client.ExchangeCode(code, authState.RedirectURI, authState.CodeVerifier)
 	if err != nil {
-		log.Printf("[GooglePhotos] Token exchange failed: %v", err)
-		http.Error(w, fmt.Sprintf("Token exchange failed: %v", err), http.StatusBadRequest)
+		// Log only error category — not the full message, which may reflect the
+		// outgoing POST body (containing client_secret) via network error strings.
+		log.Printf("[GooglePhotos] Token exchange failed: error_type=%s", oauthErrorType(err))
+		http.Error(w, "Token exchange failed", http.StatusBadRequest)
 		return
 	}
 
@@ -484,8 +561,8 @@ func (ctx *Context) handleGooglePhotosAlbumClear(w http.ResponseWriter, r *http.
 	// List all media items in the album.
 	items, err := client.ListAlbumMediaItems(r.Context(), albumID)
 	if err != nil {
-		log.Printf("[GooglePhotos] Failed to list album %s items: %v", albumID, err)
-		http.Error(w, fmt.Sprintf("Failed to list album items: %v", err), http.StatusInternalServerError)
+		log.Printf("[GooglePhotos] Failed to list album items: error_type=%T", err)
+		http.Error(w, "Failed to list album items", http.StatusInternalServerError)
 		return
 	}
 
@@ -503,8 +580,8 @@ func (ctx *Context) handleGooglePhotosAlbumClear(w http.ResponseWriter, r *http.
 	}
 
 	if err := client.BatchRemoveMediaItems(r.Context(), albumID, ids); err != nil {
-		log.Printf("[GooglePhotos] Failed to remove items from album %s: %v", albumID, err)
-		http.Error(w, fmt.Sprintf("Failed to remove items: %v", err), http.StatusInternalServerError)
+		log.Printf("[GooglePhotos] Failed to remove items from album: error_type=%T", err)
+		http.Error(w, "Failed to remove items from album", http.StatusInternalServerError)
 		return
 	}
 
