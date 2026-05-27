@@ -25,10 +25,10 @@ import (
 const (
 	defaultBatchSize        = 10 // Google Photos allows up to 50; smaller batches make album updates visible sooner.
 	defaultUploadWorkers    = 3
-	maxUploadWorkers        = 8
+	maxUploadWorkers        = 16
 	prefetchQueueMultiplier = 2
-	progressUpdateInterval  = 250 * time.Millisecond
-	progressUpdateBytes     = 512 * 1024
+	progressUpdateInterval  = 500 * time.Millisecond
+	progressUpdateBytes     = 2 * 1024 * 1024
 	googlePhotosAPITimeout  = 30 * time.Second
 	maxRetryAttempts        = 4
 	circuitBreakerThreshold = 6
@@ -37,16 +37,17 @@ const (
 
 // SyncManager orchestrates syncing photos from B2 to Google Photos
 type SyncManager struct {
-	client   *Client
-	syncMgr  SyncManagerMinimal
-	store    *stateStore
-	progress *SyncProgress
-	mu       sync.RWMutex
-	options  syncOptions
-	metrics  syncMetrics
-	cb       circuitBreaker
-	cancel   context.CancelFunc
-	running  atomic.Bool
+	client           *Client
+	syncMgr          SyncManagerMinimal
+	store            *stateStore
+	progress         *SyncProgress
+	mu               sync.RWMutex
+	options          syncOptions
+	metrics          syncMetrics
+	cb               circuitBreaker
+	cancel           context.CancelFunc
+	running          atomic.Bool
+	dynamicBatchSize atomic.Int32 // persists batch-size tuning across cards within a run
 }
 
 type syncOptions struct {
@@ -212,6 +213,15 @@ func (sm *SyncManager) Sync(ctx context.Context) error {
 		return fmt.Errorf("failed to list cards: %w", err)
 	}
 
+	// Seed dynamic batch size from configured baseline; tuneBatchSize will adapt
+	// it upward across cards within this run.
+	sm.dynamicBatchSize.Store(int32(sm.options.batchSize))
+
+	// Bulk-preload albums: a single pagination through the user's albums fills
+	// the per-card cache so each syncCard skips a per-card ListAlbums round-trip
+	// chain. Best-effort — failures fall back to the per-card lookup.
+	sm.preloadAlbumCache(ctx, cards)
+
 	sm.completeStage("discover")
 	sm.mu.Lock()
 	sm.progress.TotalCards = len(cards)
@@ -315,13 +325,55 @@ func (sm *SyncManager) Sync(ctx context.Context) error {
 		summary.Error = sm.Progress().Error
 	}
 	sm.store.addSummary(summary)
+	sm.store.flush()
 
 	log.Printf("[GooglePhotos] Sync complete: %d uploaded, %d skipped, %d failed", totalUploaded, totalSkipped, totalFailed)
 	return nil
 }
 
+// preloadAlbumCache populates the album-ID cache for every card-* album in one
+// pagination, so individual syncCard calls don't each pay a full ListAlbums.
+func (sm *SyncManager) preloadAlbumCache(ctx context.Context, cards []syncmanager.FileInfo) {
+	if sm.client == nil || len(cards) == 0 {
+		return
+	}
+	needed := make(map[string]string, len(cards))
+	for _, card := range cards {
+		cardID := strings.TrimPrefix(card.Name, "card-")
+		if cardID == "" {
+			cardID = card.Name
+		}
+		if _, ok := sm.store.albumID(cardID); ok {
+			continue
+		}
+		needed["card-"+cardID] = cardID
+	}
+	if len(needed) == 0 {
+		return
+	}
+	listCtx, cancel := context.WithTimeout(ctx, googlePhotosAPITimeout*2)
+	defer cancel()
+	albums, err := sm.client.ListAlbumsContext(listCtx)
+	if err != nil {
+		log.Printf("[GooglePhotos] Album preload failed (will fall back per card): %v", err)
+		return
+	}
+	for _, album := range albums {
+		cardID, ok := needed[album.Title]
+		if !ok {
+			continue
+		}
+		sm.store.putAlbum(cardID, album.Title, album.ID)
+	}
+}
+
 // syncCard syncs all photos from a single card to Google Photos
 func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string) (uploaded, skipped, failed int, err error) {
+	// Always cancel the worker pipeline on return so any blocked goroutines
+	// unwind even if we exit through an error path.
+	ctx, cancelWorkers := context.WithCancel(ctx)
+	defer cancelWorkers()
+
 	// List all media in the card's DCIM directory before creating an album.
 	// Camera cards commonly store files under DCIM/100CANON, DCIM/100MSDCF, etc.
 	dcimPath := filepath.Join(cardDirName, "DCIM")
@@ -375,11 +427,14 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 
 	log.Printf("[GooglePhotos] Syncing %d files from card %s to album %s", len(mediaFiles), cardID, albumTitle)
 
-	batch := make([]*NewMediaItem, 0, sm.options.batchSize)
-	batchFiles := make([]syncmanager.FileInfo, 0, sm.options.batchSize)
+	dynamicBatchSize := int(sm.dynamicBatchSize.Load())
+	if dynamicBatchSize <= 0 {
+		dynamicBatchSize = sm.options.batchSize
+	}
+	batch := make([]*NewMediaItem, 0, dynamicBatchSize)
+	batchFiles := make([]syncmanager.FileInfo, 0, dynamicBatchSize)
 	pendingResults := make(map[int]mediaUploadResult)
 	nextResult := 0
-	dynamicBatchSize := sm.options.batchSize
 	sm.startStage("upload")
 	for result := range sm.uploadMediaItems(ctx, cardID, mediaFiles) {
 		pendingResults[result.index] = result
@@ -440,14 +495,14 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 				}
 			}
 			dynamicBatchSize = tuneBatchSize(dynamicBatchSize, batchResult.successCount, batchResult.failCount, err)
+			sm.dynamicBatchSize.Store(int32(dynamicBatchSize))
 			batch = batch[:0]
 			batchFiles = batchFiles[:0]
 			sm.setCounts(uploaded, skipped, failed)
 			sm.setBatchPending(0)
-			sm.updateBackendMetrics(0, 0)
-
-			// Small delay to avoid rate limiting
-			time.Sleep(100 * time.Millisecond)
+			// The 429-aware retry + circuit breaker already handle rate-limit
+			// backoff; the unconditional post-batch sleep here was cargo-cult and
+			// wasted ~10% of the album-add path's wall time.
 		}
 	}
 
@@ -529,9 +584,7 @@ func (sm *SyncManager) uploadMediaItems(ctx context.Context, cardID string, medi
 				file := job.file
 				sm.startFileProgress(job.index, len(mediaFiles), cardID, file)
 
-				sm.updateBackendMetrics(len(jobs), 1)
 				item, checksum, skipped, err := sm.uploadMediaItem(ctx, file)
-				sm.updateBackendMetrics(len(jobs), -1)
 				result := mediaUploadResult{
 					index:    job.index,
 					file:     file,
@@ -584,18 +637,11 @@ func (sm *SyncManager) uploadMediaItem(ctx context.Context, file syncmanager.Fil
 		return nil, "", false, fmt.Errorf("upload circuit breaker open; retry after %s", sm.cb.openAt.Add(circuitBreakerCooldown).Format(time.RFC3339))
 	}
 
-	fileData, fileSize, cleanup, err := sm.downloadFile(file)
+	fileData, fileSize, checksum, cleanup, err := sm.downloadFile(file)
 	if err != nil {
 		return nil, "", false, fmt.Errorf("download %s: %w", file.Path, err)
 	}
 	defer cleanup()
-	checksum, err := checksumFile(fileData)
-	if err != nil {
-		return nil, "", false, fmt.Errorf("checksum %s: %w", file.Path, err)
-	}
-	if _, err := fileData.Seek(0, io.SeekStart); err != nil {
-		return nil, "", false, fmt.Errorf("rewind %s: %w", file.Path, err)
-	}
 
 	mimeType := mime.TypeByExtension(filepath.Ext(file.Name))
 	sm.store.putFileMeta(cachedFileMetadata{
@@ -665,9 +711,15 @@ func (sm *SyncManager) uploadMediaItem(ctx context.Context, file syncmanager.Fil
 func (sm *SyncManager) listMediaFiles(ctx context.Context, path string) ([]syncmanager.FileInfo, int, error) {
 	if sm.options.parallelMetadata {
 		files, skipped, err := sm.listMediaFilesParallel(ctx, path)
-		sm.store.save()
+		sm.store.flush()
 		return files, skipped, err
 	}
+	files, skipped, err := sm.listMediaFilesRecursive(ctx, path)
+	sm.store.flush()
+	return files, skipped, err
+}
+
+func (sm *SyncManager) listMediaFilesRecursive(ctx context.Context, path string) ([]syncmanager.FileInfo, int, error) {
 	if ctx.Err() != nil {
 		return nil, 0, ctx.Err()
 	}
@@ -685,7 +737,7 @@ func (sm *SyncManager) listMediaFiles(ctx context.Context, path string) ([]syncm
 		}
 
 		if f.IsDir {
-			nestedMediaFiles, nestedSkipped, err := sm.listMediaFiles(ctx, f.Path)
+			nestedMediaFiles, nestedSkipped, err := sm.listMediaFilesRecursive(ctx, f.Path)
 			skipped += nestedSkipped
 			if err != nil {
 				return nil, skipped, err
@@ -702,7 +754,6 @@ func (sm *SyncManager) listMediaFiles(ctx context.Context, path string) ([]syncm
 		}
 	}
 
-	sm.store.save()
 	return mediaFiles, skipped, nil
 }
 
@@ -716,43 +767,47 @@ func (sm *SyncManager) listMediaFilesParallel(ctx context.Context, root string) 
 	}
 	sem := make(chan struct{}, parallelism)
 	results := make(chan []syncmanager.FileInfo, parallelism)
-	errs := make(chan error, 1)
+	var errOnce sync.Once
+	var firstErr error
+	walkCtx, cancelWalk := context.WithCancel(ctx)
+	defer cancelWalk()
 	var wg sync.WaitGroup
 	var skipped atomic.Int64
 
 	var walk func(string)
-	walk = func(dir string) {
-		defer wg.Done()
+	spawn := func(dir string) {
+		// Acquire the semaphore in the parent goroutine so we don't pile up
+		// goroutines waiting on the sem on wide trees.
 		select {
 		case sem <- struct{}{}:
-		case <-ctx.Done():
+		case <-walkCtx.Done():
 			return
 		}
+		wg.Add(1)
+		go walk(dir)
+	}
+	walk = func(dir string) {
+		defer wg.Done()
+		defer func() { <-sem }()
 		files, err := sm.syncMgr.ListFiles(dir)
-		<-sem
 		if err != nil {
-			select {
-			case errs <- err:
-			default:
-			}
+			errOnce.Do(func() {
+				firstErr = err
+				cancelWalk()
+			})
 			return
 		}
 
 		localMedia := make([]syncmanager.FileInfo, 0, len(files))
 		for _, f := range files {
-			if ctx.Err() != nil {
+			if walkCtx.Err() != nil {
 				return
 			}
 			if f.IsDir {
-				wg.Add(1)
-				go walk(f.Path)
+				spawn(f.Path)
 				continue
 			}
 			if IsPhotoOrVideo(f.Name) {
-				if cached, ok := sm.store.fileMeta(f.Path); ok && cached.Size == f.Size && cached.ModTime.Equal(f.ModTime) {
-					f.Size = cached.Size
-					f.ModTime = cached.ModTime
-				}
 				sm.cacheListedFileMetadata(f)
 				localMedia = append(localMedia, f)
 			} else if IsRAW(f.Name) {
@@ -762,13 +817,12 @@ func (sm *SyncManager) listMediaFilesParallel(ctx context.Context, root string) 
 		if len(localMedia) > 0 {
 			select {
 			case results <- localMedia:
-			case <-ctx.Done():
+			case <-walkCtx.Done():
 			}
 		}
 	}
 
-	wg.Add(1)
-	go walk(root)
+	spawn(root)
 	go func() {
 		wg.Wait()
 		close(results)
@@ -778,13 +832,11 @@ func (sm *SyncManager) listMediaFilesParallel(ctx context.Context, root string) 
 	for chunk := range results {
 		mediaFiles = append(mediaFiles, chunk...)
 	}
+	if firstErr != nil {
+		return nil, int(skipped.Load()), firstErr
+	}
 	if err := ctx.Err(); err != nil && !errors.Is(err, context.Canceled) {
 		return nil, int(skipped.Load()), err
-	}
-	select {
-	case err := <-errs:
-		return nil, int(skipped.Load()), err
-	default:
 	}
 	return mediaFiles, int(skipped.Load()), nil
 }
@@ -834,11 +886,12 @@ func (sm *SyncManager) cacheListedFileMetadata(file syncmanager.FileInfo) {
 
 // downloadFile downloads a file from B2 using the sync manager. Native Google
 // Photos sync may process large videos, so use a temp file instead of buffering
-// the whole media item in memory.
-func (sm *SyncManager) downloadFile(file syncmanager.FileInfo) (*os.File, int64, func(), error) {
+// the whole media item in memory. The SHA-256 checksum is computed inline via
+// io.MultiWriter to avoid a second full read of the file before upload.
+func (sm *SyncManager) downloadFile(file syncmanager.FileInfo) (*os.File, int64, string, func(), error) {
 	tmp, err := os.CreateTemp("", "pictures-sync-gphotos-*"+filepath.Ext(file.Name))
 	if err != nil {
-		return nil, 0, nil, fmt.Errorf("failed to create temp file: %w", err)
+		return nil, 0, "", nil, fmt.Errorf("failed to create temp file: %w", err)
 	}
 
 	cleanup := func() {
@@ -847,26 +900,29 @@ func (sm *SyncManager) downloadFile(file syncmanager.FileInfo) (*os.File, int64,
 		_ = os.Remove(name)
 	}
 
+	hash := sha256.New()
+	sink := io.MultiWriter(tmp, hash)
+
 	timeout := googlePhotosTransferTimeout(file.Size)
 	if downloader, ok := sm.syncMgr.(syncManagerWithDownloadTimeout); ok {
-		err = downloader.GetFileWithTimeout(file.Path, tmp, timeout)
+		err = downloader.GetFileWithTimeout(file.Path, sink, timeout)
 	} else {
-		err = sm.syncMgr.GetFile(file.Path, tmp)
+		err = sm.syncMgr.GetFile(file.Path, sink)
 	}
 	if err != nil {
 		cleanup()
-		return nil, 0, nil, err
+		return nil, 0, "", nil, err
 	}
 	info, err := tmp.Stat()
 	if err != nil {
 		cleanup()
-		return nil, 0, nil, fmt.Errorf("failed to stat temp file: %w", err)
+		return nil, 0, "", nil, fmt.Errorf("failed to stat temp file: %w", err)
 	}
 	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
 		cleanup()
-		return nil, 0, nil, fmt.Errorf("failed to rewind temp file: %w", err)
+		return nil, 0, "", nil, fmt.Errorf("failed to rewind temp file: %w", err)
 	}
-	return tmp, info.Size(), cleanup, nil
+	return tmp, info.Size(), hex.EncodeToString(hash.Sum(nil)), cleanup, nil
 }
 
 func googlePhotosTransferTimeout(size int64) time.Duration {
@@ -1228,18 +1284,6 @@ func (sm *SyncManager) recordCancelledSummary(startedAt time.Time, uploaded, ski
 		FailedFiles:    failed,
 		ProcessedBytes: progress.ProcessedBytes,
 	})
-}
-
-func checksumFile(file *os.File) (string, error) {
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		return "", err
-	}
-	h := sha256.New()
-	buf := make([]byte, 256*1024)
-	if _, err := io.CopyBuffer(h, file, buf); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 type coalescedProgress struct {

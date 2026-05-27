@@ -14,6 +14,11 @@ const (
 	maxGooglePhotosHistory    = 100
 	maxAlbumCacheEntries      = 64
 	maxFileCacheEntries       = 10000
+	// stateFlushInterval coalesces per-mutation disk writes. Saves still happen
+	// promptly on lifecycle events (sync end, album creation, history append)
+	// via flush(), but per-file mutations are batched to avoid SD-card wear and
+	// to release the lock that 8 upload workers contend on.
+	stateFlushInterval = 3 * time.Second
 )
 
 type persistedSyncState struct {
@@ -51,9 +56,12 @@ type albumCacheEntry struct {
 }
 
 type stateStore struct {
-	mu   sync.Mutex
-	path string
-	data persistedSyncState
+	mu            sync.RWMutex
+	path          string
+	data          persistedSyncState
+	checksumIndex map[string]string // sha256 → path, populated only for Uploaded entries
+	dirty         bool
+	lastFlush     time.Time
 }
 
 func newStateStore() *stateStore {
@@ -67,6 +75,7 @@ func newStateStoreAt(path string) *stateStore {
 			FileCache:    make(map[string]cachedFileMetadata),
 			UploadTokens: make(map[string]cachedUploadToken),
 		},
+		checksumIndex: make(map[string]string),
 	}
 	_ = utils.LoadJSON(store.path, &store.data, store.data)
 	if store.data.FileCache == nil {
@@ -75,12 +84,17 @@ func newStateStoreAt(path string) *stateStore {
 	if store.data.UploadTokens == nil {
 		store.data.UploadTokens = make(map[string]cachedUploadToken)
 	}
+	for path, meta := range store.data.FileCache {
+		if meta.Uploaded && meta.Checksum != "" {
+			store.checksumIndex[meta.Checksum] = path
+		}
+	}
 	return store
 }
 
 func (s *stateStore) fileMeta(path string) (cachedFileMetadata, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	meta, ok := s.data.FileCache[path]
 	return meta, ok
 }
@@ -89,46 +103,61 @@ func (s *stateStore) putFileMeta(meta cachedFileMetadata) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.data.FileCache[meta.Path] = meta
+	if meta.Uploaded && meta.Checksum != "" {
+		s.checksumIndex[meta.Checksum] = meta.Path
+	}
 	s.trimFileCacheLocked()
-	_ = s.saveLocked()
+	s.maybeFlushLocked()
 }
 
 func (s *stateStore) rememberFileMeta(meta cachedFileMetadata) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.data.FileCache[meta.Path] = meta
+	if meta.Uploaded && meta.Checksum != "" {
+		s.checksumIndex[meta.Checksum] = meta.Path
+	}
 	s.trimFileCacheLocked()
+	s.markDirtyLocked()
 }
 
+// flush forces a disk write. Used at sync lifecycle boundaries where durability
+// matters (sync end, album creation, history append).
+func (s *stateStore) flush() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.flushLocked()
+}
+
+// save is kept for backwards compatibility; routes through the debounced path.
 func (s *stateStore) save() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_ = s.saveLocked()
+	s.maybeFlushLocked()
 }
 
 func (s *stateStore) uploadToken(path string) (cachedUploadToken, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	token, ok := s.data.UploadTokens[path]
 	return token, ok
 }
 
 func (s *stateStore) uploadedChecksum(checksum string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, meta := range s.data.FileCache {
-		if meta.Uploaded && meta.Checksum == checksum {
-			return true
-		}
+	if checksum == "" {
+		return false
 	}
-	return false
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, ok := s.checksumIndex[checksum]
+	return ok
 }
 
 func (s *stateStore) putUploadToken(path string, token cachedUploadToken) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.data.UploadTokens[path] = token
-	_ = s.saveLocked()
+	s.maybeFlushLocked()
 }
 
 func (s *stateStore) markBatchDone(path string) {
@@ -144,8 +173,11 @@ func (s *stateStore) markBatchDone(path string) {
 		meta.Uploaded = true
 		meta.UploadedAt = time.Now()
 		s.data.FileCache[path] = meta
+		if meta.Checksum != "" {
+			s.checksumIndex[meta.Checksum] = path
+		}
 	}
-	_ = s.saveLocked()
+	s.maybeFlushLocked()
 }
 
 func (s *stateStore) albumID(cardID string) (string, bool) {
@@ -154,7 +186,7 @@ func (s *stateStore) albumID(cardID string) (string, bool) {
 	for i := range s.data.AlbumCache {
 		if s.data.AlbumCache[i].CardID == cardID {
 			s.data.AlbumCache[i].LastUsed = time.Now()
-			_ = s.saveLocked()
+			s.markDirtyLocked()
 			return s.data.AlbumCache[i].AlbumID, true
 		}
 	}
@@ -170,7 +202,7 @@ func (s *stateStore) putAlbum(cardID, title, albumID string) {
 			s.data.AlbumCache[i].AlbumID = albumID
 			s.data.AlbumCache[i].Title = title
 			s.data.AlbumCache[i].LastUsed = now
-			_ = s.saveLocked()
+			s.flushLocked()
 			return
 		}
 	}
@@ -178,7 +210,7 @@ func (s *stateStore) putAlbum(cardID, title, albumID string) {
 	if len(s.data.AlbumCache) > maxAlbumCacheEntries {
 		s.data.AlbumCache = s.data.AlbumCache[len(s.data.AlbumCache)-maxAlbumCacheEntries:]
 	}
-	_ = s.saveLocked()
+	s.flushLocked()
 }
 
 func (s *stateStore) addSummary(summary SyncRunSummary) {
@@ -192,12 +224,12 @@ func (s *stateStore) addSummary(summary SyncRunSummary) {
 		copied := summary
 		s.data.LastSuccess = &copied
 	}
-	_ = s.saveLocked()
+	s.flushLocked()
 }
 
 func (s *stateStore) summaries() ([]SyncRunSummary, *SyncRunSummary) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	history := make([]SyncRunSummary, len(s.data.History))
 	copy(history, s.data.History)
 	var last *SyncRunSummary
@@ -213,8 +245,13 @@ func (s *stateStore) trimFileCacheLocked() {
 		return
 	}
 	removed := 0
-	for path := range s.data.FileCache {
+	for path, meta := range s.data.FileCache {
 		delete(s.data.FileCache, path)
+		if meta.Checksum != "" {
+			if owner, ok := s.checksumIndex[meta.Checksum]; ok && owner == path {
+				delete(s.checksumIndex, meta.Checksum)
+			}
+		}
 		removed++
 		if len(s.data.FileCache) <= maxFileCacheEntries || removed > 1000 {
 			return
@@ -222,6 +259,25 @@ func (s *stateStore) trimFileCacheLocked() {
 	}
 }
 
-func (s *stateStore) saveLocked() error {
-	return utils.SaveJSON(s.path, &s.data, 0600)
+func (s *stateStore) markDirtyLocked() {
+	s.dirty = true
+}
+
+// maybeFlushLocked writes to disk only if the debounce interval has elapsed;
+// otherwise it just marks state dirty for a later flush. Called with s.mu held.
+func (s *stateStore) maybeFlushLocked() {
+	s.dirty = true
+	if time.Since(s.lastFlush) < stateFlushInterval {
+		return
+	}
+	s.flushLocked()
+}
+
+func (s *stateStore) flushLocked() {
+	if !s.dirty && !s.lastFlush.IsZero() {
+		return
+	}
+	s.lastFlush = time.Now()
+	s.dirty = false
+	_ = utils.SaveJSON(s.path, &s.data, 0600)
 }

@@ -26,10 +26,24 @@ type Client struct {
 
 // NewClient creates a new Google Photos API client
 func NewClient(clientID, clientSecret string, tokenStore *TokenStore) *Client {
+	// The default http.Transport has MaxIdleConnsPerHost=2, which throttles
+	// multiple concurrent upload workers to ~2 keep-alive sockets per host and
+	// forces extra TLS handshakes. Size the pool to match maxUploadWorkers plus
+	// the concurrent metadata calls (batch-create / album list).
+	transport := &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		MaxIdleConns:          64,
+		MaxIdleConnsPerHost:   32,
+		MaxConnsPerHost:       0,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		ForceAttemptHTTP2:     true,
+	}
 	return &Client{
 		clientID:     clientID,
 		clientSecret: clientSecret,
-		httpClient:   &http.Client{Timeout: 60 * time.Second},
+		httpClient:   &http.Client{Timeout: 60 * time.Second, Transport: transport},
 		tokenStore:   tokenStore,
 	}
 }
@@ -107,12 +121,19 @@ func (c *Client) refreshToken() error {
 }
 
 func (c *Client) refreshTokenContext(ctx context.Context) error {
+	_, err := c.refreshTokenContextReturning(ctx)
+	return err
+}
+
+// refreshTokenContextReturning performs the OAuth refresh and returns the new
+// token in memory so callers can avoid an extra tokenStore.Load() round-trip.
+func (c *Client) refreshTokenContextReturning(ctx context.Context) (*OAuthToken, error) {
 	token, err := c.tokenStore.Load()
 	if err != nil {
-		return fmt.Errorf("failed to load token: %w", err)
+		return nil, fmt.Errorf("failed to load token: %w", err)
 	}
 	if token == nil || token.RefreshToken == "" {
-		return fmt.Errorf("no refresh token available")
+		return nil, fmt.Errorf("no refresh token available")
 	}
 
 	data := url.Values{
@@ -124,28 +145,28 @@ func (c *Client) refreshTokenContext(ctx context.Context) error {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, oauthTokenURL, strings.NewReader(data.Encode()))
 	if err != nil {
-		return fmt.Errorf("failed to create refresh token request: %w", err)
+		return nil, fmt.Errorf("failed to create refresh token request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("refresh token request failed: %w", err)
+		return nil, fmt.Errorf("refresh token request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("failed to read refresh response: %w", err)
+		return nil, fmt.Errorf("failed to read refresh response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("token refresh failed (%d): %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("token refresh failed (%d): %s", resp.StatusCode, string(body))
 	}
 
 	var tokenResp TokenResponse
 	if err := json.Unmarshal(body, &tokenResp); err != nil {
-		return fmt.Errorf("failed to parse refresh response: %w", err)
+		return nil, fmt.Errorf("failed to parse refresh response: %w", err)
 	}
 
 	// Preserve the refresh token (Google may not return it on refresh)
@@ -160,10 +181,10 @@ func (c *Client) refreshTokenContext(ctx context.Context) error {
 	}
 
 	if err := c.tokenStore.Save(newToken); err != nil {
-		return fmt.Errorf("failed to save refreshed token: %w", err)
+		return nil, fmt.Errorf("failed to save refreshed token: %w", err)
 	}
 
-	return nil
+	return newToken, nil
 }
 
 // getAccessToken returns a valid access token, refreshing if necessary
@@ -180,15 +201,33 @@ func (c *Client) getAccessTokenContext(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("not authenticated")
 	}
 
-	// Refresh if expired or about to expire (5 minute buffer)
-	if time.Until(token.Expiry) < 5*time.Minute {
-		if err := c.refreshTokenContext(ctx); err != nil {
-			return "", err
-		}
-		token, _ = c.tokenStore.Load()
+	// Fast path: token is fresh enough — no lock needed.
+	if time.Until(token.Expiry) >= 5*time.Minute {
+		return token.AccessToken, nil
 	}
 
-	return token.AccessToken, nil
+	// Slow path: serialize refresh so concurrent upload workers don't all
+	// hammer the OAuth endpoint and race on tokenStore writes.
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Re-check under the lock — another goroutine may have refreshed already.
+	token, err = c.tokenStore.Load()
+	if err != nil {
+		return "", fmt.Errorf("failed to load token: %w", err)
+	}
+	if token == nil {
+		return "", fmt.Errorf("not authenticated")
+	}
+	if time.Until(token.Expiry) >= 5*time.Minute {
+		return token.AccessToken, nil
+	}
+
+	refreshed, err := c.refreshTokenContextReturning(ctx)
+	if err != nil {
+		return "", err
+	}
+	return refreshed.AccessToken, nil
 }
 
 // doRequest performs an authenticated API request

@@ -132,20 +132,41 @@ func (c *Client) FindAlbumByTitle(title string) (*Album, error) {
 	return c.FindAlbumByTitleContext(context.Background(), title)
 }
 
-// FindAlbumByTitleContext finds an album by its title.
+// FindAlbumByTitleContext finds an album by its title, stopping pagination as
+// soon as a match is found.
 func (c *Client) FindAlbumByTitleContext(ctx context.Context, title string) (*Album, error) {
-	albums, err := c.ListAlbumsContext(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, album := range albums {
-		if album.Title == title {
-			return album, nil
+	pageToken := ""
+	for {
+		path := "/albums?pageSize=50"
+		if pageToken != "" {
+			path += "&pageToken=" + pageToken
 		}
+		resp, err := c.doRequestContext(ctx, "GET", path, nil)
+		if err != nil {
+			return nil, err
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("failed to read albums response: %w", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("list albums failed (%d): %s", resp.StatusCode, string(body))
+		}
+		var result ListAlbumsResponse
+		if err := json.Unmarshal(body, &result); err != nil {
+			return nil, fmt.Errorf("failed to parse albums response: %w", err)
+		}
+		for _, album := range result.Albums {
+			if album.Title == title {
+				return album, nil
+			}
+		}
+		if result.NextPageToken == "" {
+			return nil, nil
+		}
+		pageToken = result.NextPageToken
 	}
-
-	return nil, nil
 }
 
 // BatchCreateMediaItems creates multiple media items in a single request
