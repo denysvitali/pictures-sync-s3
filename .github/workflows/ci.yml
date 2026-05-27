@@ -80,6 +80,18 @@ jobs:
           COVERAGE=$(tail -n 1 coverage.txt | awk '{print $3}')
           echo "Total Coverage: $COVERAGE"
 
+      - name: Enforce coverage threshold
+        env:
+          COVERAGE_THRESHOLD: '51.1'
+        run: |
+          TOTAL=$(go tool cover -func=coverage.out | grep -E '^total:' | awk '{print $3}' | sed 's/%//')
+          echo "Total coverage: ${TOTAL}% (threshold: ${COVERAGE_THRESHOLD}%)"
+          awk -v t="${TOTAL}" -v th="${COVERAGE_THRESHOLD}" 'BEGIN { if (t+0 < th+0) { exit 1 } }' || {
+            echo "::error::Coverage ${TOTAL}% is below threshold ${COVERAGE_THRESHOLD}%"
+            exit 1
+          }
+          echo "Coverage gate passed!"
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v6
         with:

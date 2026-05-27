@@ -1,7 +1,10 @@
 # Makefile for pictures-sync-s3
 # Provides convenient commands for building, testing, and CI/CD operations
 
-.PHONY: help build webui-sync-embedded build-all run-webui test lint security clean install-tools docker-build all gokrazy-setup gokrazy-update gokrazy-edit ota ota-release
+.PHONY: help build webui-sync-embedded build-all run-webui test lint security clean install-tools docker-build all gokrazy-setup gokrazy-update gokrazy-edit ota ota-release coverage-check
+
+# Coverage threshold (percent). Ratchets up over time; failing CI below this.
+COVERAGE_THRESHOLD ?= 51.1
 
 # Default target
 .DEFAULT_GOAL := help
@@ -110,6 +113,20 @@ test-coverage: ## Run tests with coverage report
 	@echo "$(GREEN)Coverage report generated:$(NC)"
 	@tail -n 1 $(COVERAGE_DIR)/coverage.txt
 	@echo "$(BLUE)HTML report: $(COVERAGE_DIR)/coverage.html$(NC)"
+
+coverage-check: ## Verify total coverage meets COVERAGE_THRESHOLD (regenerates if missing)
+	@if [ ! -f $(COVERAGE_DIR)/coverage.out ] && [ ! -f coverage.out ]; then \
+		echo "$(YELLOW)No coverage profile found, running test-coverage...$(NC)"; \
+		$(MAKE) test-coverage; \
+	fi
+	@COV_FILE=$$( [ -f coverage.out ] && echo coverage.out || echo $(COVERAGE_DIR)/coverage.out ); \
+	TOTAL=$$($(GO) tool cover -func=$$COV_FILE | grep -E '^total:' | awk '{print $$3}' | sed 's/%//'); \
+	echo "Total coverage: $${TOTAL}% (threshold: $(COVERAGE_THRESHOLD)%)"; \
+	awk -v t="$${TOTAL}" -v th="$(COVERAGE_THRESHOLD)" 'BEGIN { if (t+0 < th+0) { exit 1 } }' || { \
+		echo "$(RED)Coverage $${TOTAL}% is below threshold $(COVERAGE_THRESHOLD)%$(NC)"; \
+		exit 1; \
+	}; \
+	echo "$(GREEN)Coverage gate passed!$(NC)"
 
 test-short: ## Run short tests only
 	@echo "$(GREEN)Running short tests...$(NC)"
