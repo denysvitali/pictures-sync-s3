@@ -304,6 +304,10 @@ make lint                   # Code quality checks
 
 ## 🔧 Development Tools
 
+### Pre-commit Hooks and Operational Docs
+- **`.pre-commit-config.yaml`** — runs `gofmt`, `go-vet`, `golangci-lint`, trailing-whitespace, and EOF fixer on every commit. Install with `make pre-commit-install` (requires `pip install pre-commit`).
+- **`docs/RUNBOOK.md`** — operational recovery guide: `/perm` backup/restore, OTA failure handling, sync failure diagnostics, and health endpoint reference.
+
 ### Code Quality
 ```bash
 # Static analysis

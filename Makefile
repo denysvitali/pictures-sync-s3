@@ -1,7 +1,7 @@
 # Makefile for pictures-sync-s3
 # Provides convenient commands for building, testing, and CI/CD operations
 
-.PHONY: help build webui-sync-embedded build-all run-webui test lint security clean install-tools docker-build all gokrazy-setup gokrazy-update gokrazy-edit ota ota-release coverage-check
+.PHONY: help build webui-sync-embedded build-all run-webui test lint security clean install-tools docker-build all gokrazy-setup gokrazy-update gokrazy-edit ota ota-release coverage-check pre-commit-install
 
 # Coverage threshold (percent). Ratchets up over time; failing CI below this.
 COVERAGE_THRESHOLD ?= 47.0
@@ -216,7 +216,17 @@ ci-quick: fmt-check test-short ## Run quick CI checks
 
 security-scan: govulncheck gosec ## Run security scans (no Docker required)
 
-pre-commit: fmt lint test-short ## Run before committing
+pre-commit: fmt lint test-short ## Run before committing (quick local check)
+	@pre-commit run --all-files 2>/dev/null || true
+
+pre-commit-install: ## Install pre-commit hooks into .git/hooks
+	@if ! command -v pre-commit >/dev/null 2>&1; then \
+		echo "$(RED)pre-commit not found. Install with: pip install pre-commit$(NC)"; \
+		echo "$(YELLOW)See https://pre-commit.com/#installation$(NC)"; \
+		exit 1; \
+	fi
+	@pre-commit install
+	@echo "$(GREEN)pre-commit hooks installed! Hooks will run automatically on git commit.$(NC)"
 
 pre-push: ci security-scan ## Run before pushing
 
