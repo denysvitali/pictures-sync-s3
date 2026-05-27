@@ -19,7 +19,8 @@ func (c *Client) UploadMediaReaderContext(ctx context.Context, r io.Reader, size
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	// Upload tokens are small strings; 1 MB is more than sufficient.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return "", fmt.Errorf("failed to read upload response: %w", err)
 	}
@@ -50,7 +51,8 @@ func (c *Client) CreateAlbumContext(ctx context.Context, title string) (*Album, 
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	// Album metadata is small JSON; 10 MB is a safe ceiling.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read album response: %w", err)
 	}
@@ -84,7 +86,8 @@ func (c *Client) ListAlbumsContext(ctx context.Context) ([]*Album, error) {
 			return nil, err
 		}
 
-		body, err := io.ReadAll(resp.Body)
+		// A page of album metadata (50 albums) is well under 10 MB.
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 		resp.Body.Close()
 		if err != nil {
 			return nil, fmt.Errorf("failed to read albums response: %w", err)
@@ -166,7 +169,8 @@ func (c *Client) BatchCreateMediaItemsContext(ctx context.Context, albumID strin
 			return err
 		}
 
-		body, err := io.ReadAll(resp.Body)
+		// A batch create response for 50 items is small JSON; 10 MB ceiling.
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 		resp.Body.Close()
 		if err != nil {
 			return fmt.Errorf("failed to read batch create response: %w", err)
@@ -212,7 +216,8 @@ func (c *Client) ListAlbumMediaItems(ctx context.Context, albumID string) ([]*Me
 			return nil, err
 		}
 
-		body, err := io.ReadAll(resp.Body)
+		// Each page holds up to 100 media item records; 10 MB is a safe bound.
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 		resp.Body.Close()
 		if err != nil {
 			return nil, fmt.Errorf("failed to read media items response: %w", err)
@@ -257,7 +262,8 @@ func (c *Client) BatchRemoveMediaItems(ctx context.Context, albumID string, medi
 			return err
 		}
 
-		body, err := io.ReadAll(resp.Body)
+		// Batch remove response is minimal JSON; 1 MB is more than enough.
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		resp.Body.Close()
 		if err != nil {
 			return fmt.Errorf("failed to read batch remove response: %w", err)

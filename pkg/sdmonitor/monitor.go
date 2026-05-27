@@ -167,7 +167,11 @@ func (m *Monitor) RedetectCurrentDevice() error {
 	return nil
 }
 
-// pollDevices polls for USB storage devices
+// pollDevices polls for USB storage devices.
+// The /proc/mounts cache is left to expire naturally via mountsCacheTTL;
+// we only force-invalidate it when checkDevices reports that the device
+// set actually changed (insert or remove). This avoids a pointless cache
+// flush — and the accompanying /proc/mounts re-read — on every tick.
 func (m *Monitor) pollDevices() {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
@@ -177,13 +181,33 @@ func (m *Monitor) pollDevices() {
 		case <-m.stopChan:
 			return
 		case <-ticker.C:
-			// Invalidate cache at each poll to get fresh data
-			m.mountsCacheMu.Lock()
-			m.mountsCacheTime = time.Time{}
-			m.mountsCacheMu.Unlock()
-			m.checkDevices()
+			changed := m.checkDevicesReporting()
+			if changed {
+				// Device set changed: flush the mounts cache so the next
+				// consumer of readMounts sees fresh data immediately.
+				m.mountsCacheMu.Lock()
+				m.mountsCacheTime = time.Time{}
+				m.mountsCacheMu.Unlock()
+			}
 		}
 	}
+}
+
+// checkDevicesReporting calls checkDevices and reports whether the observed
+// device changed (insert or remove). It is used by pollDevices to decide
+// whether the /proc/mounts cache should be force-invalidated.
+func (m *Monitor) checkDevicesReporting() (changed bool) {
+	m.mu.RLock()
+	before := m.lastDevice
+	m.mu.RUnlock()
+
+	m.checkDevices()
+
+	m.mu.RLock()
+	after := m.lastDevice
+	m.mu.RUnlock()
+
+	return before != after
 }
 
 // checkDevices checks for new or removed devices
