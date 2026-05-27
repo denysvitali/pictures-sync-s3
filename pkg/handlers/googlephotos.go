@@ -476,14 +476,27 @@ func (ctx *Context) HandleGooglePhotosSyncHistoryExport(w http.ResponseWriter, r
 	http.Error(w, "Not found", http.StatusNotFound)
 }
 
+// albumClearOps tracks in-progress album clear operations keyed by album ID.
+var (
+	albumClearOps   = make(map[string]*googlephotos.AlbumClearProgress)
+	albumClearOpsMu sync.RWMutex
+)
+
 // HandleGooglePhotosAlbums handles album operations.
 // DELETE /api/googlephotos/albums/{albumId} — removes all media items from an album.
+// GET  /api/googlephotos/albums/{albumId}/clear/progress — get clear progress.
 func (ctx *Context) HandleGooglePhotosAlbums(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodDelete {
 		ctx.handleGooglePhotosAlbumClear(w, r)
 		return
 	}
 	if r.Method == http.MethodGet {
+		path := strings.Trim(r.URL.Path, "/")
+		parts := strings.Split(path, "/")
+		if len(parts) >= 6 && parts[4] == "clear" && parts[5] == "progress" {
+			ctx.handleGooglePhotosAlbumClearProgress(w, r)
+			return
+		}
 		ctx.handleGooglePhotosAlbumList(w, r)
 		return
 	}
@@ -558,25 +571,62 @@ func (ctx *Context) handleGooglePhotosAlbumClear(w http.ResponseWriter, r *http.
 		return
 	}
 
+	// Reject if a clear is already running for this album.
+	albumClearOpsMu.RLock()
+	existing, busy := albumClearOps[albumID]
+	albumClearOpsMu.RUnlock()
+	if busy && existing.Status == "clearing" {
+		http.Error(w, "Album clear already in progress", http.StatusConflict)
+		return
+	}
+
+	// Start the clear operation in the background so the HTTP response
+	// returns immediately and the UI can poll for progress.
+	go ctx.runAlbumClear(client, albumID)
+
+	JSONResponse(w, map[string]any{"started": true, "album_id": albumID})
+}
+
+func (ctx *Context) runAlbumClear(client *googlephotos.Client, albumID string) {
 	// Use a detached context with a generous timeout so album clearing
-	// survives the HTTP request timeout (30 s) for large albums.
-	apiCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	// survives any HTTP request timeout for large albums.
+	apiCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
+
+	// Initialize progress.
+	albumClearOpsMu.Lock()
+	albumClearOps[albumID] = &googlephotos.AlbumClearProgress{
+		AlbumID: albumID,
+		Status:  "clearing",
+	}
+	albumClearOpsMu.Unlock()
 
 	// List all media items in the album.
 	items, err := client.ListAlbumMediaItems(apiCtx, albumID)
 	if err != nil {
 		log.Printf("[GooglePhotos] Failed to list album items: error_type=%T", err)
-		http.Error(w, "Failed to list album items", http.StatusInternalServerError)
+		albumClearOpsMu.Lock()
+		albumClearOps[albumID] = &googlephotos.AlbumClearProgress{
+			AlbumID: albumID,
+			Status:  "error",
+			Error:   "Failed to list album items",
+		}
+		albumClearOpsMu.Unlock()
 		return
 	}
 
 	if len(items) == 0 {
-		JSONResponse(w, map[string]any{"cleared": true, "removed": 0})
+		albumClearOpsMu.Lock()
+		albumClearOps[albumID] = &googlephotos.AlbumClearProgress{
+			AlbumID:      albumID,
+			Status:       "completed",
+			TotalItems:   0,
+			RemovedItems: 0,
+		}
+		albumClearOpsMu.Unlock()
 		return
 	}
 
-	// Batch remove media items from the album.
 	ids := make([]string, 0, len(items))
 	for _, item := range items {
 		if item.ID != "" {
@@ -584,23 +634,34 @@ func (ctx *Context) handleGooglePhotosAlbumClear(w http.ResponseWriter, r *http.
 		}
 	}
 
-	if err := client.BatchRemoveMediaItems(apiCtx, albumID, ids); err != nil {
+	onProgress := func(removed, total int) {
+		albumClearOpsMu.Lock()
+		albumClearOps[albumID] = &googlephotos.AlbumClearProgress{
+			AlbumID:      albumID,
+			Status:       "clearing",
+			TotalItems:   total,
+			RemovedItems: removed,
+		}
+		albumClearOpsMu.Unlock()
+	}
+
+	if err := client.BatchRemoveMediaItemsWithProgress(apiCtx, albumID, ids, onProgress); err != nil {
 		log.Printf("[GooglePhotos] Failed to remove items from album: error_type=%T", err)
-		http.Error(w, "Failed to remove items from album", http.StatusInternalServerError)
+		albumClearOpsMu.Lock()
+		albumClearOps[albumID] = &googlephotos.AlbumClearProgress{
+			AlbumID:      albumID,
+			Status:       "error",
+			TotalItems:   len(ids),
+			RemovedItems: albumClearOps[albumID].RemovedItems,
+			Error:        "Failed to remove items from album",
+		}
+		albumClearOpsMu.Unlock()
 		return
 	}
 
 	// Clear local upload state so the next sync can re-upload these files.
-	albumName := ""
-	for _, a := range items {
-		if a.Filename != "" {
-			// Try to infer album name from album ID via listing; fallback to album ID.
-			break
-		}
-	}
-	// Best effort: clear state for any album matching this album ID.
-	// Since we don't have the album title from the items, try to get it.
-	albums, _ := client.ListAlbumsContext(r.Context())
+	albums, _ := client.ListAlbumsContext(apiCtx)
+	var albumName string
 	for _, a := range albums {
 		if a.ID == albumID {
 			albumName = a.Title
@@ -614,5 +675,47 @@ func (ctx *Context) handleGooglePhotosAlbumClear(w http.ResponseWriter, r *http.
 	}
 
 	log.Printf("[GooglePhotos] Cleared %d item(s) from album %s", len(ids), albumID)
-	JSONResponse(w, map[string]any{"cleared": true, "removed": len(ids)})
+	albumClearOpsMu.Lock()
+	albumClearOps[albumID] = &googlephotos.AlbumClearProgress{
+		AlbumID:      albumID,
+		Status:       "completed",
+		TotalItems:   len(ids),
+		RemovedItems: len(ids),
+	}
+	albumClearOpsMu.Unlock()
+}
+
+func (ctx *Context) handleGooglePhotosAlbumClearProgress(w http.ResponseWriter, r *http.Request) {
+	// Extract album ID from path: /api/googlephotos/albums/{albumId}/clear/progress
+	path := strings.Trim(r.URL.Path, "/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 4 {
+		http.Error(w, "Missing album ID", http.StatusBadRequest)
+		return
+	}
+	albumID := parts[3]
+	if albumID == "" {
+		http.Error(w, "Missing album ID", http.StatusBadRequest)
+		return
+	}
+
+	albumClearOpsMu.RLock()
+	progress, ok := albumClearOps[albumID]
+	albumClearOpsMu.RUnlock()
+
+	if !ok {
+		JSONResponse(w, map[string]any{
+			"album_id": albumID,
+			"status":   "idle",
+		})
+		return
+	}
+
+	JSONResponse(w, map[string]any{
+		"album_id":      progress.AlbumID,
+		"status":        progress.Status,
+		"total_items":   progress.TotalItems,
+		"removed_items": progress.RemovedItems,
+		"error":         progress.Error,
+	})
 }
