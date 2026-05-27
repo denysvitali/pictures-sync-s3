@@ -1,7 +1,6 @@
 package websocket
 
 import (
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -307,18 +306,6 @@ func BenchmarkOriginValidation(b *testing.B) {
 				_ = checkOriginStrict(req)
 			}
 		})
-	}
-}
-
-// BenchmarkRateLimiter benchmarks rate limiting
-func BenchmarkRateLimiter(b *testing.B) {
-	limiter := NewConnectionRateLimiter()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		ip := fmt.Sprintf("192.168.1.%d", i%255)
-		l := limiter.GetLimiter(ip)
-		_ = l.Allow()
 	}
 }
 

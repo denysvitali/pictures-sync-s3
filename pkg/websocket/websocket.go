@@ -18,79 +18,7 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 	"github.com/denysvitali/pictures-sync-s3/pkg/systeminfo"
 	"github.com/gorilla/websocket"
-	"golang.org/x/time/rate"
 )
-
-// rateLimiterEntry pairs a rate limiter with its last-seen timestamp,
-// enabling per-IP idle-time eviction without dropping active limiters.
-type rateLimiterEntry struct {
-	limiter  *rate.Limiter
-	lastSeen time.Time
-}
-
-// rateLimiterIdleTimeout is how long an IP entry can be idle before eviction.
-const rateLimiterIdleTimeout = 15 * time.Minute
-
-// ConnectionRateLimiter tracks rate limits per IP address
-type ConnectionRateLimiter struct {
-	limiters map[string]*rateLimiterEntry
-	mu       sync.RWMutex
-}
-
-// NewConnectionRateLimiter creates a new rate limiter for WebSocket connections
-func NewConnectionRateLimiter() *ConnectionRateLimiter {
-	return &ConnectionRateLimiter{
-		limiters: make(map[string]*rateLimiterEntry),
-	}
-}
-
-// GetLimiter returns or creates a rate limiter for the given IP
-// Allows 10 connections per minute with burst of 3
-func (c *ConnectionRateLimiter) GetLimiter(ip string) *rate.Limiter {
-	now := time.Now()
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	entry, exists := c.limiters[ip]
-	if !exists {
-		limit, burst := getConnectionRateConfig()
-		entry = &rateLimiterEntry{
-			limiter:  rate.NewLimiter(limit, burst),
-			lastSeen: now,
-		}
-		c.limiters[ip] = entry
-	} else {
-		entry.lastSeen = now
-	}
-	return entry.limiter
-}
-
-// CleanupOldLimiters evicts per-IP limiter entries that have been idle past
-// rateLimiterIdleTimeout. Active IPs keep their limiter state, so attackers
-// can't reset their rate window simply by waiting for the periodic clear.
-func (c *ConnectionRateLimiter) CleanupOldLimiters(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case now := <-ticker.C:
-			c.mu.Lock()
-			for ip, entry := range c.limiters {
-				if now.Sub(entry.lastSeen) > rateLimiterIdleTimeout {
-					delete(c.limiters, ip)
-				}
-			}
-			c.mu.Unlock()
-		}
-	}
-}
-
-// StartRateLimiterCleanup starts the rate limiter cleanup goroutine
-func StartRateLimiterCleanup(ctx context.Context) {
-	getConnectionRateLimiter().CleanupOldLimiters(ctx)
-}
 
 // maxWSTokens caps the number of outstanding WebSocket auth tokens to bound
 // memory consumption against issuance abuse. When at capacity, oldest tokens
@@ -104,15 +32,10 @@ const maxWSTokens = 1000
 const maxIncomingMessageBytes = 64 * 1024
 
 var (
-	wsTokens            = make(map[string]time.Time) // WebSocket auth tokens with expiry
-	wsTokenMutex        sync.RWMutex
-	connRateLimiter     *ConnectionRateLimiter
-	connRateLimiterOnce sync.Once
-	connectionRateLimit = rate.Every(6 * time.Second)
-	connectionRateBurst = 3
-	// wsConfigMutex guards the mutable package-level config knobs above
-	// (connRateLimiter pointer, rate/burst, and authReadTimeout) which can be
-	// re-set in tests while connection handlers concurrently read them.
+	wsTokens     = make(map[string]time.Time) // WebSocket auth tokens with expiry
+	wsTokenMutex sync.RWMutex
+	// wsConfigMutex guards mutable package-level config (currently
+	// authReadTimeout) that tests may re-set while handlers run.
 	wsConfigMutex       sync.RWMutex
 	allowedOrigins      = []string{} // Configurable whitelist (empty = same-host only by default)
 	allowedOriginsMutex sync.RWMutex
@@ -122,11 +45,6 @@ var (
 	trustLANOrigins      bool
 	trustLANOriginsMutex sync.RWMutex
 	authReadTimeout      = 5 * time.Second
-
-	// wsTokenIssuanceLimiters rate-limits WS-token issuance per client IP to
-	// prevent token-map flooding. Entries are evicted alongside other idle state.
-	wsTokenIssuanceLimiters = make(map[string]*rateLimiterEntry)
-	wsTokenIssuanceMutex    sync.Mutex
 
 	upgrader = websocket.Upgrader{
 		CheckOrigin: checkOriginStrict,
@@ -148,66 +66,12 @@ func lanOriginsTrusted() bool {
 	return trustLANOrigins
 }
 
-// AllowWSTokenIssuance returns true if an additional WS-token may be issued
-// for the given client IP. Allows up to ~10 tokens/minute with a burst of 5.
-func AllowWSTokenIssuance(ip string) bool {
-	now := time.Now()
-	wsTokenIssuanceMutex.Lock()
-	defer wsTokenIssuanceMutex.Unlock()
-
-	// Opportunistically evict idle entries.
-	for k, entry := range wsTokenIssuanceLimiters {
-		if now.Sub(entry.lastSeen) > rateLimiterIdleTimeout {
-			delete(wsTokenIssuanceLimiters, k)
-		}
-	}
-
-	entry, ok := wsTokenIssuanceLimiters[ip]
-	if !ok {
-		entry = &rateLimiterEntry{
-			limiter:  rate.NewLimiter(rate.Every(6*time.Second), 5),
-			lastSeen: now,
-		}
-		wsTokenIssuanceLimiters[ip] = entry
-	} else {
-		entry.lastSeen = now
-	}
-	return entry.limiter.Allow()
-}
-
-// getConnectionRateLimiter returns the singleton rate limiter instance
-func getConnectionRateLimiter() *ConnectionRateLimiter {
-	wsConfigMutex.RLock()
-	if connRateLimiter != nil {
-		l := connRateLimiter
-		wsConfigMutex.RUnlock()
-		return l
-	}
-	wsConfigMutex.RUnlock()
-	wsConfigMutex.Lock()
-	defer wsConfigMutex.Unlock()
-	connRateLimiterOnce.Do(func() {
-		connRateLimiter = NewConnectionRateLimiter()
-	})
-	if connRateLimiter == nil {
-		connRateLimiter = NewConnectionRateLimiter()
-	}
-	return connRateLimiter
-}
-
 // getAuthReadTimeout returns the configured auth read timeout in a
 // concurrency-safe way (tests mutate this value).
 func getAuthReadTimeout() time.Duration {
 	wsConfigMutex.RLock()
 	defer wsConfigMutex.RUnlock()
 	return authReadTimeout
-}
-
-// getConnectionRateConfig returns the current rate limit and burst.
-func getConnectionRateConfig() (rate.Limit, int) {
-	wsConfigMutex.RLock()
-	defer wsConfigMutex.RUnlock()
-	return connectionRateLimit, connectionRateBurst
 }
 
 // isPrivateIP checks if an IP address is in a private RFC 1918 range or Tailscale range
@@ -534,18 +398,9 @@ func HandleWebSocketWithDmesg(stateMgr *state.Manager, eventMgr *events.Manager,
 
 func handleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager, dmesgMgr *dmesg.Manager, otaManagers ...*ota.Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Extract client IP for rate limiting
 		clientIP := r.RemoteAddr
 		if host, _, err := net.SplitHostPort(clientIP); err == nil {
 			clientIP = host
-		}
-
-		// Apply rate limiting per IP
-		limiter := getConnectionRateLimiter().GetLimiter(clientIP)
-		if !limiter.Allow() {
-			log.Printf("WebSocket: Rate limit exceeded for IP %s", clientIP)
-			http.Error(w, "Too many connection attempts. Please try again later.", http.StatusTooManyRequests)
-			return
 		}
 
 		// Upgrade to WebSocket without auth - we'll validate token in first message

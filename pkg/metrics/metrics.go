@@ -5,8 +5,10 @@
 package metrics
 
 import (
+	"bufio"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -232,4 +234,22 @@ func (cw *captureWriter) Write(b []byte) (int, error) {
 		cw.wroteHeader = true
 	}
 	return cw.ResponseWriter.Write(b)
+}
+
+// Hijack forwards to the wrapped ResponseWriter when it supports hijacking.
+// Required so WebSocket upgrades (which require http.Hijacker) keep working
+// through this middleware.
+func (cw *captureWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := cw.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, http.ErrNotSupported
+}
+
+// Flush forwards to the wrapped ResponseWriter when it supports flushing,
+// preserving streaming response behavior.
+func (cw *captureWriter) Flush() {
+	if fl, ok := cw.ResponseWriter.(http.Flusher); ok {
+		fl.Flush()
+	}
 }

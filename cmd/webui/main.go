@@ -290,11 +290,6 @@ func main() {
 		websocket.CleanupExpiredWSTokens(shutdownCtx)
 	})
 
-	// Start WebSocket rate limiter cleanup goroutine
-	go recoverAndPersistPanic("webui-ws-rate-limiter-cleanup", func() {
-		websocket.StartRateLimiterCleanup(shutdownCtx)
-	})
-
 	// Start system stats collector
 	statsCollector := systeminfo.NewStatsCollector()
 	statsCollector.Start()
@@ -393,8 +388,7 @@ func main() {
 	// (and an explicit ws-token for WebSocket); CSRF token middleware was
 	// removed because it produced spurious failures and added no defense
 	// beyond what credentialed same-origin already provides.
-	wsTokenLimiter := ratelimit.NewLimiter(handlers.WSTokenRateLimitConfig())
-	http.HandleFunc("/api/ws-token", handlers.WSTokenHandler(passwordMgr, wsTokenLimiter))
+	http.HandleFunc("/api/ws-token", handlers.WSTokenHandler(passwordMgr))
 	http.HandleFunc("/api/version", ctx.HandleVersion)
 	http.HandleFunc("/api/status", ctx.HandleStatus)
 	http.HandleFunc("/api/history", ctx.HandleHistory)

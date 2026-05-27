@@ -3,9 +3,6 @@ package websocket
 import (
 	"net/http/httptest"
 	"testing"
-	"time"
-
-	"golang.org/x/time/rate"
 )
 
 // TestCheckOriginStrict_EmptyOrigin verifies empty origins are rejected
@@ -182,62 +179,6 @@ func TestIsPrivateIP(t *testing.T) {
 				t.Errorf("isPrivateIP(%s) = %v, want %v", tt.ip, got, tt.want)
 			}
 		})
-	}
-}
-
-// TestRateLimiting verifies rate limiting per IP
-func TestRateLimiting(t *testing.T) {
-	limiter := NewConnectionRateLimiter()
-
-	// First 3 requests should succeed (burst)
-	ip := "192.168.1.100"
-	l := limiter.GetLimiter(ip)
-
-	if !l.Allow() {
-		t.Error("First request should be allowed")
-	}
-	if !l.Allow() {
-		t.Error("Second request should be allowed (burst)")
-	}
-	if !l.Allow() {
-		t.Error("Third request should be allowed (burst)")
-	}
-
-	// Fourth request should be blocked
-	if l.Allow() {
-		t.Error("Fourth request should be rate limited")
-	}
-
-	l.SetLimit(rate.Every(time.Nanosecond))
-	time.Sleep(time.Millisecond)
-	if !l.Allow() {
-		t.Error("Request after wait should be allowed")
-	}
-}
-
-// TestRateLimiter_DifferentIPs verifies rate limits are per-IP
-func TestRateLimiter_DifferentIPs(t *testing.T) {
-	limiter := NewConnectionRateLimiter()
-
-	ip1 := "192.168.1.100"
-	ip2 := "192.168.1.101"
-
-	l1 := limiter.GetLimiter(ip1)
-	l2 := limiter.GetLimiter(ip2)
-
-	// Exhaust IP1's limit
-	l1.Allow()
-	l1.Allow()
-	l1.Allow()
-
-	// IP1 should be blocked
-	if l1.Allow() {
-		t.Error("IP1 should be rate limited")
-	}
-
-	// IP2 should still work
-	if !l2.Allow() {
-		t.Error("IP2 should not be affected by IP1's rate limit")
 	}
 }
 

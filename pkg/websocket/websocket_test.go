@@ -8,14 +8,12 @@ import (
 	"os"
 	"runtime"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/events"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 	"github.com/gorilla/websocket"
-	"golang.org/x/time/rate"
 )
 
 func runtimeNumGoroutineImpl() int { return runtime.NumGoroutine() }
@@ -33,19 +31,10 @@ func TestMain(m *testing.M) {
 func resetWebSocketTestState(t *testing.T) {
 	t.Helper()
 	wsConfigMutex.Lock()
-	connRateLimiter = NewConnectionRateLimiter()
-	connRateLimiterOnce = sync.Once{}
-	connectionRateLimit = rate.Inf
-	connectionRateBurst = 1000
 	authReadTimeout = 5 * time.Second
 	wsConfigMutex.Unlock()
-	// LAN auto-trust is enabled at the suite level via TestMain.
 	t.Cleanup(func() {
 		wsConfigMutex.Lock()
-		connRateLimiter = nil
-		connRateLimiterOnce = sync.Once{}
-		connectionRateLimit = rate.Every(6 * time.Second)
-		connectionRateBurst = 3
 		authReadTimeout = 5 * time.Second
 		wsConfigMutex.Unlock()
 	})
@@ -423,46 +412,6 @@ func TestWebSocketEventDelivery(t *testing.T) {
 
 		if !foundEvent {
 			t.Error("Did not receive event after emission")
-		}
-	})
-}
-
-// TestWebSocketRateLimiting tests per-IP rate limiting
-func TestWebSocketRateLimiting(t *testing.T) {
-	stateMgr, err := state.NewManager()
-	if err != nil {
-		t.Fatalf("Failed to create state manager: %v", err)
-	}
-	eventMgr := events.NewManager()
-
-	server := httptest.NewServer(HandleWebSocket(stateMgr, eventMgr))
-	defer server.Close()
-
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
-
-	t.Run("rate limit enforcement", func(t *testing.T) {
-		time.Sleep(500 * time.Millisecond) // Avoid rate limit from previous tests
-
-		// Make multiple rapid connections
-		successCount := 0
-		rateLimitedCount := 0
-
-		dialer, headers := createTestDialer()
-		for i := 0; i < 10; i++ {
-			conn, resp, err := dialer.Dial(wsURL, headers)
-			if err != nil {
-				if resp != nil && resp.StatusCode == http.StatusTooManyRequests {
-					rateLimitedCount++
-				}
-				continue
-			}
-			conn.Close()
-			successCount++
-			time.Sleep(100 * time.Millisecond)
-		}
-
-		if rateLimitedCount == 0 {
-			t.Log("Warning: Rate limiting may not be working as expected")
 		}
 	})
 }

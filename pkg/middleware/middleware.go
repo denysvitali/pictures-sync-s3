@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"bufio"
 	"encoding/json"
 	"io"
 	"log"
@@ -73,6 +74,21 @@ func (rw *recoveryResponseWriter) WriteHeader(code int) {
 func (rw *recoveryResponseWriter) Write(b []byte) (int, error) {
 	rw.wroteHeader = true
 	return rw.ResponseWriter.Write(b)
+}
+
+// Hijack forwards to the wrapped ResponseWriter when it supports hijacking
+// so WebSocket upgrades work through Recovery middleware.
+func (rw *recoveryResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := rw.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, http.ErrNotSupported
+}
+
+func (rw *recoveryResponseWriter) Flush() {
+	if fl, ok := rw.ResponseWriter.(http.Flusher); ok {
+		fl.Flush()
+	}
 }
 
 // Recovery middleware recovers from panics and logs them. It re-raises
