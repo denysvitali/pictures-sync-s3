@@ -374,11 +374,14 @@ func GetAllowedOrigins() []string {
 	return result
 }
 
-// GenerateWSToken creates a new WebSocket auth token
+// GenerateWSToken creates a new WebSocket auth token. Returns an empty string
+// if the random source fails, allowing callers to handle the error gracefully
+// instead of crashing the service.
 func GenerateWSToken() string {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
-		log.Fatal("Failed to generate WebSocket token:", err)
+		log.Printf("Failed to generate WebSocket token: %v", err)
+		return ""
 	}
 	return base64.URLEncoding.EncodeToString(b)
 }
@@ -388,6 +391,9 @@ func GenerateWSToken() string {
 // failing that, the oldest entry is evicted to make room.
 func CreateWSToken() string {
 	token := GenerateWSToken()
+	if token == "" {
+		return ""
+	}
 	now := time.Now()
 	wsTokenMutex.Lock()
 	defer wsTokenMutex.Unlock()
