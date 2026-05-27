@@ -30,9 +30,7 @@ const (
 	progressUpdateInterval  = 500 * time.Millisecond
 	progressUpdateBytes     = 2 * 1024 * 1024
 	googlePhotosAPITimeout  = 30 * time.Second
-	maxRetryAttempts        = 4
-	circuitBreakerThreshold = 6
-	circuitBreakerCooldown  = 2 * time.Minute
+	maxRetryAttempts = 4
 )
 
 // SyncManager orchestrates syncing photos from B2 to Google Photos
@@ -55,21 +53,6 @@ type syncOptions struct {
 	parallelMetadata  bool
 	uploadWorkerFloor int
 	batchSize         int
-}
-
-type syncMetrics struct {
-	mu            sync.Mutex
-	uploadCount   int
-	uploadLatency time.Duration
-	apiCount      int
-	apiLatency    time.Duration
-	bytesUploaded int64
-	startedAt     time.Time
-}
-
-type circuitBreaker struct {
-	failures int
-	openAt   time.Time
 }
 
 // SyncManagerMinimal is the minimal interface needed from syncmanager for Google Photos sync
@@ -634,7 +617,7 @@ func (sm *SyncManager) uploadMediaItem(ctx context.Context, file syncmanager.Fil
 		}
 	}
 	if !sm.allowRequest() {
-		return nil, "", false, fmt.Errorf("upload circuit breaker open; retry after %s", sm.cb.openAt.Add(circuitBreakerCooldown).Format(time.RFC3339))
+		return nil, "", false, sm.circuitBreakerOpenError()
 	}
 
 	fileData, fileSize, checksum, cleanup, err := sm.downloadFile(file)
@@ -957,7 +940,7 @@ func (sm *SyncManager) createBatch(ctx context.Context, albumID string, items []
 	}
 	if !sm.allowRequest() {
 		result.failCount = len(items)
-		return result, fmt.Errorf("upload circuit breaker open; retry after %s", sm.cb.openAt.Add(circuitBreakerCooldown).Format(time.RFC3339))
+		return result, sm.circuitBreakerOpenError()
 	}
 	started := time.Now()
 	resp, err := retry(ctx, maxRetryAttempts, func(int) (*BatchCreateResponse, error) {
@@ -1101,59 +1084,6 @@ func (sm *SyncManager) adaptiveUploadWorkers(totalFiles int) int {
 	return workers
 }
 
-func (sm *SyncManager) recordUploadLatency(latency time.Duration, bytes int64) {
-	sm.metrics.mu.Lock()
-	sm.metrics.uploadCount++
-	sm.metrics.uploadLatency += latency
-	sm.metrics.bytesUploaded += bytes
-	sm.metrics.mu.Unlock()
-	sm.updateBackendMetrics(0, 0)
-}
-
-func (sm *SyncManager) recordAPILatency(latency time.Duration) {
-	sm.metrics.mu.Lock()
-	sm.metrics.apiCount++
-	sm.metrics.apiLatency += latency
-	sm.metrics.mu.Unlock()
-	sm.updateBackendMetrics(0, 0)
-}
-
-func (sm *SyncManager) updateBackendMetrics(queueDepth, inFlightDelta int) {
-	sm.metrics.mu.Lock()
-	defer sm.metrics.mu.Unlock()
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-	if sm.progress == nil {
-		return
-	}
-	if queueDepth >= 0 {
-		sm.progress.BackendMetrics.QueueDepth = queueDepth
-	}
-	sm.progress.BackendMetrics.InFlightJobs += inFlightDelta
-	if sm.progress.BackendMetrics.InFlightJobs < 0 {
-		sm.progress.BackendMetrics.InFlightJobs = 0
-	}
-	if sm.metrics.uploadCount > 0 {
-		sm.progress.BackendMetrics.AverageUploadLatency = (sm.metrics.uploadLatency / time.Duration(sm.metrics.uploadCount)).Round(time.Millisecond).String()
-	}
-	if sm.metrics.apiCount > 0 {
-		sm.progress.BackendMetrics.AverageAPILatency = (sm.metrics.apiLatency / time.Duration(sm.metrics.apiCount)).Round(time.Millisecond).String()
-	}
-	if elapsed := time.Since(sm.metrics.startedAt).Seconds(); elapsed > 0 {
-		sm.progress.BackendMetrics.UploadBytesPerSec = float64(sm.metrics.bytesUploaded) / elapsed
-	}
-	if sm.progress.BackendMetrics.UploadBytesPerSec > 0 && sm.progress.TotalBytes > sm.progress.ProcessedBytes {
-		eta := time.Duration(float64(sm.progress.TotalBytes-sm.progress.ProcessedBytes)/sm.progress.BackendMetrics.UploadBytesPerSec) * time.Second
-		for i := range sm.progress.StageTimeline {
-			if sm.progress.StageTimeline[i].Status == "active" {
-				sm.progress.StageTimeline[i].ETA = eta.Round(time.Second).String()
-				sm.progress.StageTimeline[i].BytesPerSec = sm.progress.BackendMetrics.UploadBytesPerSec
-			}
-		}
-	}
-	sm.progress.UpdatedAt = timePtr(time.Now())
-}
-
 func (sm *SyncManager) setCardProgress(cardID string, processed, total, uploaded, skipped, failed int, phase string, queueDepth int) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -1239,31 +1169,6 @@ func (sm *SyncManager) setRetryStatus(count int, next time.Time, reason string) 
 	}
 	sm.progress.RetryStatus = &RetryStatus{Count: count, NextRetryAt: &next, Reason: classifyGooglePhotosErrorMessage(reason).Error()}
 	sm.progress.UpdatedAt = timePtr(time.Now())
-}
-
-func (sm *SyncManager) recordFailure() {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-	sm.cb.failures++
-	if sm.cb.failures >= circuitBreakerThreshold {
-		sm.cb.openAt = time.Now()
-		if sm.progress != nil {
-			sm.progress.DebugDetails = append(sm.progress.DebugDetails, "Google Photos upload circuit breaker opened after repeated failures")
-		}
-	}
-}
-
-func (sm *SyncManager) recordSuccess() {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-	sm.cb.failures = 0
-	sm.cb.openAt = time.Time{}
-}
-
-func (sm *SyncManager) allowRequest() bool {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	return sm.cb.openAt.IsZero() || time.Since(sm.cb.openAt) > circuitBreakerCooldown
 }
 
 func (sm *SyncManager) recordCancelledSummary(startedAt time.Time, uploaded, skipped, failed int) {
@@ -1356,7 +1261,19 @@ func classifyGooglePhotosError(err error) error {
 	if err == nil {
 		return nil
 	}
-	return classifyGooglePhotosErrorMessage(err.Error())
+	lower := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(lower, "401"), strings.Contains(lower, "403"), strings.Contains(lower, "token"), strings.Contains(lower, "auth"):
+		return fmt.Errorf("Google Photos authorization failed; reconnect your account: %w", err)
+	case strings.Contains(lower, "quota"), strings.Contains(lower, "429"):
+		return fmt.Errorf("Google Photos quota or rate limit reached; retry later: %w", err)
+	case strings.Contains(lower, "timeout"), strings.Contains(lower, "connection"), strings.Contains(lower, "network"):
+		return fmt.Errorf("network problem while contacting Google Photos: %w", err)
+	case strings.Contains(lower, "400"), strings.Contains(lower, "bad request"):
+		return fmt.Errorf("Google Photos rejected a media item or request payload: %w", err)
+	default:
+		return err
+	}
 }
 
 func classifyGooglePhotosErrorMessage(message string) error {
@@ -1367,11 +1284,11 @@ func classifyGooglePhotosErrorMessage(message string) error {
 	case strings.Contains(lower, "quota"), strings.Contains(lower, "429"):
 		return fmt.Errorf("Google Photos quota or rate limit reached; retry later: %s", message)
 	case strings.Contains(lower, "timeout"), strings.Contains(lower, "connection"), strings.Contains(lower, "network"):
-		return fmt.Errorf("Network problem while contacting Google Photos: %s", message)
+		return fmt.Errorf("network problem while contacting Google Photos: %s", message)
 	case strings.Contains(lower, "400"), strings.Contains(lower, "bad request"):
 		return fmt.Errorf("Google Photos rejected a media item or request payload: %s", message)
 	default:
-		return fmt.Errorf("%s", message)
+		return errors.New(message)
 	}
 }
 
