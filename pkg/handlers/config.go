@@ -168,42 +168,37 @@ func (ctx *Context) HandleConfigTest(w http.ResponseWriter, r *http.Request) {
 // are safe to display in the redacted config view. Anything not on this list
 // is redacted by default. Adding a new backend requires explicit review here,
 // which is the whole point of an allowlist over a blacklist.
+//
+// Only structural/non-identifier fields belong here. Keys that carry account
+// identifiers, credentials, access keys, or user-specific values must NOT be
+// listed — they are redacted by default.
 var safeRcloneConfigKeys = map[string]bool{
-	"type":                    true,
-	"provider":                true,
-	"region":                  true,
-	"endpoint":                true,
-	"location":                true,
-	"location_constraint":     true,
-	"acl":                     true,
-	"storage_class":           true,
-	"bucket":                  true,
-	"bucket_acl":              true,
-	"chunk_size":              true,
-	"upload_concurrency":      true,
-	"hard_delete":             true,
-	"versions":                true,
-	"download_url":            true,
-	"copy_cutoff":             true,
-	"disable_checksum":        true,
-	"force_path_style":        true,
-	"server_side_encryption":  true,
-	"sse_customer_algorithm":  true,
-	"no_check_bucket":         true,
-	"team_drive":              true,
-	"root_folder_id":          true,
-	"scope":                   true,
-	"shared_credentials_file": true,
-	"profile":                 true,
-	"env_auth":                true,
-	"account":                 true, // username-style identifier (e.g. B2 account/key id)
-	"key_id":                  true,
-	"user":                    true,
-	"username":                true,
-	"vendor":                  true,
-	"host":                    true,
-	"port":                    true,
-	"url":                     true,
+	"type":                   true,
+	"provider":               true,
+	"region":                 true,
+	"endpoint":               true,
+	"location":               true,
+	"location_constraint":    true,
+	"acl":                    true,
+	"storage_class":          true,
+	"bucket":                 true,
+	"bucket_acl":             true,
+	"chunk_size":             true,
+	"upload_concurrency":     true,
+	"hard_delete":            true,
+	"versions":               true,
+	"copy_cutoff":            true,
+	"disable_checksum":       true,
+	"force_path_style":       true,
+	"server_side_encryption": true,
+	"sse_customer_algorithm": true,
+	"no_check_bucket":        true,
+	"scope":                  true,
+	"env_auth":               true,
+	// Omitted (identifier/credential fields — redacted for safety):
+	//   account, account_id, key_id, user, username, host, port, url,
+	//   download_url, shared_credentials_file, profile, team_drive,
+	//   root_folder_id, vendor
 }
 
 func redactRcloneConfig(data []byte) (string, string) {
