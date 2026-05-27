@@ -81,6 +81,17 @@ func (ctx *Context) HandleSystemTLSCertificate(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	if len(req.Hosts) == 0 {
+		httputil.BadRequest(w, "invalid host: hosts list must not be empty")
+		return
+	}
+	for _, h := range req.Hosts {
+		if !isValidCertHost(h) {
+			httputil.BadRequest(w, fmt.Sprintf("invalid host: %q", h))
+			return
+		}
+	}
+
 	hosts := append([]string{}, req.Hosts...)
 	hosts = append(hosts, requestHost(r))
 	info, err := generateCert(hosts)
@@ -93,6 +104,56 @@ func (ctx *Context) HandleSystemTLSCertificate(w http.ResponseWriter, r *http.Re
 		"generated":       true,
 		"tls_certificate": certificateInfoResponse(info),
 	}))
+}
+
+// isValidCertHost reports whether host is acceptable for use as a TLS
+// certificate Subject Alternative Name. It accepts a valid IP address or a
+// DNS hostname conforming to RFC 1123 (letters, digits, hyphens; no leading
+// or trailing hyphen; label <= 63 chars; total <= 253 chars).
+func isValidCertHost(host string) bool {
+	if host == "" {
+		return false
+	}
+	if net.ParseIP(host) != nil {
+		return true
+	}
+	return isValidDNSHostname(host)
+}
+
+func isValidDNSHostname(host string) bool {
+	// Allow trailing dot in the input but do not count it toward length.
+	host = strings.TrimSuffix(host, ".")
+	if host == "" || len(host) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(host, ".") {
+		if !isValidDNSLabel(label) {
+			return false
+		}
+	}
+	return true
+}
+
+func isValidDNSLabel(label string) bool {
+	n := len(label)
+	if n == 0 || n > 63 {
+		return false
+	}
+	if label[0] == '-' || label[n-1] == '-' {
+		return false
+	}
+	for i := 0; i < n; i++ {
+		c := label[i]
+		switch {
+		case c >= 'a' && c <= 'z':
+		case c >= 'A' && c <= 'Z':
+		case c >= '0' && c <= '9':
+		case c == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func (ctx *Context) HandleSystemPanic(w http.ResponseWriter, r *http.Request) {
