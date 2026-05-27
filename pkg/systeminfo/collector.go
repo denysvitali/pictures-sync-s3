@@ -157,7 +157,7 @@ func (c *StatsCollector) truncateLocked() {
 		c.records = c.records[:len(c.records)-oldest]
 	}
 
-	maxRecords := int(c.retention.Seconds() / defaultInterval.Seconds())
+	maxRecords := int(c.retention.Seconds() / c.interval.Seconds())
 	if maxRecords <= 0 {
 		maxRecords = 1
 	}
@@ -201,7 +201,7 @@ func (c *StatsCollector) sampleCPU() float64 {
 	c.lastCPUTime = now
 	c.mu.Unlock()
 
-	if lastTotal == 0 || lastTime.IsZero() {
+	if lastTime.IsZero() {
 		return 0
 	}
 

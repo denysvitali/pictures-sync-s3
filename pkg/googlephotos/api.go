@@ -9,15 +9,7 @@ import (
 	"net/http"
 )
 
-// UploadMedia uploads media bytes to Google Photos and returns an upload token
-func (c *Client) UploadMedia(data []byte, filename string) (string, error) {
-	return c.UploadMediaReaderContext(context.Background(), bytes.NewReader(data), int64(len(data)), filename)
-}
-
-// UploadMediaReader uploads media from a reader to Google Photos and returns an upload token.
-func (c *Client) UploadMediaReader(r io.Reader, size int64, filename string) (string, error) {
-	return c.UploadMediaReaderContext(context.Background(), r, size, filename)
-}
+const maxBatchSize = 50
 
 // UploadMediaReaderContext uploads media from a reader to Google Photos and returns an upload token.
 func (c *Client) UploadMediaReaderContext(ctx context.Context, r io.Reader, size int64, filename string) (string, error) {
@@ -37,11 +29,6 @@ func (c *Client) UploadMediaReaderContext(ctx context.Context, r io.Reader, size
 	}
 
 	return string(body), nil
-}
-
-// CreateAlbum creates a new album in Google Photos
-func (c *Client) CreateAlbum(title string) (*Album, error) {
-	return c.CreateAlbumContext(context.Background(), title)
 }
 
 // CreateAlbumContext creates a new album in Google Photos.
@@ -80,15 +67,11 @@ func (c *Client) CreateAlbumContext(ctx context.Context, title string) (*Album, 
 	return &album, nil
 }
 
-// ListAlbums lists all albums in the user's Google Photos library
-func (c *Client) ListAlbums() ([]*Album, error) {
-	return c.ListAlbumsContext(context.Background())
-}
-
 // ListAlbumsContext lists all albums in the user's Google Photos library.
 func (c *Client) ListAlbumsContext(ctx context.Context) ([]*Album, error) {
 	var allAlbums []*Album
 	pageToken := ""
+	seenTokens := make(map[string]struct{})
 
 	for {
 		path := "/albums?pageSize=50"
@@ -121,75 +104,53 @@ func (c *Client) ListAlbumsContext(ctx context.Context) ([]*Album, error) {
 		if result.NextPageToken == "" {
 			break
 		}
+		if _, dup := seenTokens[result.NextPageToken]; dup {
+			return nil, fmt.Errorf("list albums: pagination loop detected at token %q", result.NextPageToken)
+		}
+		seenTokens[result.NextPageToken] = struct{}{}
 		pageToken = result.NextPageToken
 	}
 
 	return allAlbums, nil
 }
 
-// FindAlbumByTitle finds an album by its title
-func (c *Client) FindAlbumByTitle(title string) (*Album, error) {
-	return c.FindAlbumByTitleContext(context.Background(), title)
-}
-
-// FindAlbumByTitleContext finds an album by its title, stopping pagination as
-// soon as a match is found.
+// FindAlbumByTitleContext finds an album by its title.
 func (c *Client) FindAlbumByTitleContext(ctx context.Context, title string) (*Album, error) {
-	pageToken := ""
-	for {
-		path := "/albums?pageSize=50"
-		if pageToken != "" {
-			path += "&pageToken=" + pageToken
-		}
-		resp, err := c.doRequestContext(ctx, "GET", path, nil)
-		if err != nil {
-			return nil, err
-		}
-		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			return nil, fmt.Errorf("failed to read albums response: %w", err)
-		}
-		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("list albums failed (%d): %s", resp.StatusCode, string(body))
-		}
-		var result ListAlbumsResponse
-		if err := json.Unmarshal(body, &result); err != nil {
-			return nil, fmt.Errorf("failed to parse albums response: %w", err)
-		}
-		for _, album := range result.Albums {
-			if album.Title == title {
-				return album, nil
-			}
-		}
-		if result.NextPageToken == "" {
-			return nil, nil
-		}
-		pageToken = result.NextPageToken
+	albums, err := c.ListAlbumsContext(ctx)
+	if err != nil {
+		return nil, err
 	}
+
+	for _, album := range albums {
+		if album.Title == title {
+			return album, nil
+		}
+	}
+
+	return nil, nil
 }
 
-// BatchCreateMediaItems creates multiple media items in a single request
-func (c *Client) BatchCreateMediaItems(albumID string, items []*NewMediaItem) (*BatchCreateResponse, error) {
-	return c.BatchCreateMediaItemsContext(context.Background(), albumID, items)
+// chunkSlice invokes fn on consecutive slices of items of at most size elements.
+// Returns the first error fn returns, stopping iteration.
+func chunkSlice[T any](items []T, size int, fn func(chunk []T) error) error {
+	for i := 0; i < len(items); i += size {
+		end := i + size
+		if end > len(items) {
+			end = len(items)
+		}
+		if err := fn(items[i:end]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
-
-const maxBatchSize = 50
 
 // BatchCreateMediaItemsContext creates multiple media items in a single request.
 // If more than 50 items are provided they are sent in multiple chunked requests.
 func (c *Client) BatchCreateMediaItemsContext(ctx context.Context, albumID string, items []*NewMediaItem) (*BatchCreateResponse, error) {
 	var combined BatchCreateResponse
-	for i := 0; i < len(items); i += maxBatchSize {
-		end := i + maxBatchSize
-		if end > len(items) {
-			end = len(items)
-		}
-		chunk := items[i:end]
-
-		reqBody := BatchCreateRequest{
-			NewMediaItems: chunk,
-		}
+	err := chunkSlice(items, maxBatchSize, func(chunk []*NewMediaItem) error {
+		reqBody := BatchCreateRequest{NewMediaItems: chunk}
 		if albumID != "" {
 			reqBody.AlbumID = albumID
 			reqBody.AlbumPosition = &AlbumPosition{Position: "LAST_IN_ALBUM"}
@@ -197,31 +158,34 @@ func (c *Client) BatchCreateMediaItemsContext(ctx context.Context, albumID strin
 
 		jsonBody, err := json.Marshal(reqBody)
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal batch create request: %w", err)
+			return fmt.Errorf("failed to marshal batch create request: %w", err)
 		}
 
 		resp, err := c.doRequestContext(ctx, "POST", "/mediaItems:batchCreate", bytes.NewReader(jsonBody))
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		body, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
-			return nil, fmt.Errorf("failed to read batch create response: %w", err)
+			return fmt.Errorf("failed to read batch create response: %w", err)
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("batch create failed (%d): %s", resp.StatusCode, string(body))
+			return fmt.Errorf("batch create failed (%d): %s", resp.StatusCode, string(body))
 		}
 
 		var result BatchCreateResponse
 		if err := json.Unmarshal(body, &result); err != nil {
-			return nil, fmt.Errorf("failed to parse batch create response: %w", err)
+			return fmt.Errorf("failed to parse batch create response: %w", err)
 		}
 		combined.NewMediaItemResults = append(combined.NewMediaItemResults, result.NewMediaItemResults...)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
-
 	return &combined, nil
 }
 
@@ -229,11 +193,12 @@ func (c *Client) BatchCreateMediaItemsContext(ctx context.Context, albumID strin
 func (c *Client) ListAlbumMediaItems(ctx context.Context, albumID string) ([]*MediaItem, error) {
 	var allItems []*MediaItem
 	pageToken := ""
+	seenTokens := make(map[string]struct{})
 
 	for {
-		path := fmt.Sprintf("/mediaItems:search?pageSize=100")
+		path := "/mediaItems:search?pageSize=100"
 		if pageToken != "" {
-			path = fmt.Sprintf("/mediaItems:search?pageSize=100&pageToken=%s", pageToken)
+			path += "&pageToken=" + pageToken
 		}
 
 		reqBody := map[string]string{"albumId": albumID}
@@ -267,6 +232,10 @@ func (c *Client) ListAlbumMediaItems(ctx context.Context, albumID string) ([]*Me
 		if result.NextPageToken == "" {
 			break
 		}
+		if _, dup := seenTokens[result.NextPageToken]; dup {
+			return nil, fmt.Errorf("list album media items: pagination loop detected at token %q", result.NextPageToken)
+		}
+		seenTokens[result.NextPageToken] = struct{}{}
 		pageToken = result.NextPageToken
 	}
 
@@ -276,13 +245,7 @@ func (c *Client) ListAlbumMediaItems(ctx context.Context, albumID string) ([]*Me
 // BatchRemoveMediaItems removes media items from an album.
 // Requests are automatically chunked to respect the 50-item API limit.
 func (c *Client) BatchRemoveMediaItems(ctx context.Context, albumID string, mediaItemIds []string) error {
-	for i := 0; i < len(mediaItemIds); i += maxBatchSize {
-		end := i + maxBatchSize
-		if end > len(mediaItemIds) {
-			end = len(mediaItemIds)
-		}
-		chunk := mediaItemIds[i:end]
-
+	return chunkSlice(mediaItemIds, maxBatchSize, func(chunk []string) error {
 		reqBody := BatchRemoveMediaItemsRequest{MediaItemIds: chunk}
 		jsonBody, err := json.Marshal(reqBody)
 		if err != nil {
@@ -303,7 +266,6 @@ func (c *Client) BatchRemoveMediaItems(ctx context.Context, albumID string, medi
 		if resp.StatusCode != http.StatusOK {
 			return fmt.Errorf("batch remove failed (%d): %s", resp.StatusCode, string(body))
 		}
-	}
-
-	return nil
+		return nil
+	})
 }

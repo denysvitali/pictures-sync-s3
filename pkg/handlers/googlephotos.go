@@ -43,7 +43,7 @@ func (ctx *Context) HandleGooglePhotosStatus(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	JSONResponse(w, map[string]interface{}{
+	JSONResponse(w, map[string]any{
 		"configured": configured && gpRemoteName != "",
 		"connected":  connected,
 	})
@@ -111,7 +111,7 @@ func (ctx *Context) HandleGooglePhotosAuthStart(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	JSONResponse(w, map[string]interface{}{
+	JSONResponse(w, map[string]any{
 		"auth_url": authURL,
 		"state":    authState.State,
 	})
@@ -230,7 +230,7 @@ func (ctx *Context) HandleGooglePhotosAuthDisconnect(w http.ResponseWriter, r *h
 	}
 	ctx.SyncMgr.SetGooglePhotos(false, "")
 
-	JSONResponse(w, map[string]interface{}{"disconnected": true})
+	JSONResponse(w, map[string]any{"disconnected": true})
 }
 
 // updateRcloneConfigWithRemote adds or replaces a remote section in rclone.conf.
@@ -334,7 +334,7 @@ func (ctx *Context) HandleGooglePhotosSync(w http.ResponseWriter, r *http.Reques
 		}
 	}()
 
-	JSONResponse(w, map[string]interface{}{
+	JSONResponse(w, map[string]any{
 		"started": true,
 		"status":  "syncing",
 	})
@@ -351,14 +351,14 @@ func (ctx *Context) HandleGooglePhotosSyncCancel(w http.ResponseWriter, r *http.
 		return
 	}
 	if !ctx.SyncMgr.IsGooglePhotosRunning() {
-		JSONResponse(w, map[string]interface{}{"cancelled": false, "status": "idle"})
+		JSONResponse(w, map[string]any{"cancelled": false, "status": "idle"})
 		return
 	}
 	if err := ctx.SyncMgr.CancelGooglePhotos(); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	JSONResponse(w, map[string]interface{}{"cancelled": true, "status": "cancelling"})
+	JSONResponse(w, map[string]any{"cancelled": true, "status": "cancelling"})
 }
 
 // HandleGooglePhotosSyncProgress returns the current Google Photos sync progress.
@@ -369,7 +369,7 @@ func (ctx *Context) HandleGooglePhotosSyncProgress(w http.ResponseWriter, r *htt
 	}
 
 	if ctx.SyncMgr == nil {
-		JSONResponse(w, map[string]interface{}{
+		JSONResponse(w, map[string]any{
 			"status": "not_initialized",
 		})
 		return
@@ -380,7 +380,7 @@ func (ctx *Context) HandleGooglePhotosSyncProgress(w http.ResponseWriter, r *htt
 	if status == "" && ctx.SyncMgr.IsGooglePhotosRunning() {
 		status = "syncing"
 	}
-	JSONResponse(w, map[string]interface{}{
+	JSONResponse(w, map[string]any{
 		"status":            status,
 		"current_file":      progress.CurrentFile,
 		"current_file_size": progress.CurrentFileSize,
@@ -428,11 +428,11 @@ func (ctx *Context) handleGooglePhotosAlbumList(w http.ResponseWriter, r *http.R
 	tokenStore := googlephotos.NewTokenStore("")
 	client := googlephotos.NewClient(clientID, clientSecret, tokenStore)
 	if !client.IsAuthenticated() {
-		JSONResponse(w, map[string]interface{}{"albums": []any{}})
+		JSONResponse(w, map[string]any{"albums": []any{}})
 		return
 	}
 
-	albums, err := client.ListAlbums()
+	albums, err := client.ListAlbumsContext(r.Context())
 	if err != nil {
 		log.Printf("[GooglePhotos] Failed to list albums: %v", err)
 		http.Error(w, "Failed to list albums", http.StatusInternalServerError)
@@ -446,7 +446,7 @@ func (ctx *Context) handleGooglePhotosAlbumList(w http.ResponseWriter, r *http.R
 			managed = append(managed, a)
 		}
 	}
-	JSONResponse(w, map[string]interface{}{"albums": managed})
+	JSONResponse(w, map[string]any{"albums": managed})
 }
 
 func (ctx *Context) handleGooglePhotosAlbumClear(w http.ResponseWriter, r *http.Request) {
@@ -490,7 +490,7 @@ func (ctx *Context) handleGooglePhotosAlbumClear(w http.ResponseWriter, r *http.
 	}
 
 	if len(items) == 0 {
-		JSONResponse(w, map[string]interface{}{"cleared": true, "removed": 0})
+		JSONResponse(w, map[string]any{"cleared": true, "removed": 0})
 		return
 	}
 
@@ -518,7 +518,7 @@ func (ctx *Context) handleGooglePhotosAlbumClear(w http.ResponseWriter, r *http.
 	}
 	// Best effort: clear state for any album matching this album ID.
 	// Since we don't have the album title from the items, try to get it.
-	albums, _ := client.ListAlbums()
+	albums, _ := client.ListAlbumsContext(r.Context())
 	for _, a := range albums {
 		if a.ID == albumID {
 			albumName = a.Title
@@ -532,5 +532,5 @@ func (ctx *Context) handleGooglePhotosAlbumClear(w http.ResponseWriter, r *http.
 	}
 
 	log.Printf("[GooglePhotos] Cleared %d item(s) from album %s", len(ids), albumID)
-	JSONResponse(w, map[string]interface{}{"cleared": true, "removed": len(ids)})
+	JSONResponse(w, map[string]any{"cleared": true, "removed": len(ids)})
 }
