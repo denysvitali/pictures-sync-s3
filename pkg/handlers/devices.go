@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/daemoncontrol"
+	"github.com/denysvitali/pictures-sync-s3/pkg/httputil"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 )
 
@@ -63,7 +64,7 @@ func (ctx *Context) HandleDevices(w http.ResponseWriter, r *http.Request) {
 	// Update state manager with available devices
 	ctx.StateMgr.SetAvailableDevices(stateDevices)
 
-	JSONResponse(w, devices)
+	httputil.JSON(w, http.StatusOK, devices)
 }
 
 // HandleDeviceSelect handles manual device selection
@@ -77,6 +78,7 @@ func (ctx *Context) HandleDeviceSelect(w http.ResponseWriter, r *http.Request) {
 		DevicePath string `json:"device_path"`
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 4*1024)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
@@ -110,7 +112,7 @@ func (ctx *Context) HandleDeviceSelect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	JSONResponse(w, map[string]string{
+	httputil.JSON(w, http.StatusOK, map[string]string{
 		"status":  "ok",
 		"message": "Manual sync requested for selected device",
 	})
@@ -162,7 +164,7 @@ func (ctx *Context) HandleDeviceFormat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	JSONResponse(w, map[string]string{
+	httputil.JSON(w, http.StatusOK, map[string]string{
 		"status":  "ok",
 		"message": "SD card formatted",
 	})
@@ -194,7 +196,7 @@ func (ctx *Context) HandleDeviceRedetect(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	JSONResponse(w, map[string]string{
+	httputil.JSON(w, http.StatusOK, map[string]string{
 		"status":  "ok",
 		"message": "SD card re-detected",
 	})
@@ -234,7 +236,7 @@ func (ctx *Context) HandleSyncStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	JSONResponse(w, map[string]string{
+	httputil.JSON(w, http.StatusOK, map[string]string{
 		"status":  "ok",
 		"message": "Sync start requested",
 	})
@@ -266,7 +268,7 @@ func (ctx *Context) HandleSyncCancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	JSONResponse(w, map[string]string{
+	httputil.JSON(w, http.StatusOK, map[string]string{
 		"status":  "ok",
 		"message": "Sync cancelled",
 	})

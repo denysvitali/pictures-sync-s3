@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/denysvitali/pictures-sync-s3/pkg/httputil"
 	"github.com/denysvitali/pictures-sync-s3/pkg/utils"
 	"golang.org/x/crypto/ssh"
 )
@@ -30,7 +31,7 @@ func (ctx *Context) HandleBreakglassAuthorizedKeys(w http.ResponseWriter, r *htt
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		JSONResponse(w, map[string]any{
+		httputil.JSON(w, http.StatusOK, map[string]any{
 			"authorized_keys": keys,
 			"path":            breakglassAuthorizedKeysPath,
 			"count":           countAuthorizedKeys(keys),
@@ -71,7 +72,7 @@ func (ctx *Context) HandleBreakglassAuthorizedKeys(w http.ResponseWriter, r *htt
 			return
 		}
 
-		JSONResponse(w, map[string]any{
+		httputil.JSON(w, http.StatusOK, map[string]any{
 			"status": "ok",
 			"path":   breakglassAuthorizedKeysPath,
 			"count":  countAuthorizedKeys(keys),

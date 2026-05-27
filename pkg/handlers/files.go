@@ -40,7 +40,7 @@ func (ctx *Context) HandleFileCards(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	JSONResponse(w, map[string]any{
+	httputil.JSON(w, http.StatusOK, map[string]any{
 		"cards": cards,
 	})
 }
@@ -94,7 +94,7 @@ func (ctx *Context) HandleFilesPaginated(w http.ResponseWriter, r *http.Request)
 		time.Since(start),
 	)
 
-	JSONResponse(w, result)
+	httputil.JSON(w, http.StatusOK, result)
 }
 
 var fileViewImageContentTypes = map[string]string{
@@ -188,7 +188,7 @@ func (ctx *Context) HandleFiles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("[Gallery] Successfully listed %d files", len(files))
-	JSONResponse(w, map[string]any{
+	httputil.JSON(w, http.StatusOK, map[string]any{
 		"files": files,
 		"path":  path,
 	})
@@ -279,7 +279,7 @@ func (ctx *Context) HandleFileLink(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Cache-Control", "no-store")
-	JSONResponse(w, map[string]string{
+	httputil.JSON(w, http.StatusOK, map[string]string{
 		"url": link,
 	})
 }
@@ -376,7 +376,7 @@ func (ctx *Context) HandleSDCardFiles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("[Gallery] list sdcard complete path=%q files=%d duration=%s", requestedPath, len(result.Files), time.Since(start))
-	JSONResponse(w, result)
+	httputil.JSON(w, http.StatusOK, result)
 }
 
 // extractEXIF extracts EXIF metadata from an image file

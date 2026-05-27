@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+
+	"github.com/denysvitali/pictures-sync-s3/pkg/httputil"
 )
 
 // HandleCaptivePortalStatus returns the current captive portal authentication status
@@ -26,7 +28,7 @@ func (ctx *Context) HandleCaptivePortalStatus(w http.ResponseWriter, r *http.Req
 	}
 
 	if ctx.CaptivePortal == nil {
-		JSONResponse(w, map[string]any{
+		httputil.JSON(w, http.StatusOK, map[string]any{
 			"error":   "Captive portal authenticator not initialized",
 			"enabled": false,
 		})
@@ -36,7 +38,7 @@ func (ctx *Context) HandleCaptivePortalStatus(w http.ResponseWriter, r *http.Req
 	status := ctx.CaptivePortal.GetAuthenticationStatus()
 	status["enabled"] = true
 
-	JSONResponse(w, status)
+	httputil.JSON(w, http.StatusOK, status)
 }
 
 // HandleCaptivePortalAuthenticate manually triggers captive portal authentication
@@ -97,7 +99,7 @@ func (ctx *Context) HandleCaptivePortalAuthenticate(w http.ResponseWriter, r *ht
 	conn, err := ctx.WiFiMgr.GetCurrentConnection()
 	if err != nil {
 		log.Printf("[API] Not connected to WiFi: %v", err)
-		JSONResponse(w, map[string]any{
+		httputil.JSON(w, http.StatusOK, map[string]any{
 			"success": false,
 			"error":   "Not connected to WiFi network",
 		})
@@ -134,7 +136,7 @@ func (ctx *Context) HandleCaptivePortalAuthenticate(w http.ResponseWriter, r *ht
 		response["authenticated"] = false
 	}
 
-	JSONResponse(w, response)
+	httputil.JSON(w, http.StatusOK, response)
 }
 
 // HandleCaptivePortalTest tests the captive portal detection and retrieves network identifiers
@@ -171,7 +173,7 @@ func (ctx *Context) HandleCaptivePortalTest(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		response["error"] = err.Error()
 		response["connected"] = false
-		JSONResponse(w, response)
+		httputil.JSON(w, http.StatusOK, response)
 		return
 	}
 
@@ -192,5 +194,5 @@ func (ctx *Context) HandleCaptivePortalTest(w http.ResponseWriter, r *http.Reque
 		response["local_mac"] = mac
 	}
 
-	JSONResponse(w, response)
+	httputil.JSON(w, http.StatusOK, response)
 }

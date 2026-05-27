@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/denysvitali/pictures-sync-s3/pkg/httputil"
 	"github.com/denysvitali/pictures-sync-s3/pkg/systeminfo"
 )
 
@@ -28,7 +29,7 @@ func (ctx *Context) HandleStatus(w http.ResponseWriter, r *http.Request) {
 
 	runtimeInfo := systeminfo.Snapshot()
 	status.Runtime = &runtimeInfo
-	JSONResponse(w, status)
+	httputil.JSON(w, http.StatusOK, status)
 }
 
 // HandleHistory returns sync history
@@ -48,5 +49,5 @@ func (ctx *Context) HandleHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	JSONResponse(w, history)
+	httputil.JSON(w, http.StatusOK, history)
 }

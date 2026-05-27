@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/denysvitali/pictures-sync-s3/pkg/httputil"
 	"github.com/denysvitali/pictures-sync-s3/pkg/settings"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 )
@@ -159,7 +160,7 @@ func BenchmarkJSONResponse(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		w := httptest.NewRecorder()
-		JSONResponse(w, data)
+		httputil.JSON(w, http.StatusOK, data)
 
 		if w.Code != http.StatusOK {
 			b.Fatalf("expected status 200, got %d", w.Code)
@@ -188,7 +189,7 @@ func BenchmarkJSONResponseLarge(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		w := httptest.NewRecorder()
-		JSONResponse(w, history)
+		httputil.JSON(w, http.StatusOK, history)
 
 		if w.Code != http.StatusOK {
 			b.Fatalf("expected status 200, got %d", w.Code)

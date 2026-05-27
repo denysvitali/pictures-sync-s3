@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/auth"
+	"github.com/denysvitali/pictures-sync-s3/pkg/httputil"
 	"github.com/denysvitali/pictures-sync-s3/pkg/settings"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 	"github.com/denysvitali/pictures-sync-s3/pkg/utils"
@@ -68,7 +69,7 @@ func (ctx *Context) HandleConfig(w http.ResponseWriter, r *http.Request) {
 				response["provider"] = provider
 			}
 		}
-		JSONResponse(w, response)
+		httputil.JSON(w, http.StatusOK, response)
 
 	case http.MethodPost:
 		// Update rclone config with comprehensive validation
@@ -139,7 +140,7 @@ func (ctx *Context) HandleConfig(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Config uploaded with warnings: %v", result.Warnings)
 		}
 
-		JSONResponse(w, response)
+		httputil.JSON(w, http.StatusOK, response)
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -154,14 +155,14 @@ func (ctx *Context) HandleConfigTest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := ctx.SyncMgr.TestConnection(); err != nil {
-		JSONResponse(w, map[string]any{
+		httputil.JSON(w, http.StatusOK, map[string]any{
 			"success": false,
 			"error":   err.Error(),
 		})
 		return
 	}
 
-	JSONResponse(w, map[string]any{"success": true})
+	httputil.JSON(w, http.StatusOK, map[string]any{"success": true})
 }
 
 // safeRcloneConfigKeys is a strict allowlist of rclone config keys whose values
@@ -270,7 +271,7 @@ func (ctx *Context) HandlePasswordChange(w http.ResponseWriter, r *http.Request)
 	}
 
 	logConfigChange(r, "password_changed", "Updated gokrazy UI password")
-	JSONResponse(w, map[string]any{"status": "ok"})
+	httputil.JSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 
 // HandleConfigB2Regions returns available Backblaze B2 regions with their endpoints.
@@ -279,7 +280,7 @@ func (ctx *Context) HandleConfigB2Regions(w http.ResponseWriter, r *http.Request
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	JSONResponse(w, validation.B2Regions)
+	httputil.JSON(w, http.StatusOK, validation.B2Regions)
 }
 
 // logConfigChange logs rclone configuration changes with client information
@@ -305,16 +306,14 @@ func (ctx *Context) HandleConfigB2(w http.ResponseWriter, r *http.Request) {
 	b2cfg, remoteName, remotePath, err := req.toB2Config()
 	if err != nil {
 		logConfigChange(r, "b2_validation_failed", err.Error())
-		w.WriteHeader(http.StatusBadRequest)
-		JSONResponse(w, map[string]any{"success": false, "error": err.Error()})
+		httputil.JSON(w, http.StatusBadRequest, map[string]any{"success": false, "error": err.Error()})
 		return
 	}
 
 	configBytes, err := validation.BuildB2RcloneConfig(b2cfg)
 	if err != nil {
 		logConfigChange(r, "b2_validation_failed", err.Error())
-		w.WriteHeader(http.StatusBadRequest)
-		JSONResponse(w, map[string]any{"success": false, "error": err.Error()})
+		httputil.JSON(w, http.StatusBadRequest, map[string]any{"success": false, "error": err.Error()})
 		return
 	}
 
@@ -328,8 +327,7 @@ func (ctx *Context) HandleConfigB2(w http.ResponseWriter, r *http.Request) {
 			errMsg = result.Errors[0].Error()
 		}
 		logConfigChange(r, "b2_validation_failed", errMsg)
-		w.WriteHeader(http.StatusBadRequest)
-		JSONResponse(w, map[string]any{"success": false, "error": errMsg})
+		httputil.JSON(w, http.StatusBadRequest, map[string]any{"success": false, "error": errMsg})
 		return
 	}
 
@@ -357,7 +355,7 @@ func (ctx *Context) HandleConfigB2(w http.ResponseWriter, r *http.Request) {
 	// Test connection
 	if err := ctx.SyncMgr.TestConnection(); err != nil {
 		logConfigChange(r, "b2_test_failed", err.Error())
-		JSONResponse(w, map[string]any{
+		httputil.JSON(w, http.StatusOK, map[string]any{
 			"success":     true,
 			"remote_name": remoteName,
 			"warning":     fmt.Sprintf("Config saved but connection test failed: %v", err),
@@ -366,7 +364,7 @@ func (ctx *Context) HandleConfigB2(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logConfigChange(r, "b2_success", fmt.Sprintf("Configured B2 remote '%s' with bucket '%s'", remoteName, b2cfg.Bucket))
-	JSONResponse(w, map[string]any{
+	httputil.JSON(w, http.StatusOK, map[string]any{
 		"success":     true,
 		"remote_name": remoteName,
 		"remotes":     []string{remoteName},
@@ -563,7 +561,7 @@ func (ctx *Context) HandleSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		response["tailscale_auth_key_configured"] = tailscaleConfigured
 		response["tailscale_auth_key_path"] = tailscaleAuthKeyPath
-		JSONResponse(w, response)
+		httputil.JSON(w, http.StatusOK, response)
 
 	case http.MethodPost:
 		var req settingsRequest
@@ -590,7 +588,7 @@ func (ctx *Context) HandleSettings(w http.ResponseWriter, r *http.Request) {
 		}
 
 		log.Println("Settings updated")
-		JSONResponse(w, response)
+		httputil.JSON(w, http.StatusOK, response)
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)

@@ -12,6 +12,7 @@ import (
 
 	probing "github.com/prometheus-community/pro-bing"
 
+	"github.com/denysvitali/pictures-sync-s3/pkg/httputil"
 	"github.com/denysvitali/pictures-sync-s3/pkg/middleware"
 )
 
@@ -29,7 +30,7 @@ func (ctx *Context) HandleNetworkDNS(w http.ResponseWriter, r *http.Request) {
 		resolvConf = []byte("Unable to read /etc/resolv.conf")
 	}
 
-	JSONResponse(w, map[string]string{
+	httputil.JSON(w, http.StatusOK, map[string]string{
 		"resolv_conf": string(resolvConf),
 	})
 }
@@ -45,7 +46,7 @@ func (ctx *Context) HandleNetworkInterfaces(w http.ResponseWriter, r *http.Reque
 	interfaces, err := net.Interfaces()
 	if err != nil {
 		log.Printf("Failed to get network interfaces: %v", err)
-		JSONResponse(w, map[string]any{
+		httputil.JSON(w, http.StatusOK, map[string]any{
 			"interfaces": []map[string]any{},
 			"error":      err.Error(),
 		})
@@ -102,7 +103,7 @@ func (ctx *Context) HandleNetworkInterfaces(w http.ResponseWriter, r *http.Reque
 		result = append(result, ifaceInfo)
 	}
 
-	JSONResponse(w, map[string]any{
+	httputil.JSON(w, http.StatusOK, map[string]any{
 		"interfaces": result,
 	})
 }
@@ -118,6 +119,7 @@ func (ctx *Context) HandleDNSLookup(w http.ResponseWriter, r *http.Request) {
 		Hostname string `json:"hostname"`
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 16*1024)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
@@ -139,7 +141,7 @@ func (ctx *Context) HandleDNSLookup(w http.ResponseWriter, r *http.Request) {
 	ips, err := ctx.SSRFValidator.ValidateHostname(req.Hostname, clientIP)
 	if err != nil {
 		log.Printf("[SSRF] DNS lookup blocked for %s from %s: %v", req.Hostname, clientIP, err)
-		JSONResponse(w, map[string]any{
+		httputil.JSON(w, http.StatusOK, map[string]any{
 			"error": fmt.Sprintf("Request blocked: %v", err),
 		})
 		return
@@ -164,7 +166,7 @@ func (ctx *Context) HandleDNSLookup(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[SSRF] DNS lookup allowed for %s from %s, resolved %d addresses", req.Hostname, clientIP, len(addresses))
 
-	JSONResponse(w, map[string]any{
+	httputil.JSON(w, http.StatusOK, map[string]any{
 		"addresses":  addresses,
 		"raw_output": rawOutput.String(),
 	})
@@ -182,6 +184,7 @@ func (ctx *Context) HandlePing(w http.ResponseWriter, r *http.Request) {
 		Count    int    `json:"count"`
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 16*1024)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
@@ -210,14 +213,14 @@ func (ctx *Context) HandlePing(w http.ResponseWriter, r *http.Request) {
 	ips, err := ctx.SSRFValidator.ValidateHostname(req.Hostname, clientIP)
 	if err != nil {
 		log.Printf("[SSRF] Ping blocked for %s from %s: %v", req.Hostname, clientIP, err)
-		JSONResponse(w, map[string]any{
+		httputil.JSON(w, http.StatusOK, map[string]any{
 			"error": fmt.Sprintf("Request blocked: %v", err),
 		})
 		return
 	}
 
 	if len(ips) == 0 {
-		JSONResponse(w, map[string]any{
+		httputil.JSON(w, http.StatusOK, map[string]any{
 			"error": "No IP addresses found for hostname",
 		})
 		return
@@ -239,7 +242,7 @@ func (ctx *Context) HandlePing(w http.ResponseWriter, r *http.Request) {
 
 	// Perform ping
 	result := performICMPPing(req.Hostname, targetIP.String(), req.Count)
-	JSONResponse(w, result)
+	httputil.JSON(w, http.StatusOK, result)
 }
 
 // performICMPPing executes ICMP ping using pro-bing
@@ -360,7 +363,7 @@ func (ctx *Context) HandleNetworkDiagnostics(w http.ResponseWriter, r *http.Requ
 	routes := readRoutingTable()
 	result["routes"] = routes
 
-	JSONResponse(w, result)
+	httputil.JSON(w, http.StatusOK, result)
 }
 
 // Helper functions for network debugging

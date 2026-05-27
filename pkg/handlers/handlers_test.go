@@ -14,6 +14,7 @@ import (
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/captiveportal"
 	"github.com/denysvitali/pictures-sync-s3/pkg/daemoncontrol"
+	"github.com/denysvitali/pictures-sync-s3/pkg/httputil"
 	"github.com/denysvitali/pictures-sync-s3/pkg/sdcardbrowser"
 	"github.com/denysvitali/pictures-sync-s3/pkg/sdmonitor"
 	"github.com/denysvitali/pictures-sync-s3/pkg/settings"
@@ -1045,12 +1046,12 @@ func TestHandleSDCardPreview_PathTraversal(t *testing.T) {
 	}
 }
 
-// TestJSONResponse tests JSON response helper
+// TestJSONResponse tests the httputil.JSON response helper
 func TestJSONResponse(t *testing.T) {
 	w := httptest.NewRecorder()
 	data := map[string]string{"key": "value"}
 
-	JSONResponse(w, data)
+	httputil.JSON(w, http.StatusOK, data)
 
 	if w.Header().Get("Content-Type") != "application/json" {
 		t.Error("Expected Content-Type to be application/json")

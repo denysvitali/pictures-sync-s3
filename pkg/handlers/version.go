@@ -1,6 +1,10 @@
 package handlers
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/denysvitali/pictures-sync-s3/pkg/httputil"
+)
 
 func (ctx *Context) HandleVersion(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -8,5 +12,5 @@ func (ctx *Context) HandleVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	JSONResponse(w, ctx.VersionInfo())
+	httputil.JSON(w, http.StatusOK, ctx.VersionInfo())
 }

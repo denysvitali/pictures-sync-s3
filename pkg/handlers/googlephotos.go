@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/googlephotos"
+	"github.com/denysvitali/pictures-sync-s3/pkg/httputil"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 	"github.com/denysvitali/pictures-sync-s3/pkg/syncmanager"
 	"github.com/denysvitali/pictures-sync-s3/pkg/utils"
@@ -107,7 +108,7 @@ func (ctx *Context) HandleGooglePhotosStatus(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	JSONResponse(w, map[string]any{
+	httputil.JSON(w, http.StatusOK, map[string]any{
 		"configured": configured && gpRemoteName != "",
 		"connected":  connected,
 	})
@@ -174,6 +175,7 @@ func (ctx *Context) HandleGooglePhotosAuthStart(w http.ResponseWriter, r *http.R
 	var reqBody struct {
 		RedirectURI string `json:"redirect_uri"`
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 16*1024)
 	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
 		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
 		return
@@ -186,7 +188,7 @@ func (ctx *Context) HandleGooglePhotosAuthStart(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	JSONResponse(w, map[string]any{
+	httputil.JSON(w, http.StatusOK, map[string]any{
 		"auth_url": authURL,
 		"state":    authState.State,
 	})
@@ -307,7 +309,7 @@ func (ctx *Context) HandleGooglePhotosAuthDisconnect(w http.ResponseWriter, r *h
 	}
 	ctx.SyncMgr.SetGooglePhotos(false, "")
 
-	JSONResponse(w, map[string]any{"disconnected": true})
+	httputil.JSON(w, http.StatusOK, map[string]any{"disconnected": true})
 }
 
 // updateRcloneConfigWithRemote adds or replaces a remote section in rclone.conf.
@@ -411,7 +413,7 @@ func (ctx *Context) HandleGooglePhotosSync(w http.ResponseWriter, r *http.Reques
 		}
 	}()
 
-	JSONResponse(w, map[string]any{
+	httputil.JSON(w, http.StatusOK, map[string]any{
 		"started": true,
 		"status":  "syncing",
 	})
@@ -428,14 +430,14 @@ func (ctx *Context) HandleGooglePhotosSyncCancel(w http.ResponseWriter, r *http.
 		return
 	}
 	if !ctx.SyncMgr.IsGooglePhotosRunning() {
-		JSONResponse(w, map[string]any{"cancelled": false, "status": "idle"})
+		httputil.JSON(w, http.StatusOK, map[string]any{"cancelled": false, "status": "idle"})
 		return
 	}
 	if err := ctx.SyncMgr.CancelGooglePhotos(); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	JSONResponse(w, map[string]any{"cancelled": true, "status": "cancelling"})
+	httputil.JSON(w, http.StatusOK, map[string]any{"cancelled": true, "status": "cancelling"})
 }
 
 // HandleGooglePhotosSyncProgress returns the current Google Photos sync progress.
@@ -446,7 +448,7 @@ func (ctx *Context) HandleGooglePhotosSyncProgress(w http.ResponseWriter, r *htt
 	}
 
 	if ctx.SyncMgr == nil {
-		JSONResponse(w, map[string]any{
+		httputil.JSON(w, http.StatusOK, map[string]any{
 			"status": "not_initialized",
 		})
 		return
@@ -457,7 +459,7 @@ func (ctx *Context) HandleGooglePhotosSyncProgress(w http.ResponseWriter, r *htt
 	if status == "" && ctx.SyncMgr.IsGooglePhotosRunning() {
 		status = "syncing"
 	}
-	JSONResponse(w, map[string]any{
+	httputil.JSON(w, http.StatusOK, map[string]any{
 		"status":            status,
 		"current_file":      progress.CurrentFile,
 		"current_file_size": progress.CurrentFileSize,
@@ -518,7 +520,7 @@ func (ctx *Context) handleGooglePhotosAlbumList(w http.ResponseWriter, r *http.R
 	tokenStore := googlephotos.NewTokenStore("")
 	client := googlephotos.NewClient(clientID, clientSecret, tokenStore)
 	if !client.IsAuthenticated() {
-		JSONResponse(w, map[string]any{"albums": []any{}})
+		httputil.JSON(w, http.StatusOK, map[string]any{"albums": []any{}})
 		return
 	}
 
@@ -536,7 +538,7 @@ func (ctx *Context) handleGooglePhotosAlbumList(w http.ResponseWriter, r *http.R
 			managed = append(managed, a)
 		}
 	}
-	JSONResponse(w, map[string]any{"albums": managed})
+	httputil.JSON(w, http.StatusOK, map[string]any{"albums": managed})
 }
 
 func (ctx *Context) handleGooglePhotosAlbumClear(w http.ResponseWriter, r *http.Request) {
@@ -584,7 +586,7 @@ func (ctx *Context) handleGooglePhotosAlbumClear(w http.ResponseWriter, r *http.
 	// returns immediately and the UI can poll for progress.
 	go ctx.runAlbumClear(client, albumID)
 
-	JSONResponse(w, map[string]any{"started": true, "album_id": albumID})
+	httputil.JSON(w, http.StatusOK, map[string]any{"started": true, "album_id": albumID})
 }
 
 func (ctx *Context) runAlbumClear(client *googlephotos.Client, albumID string) {
@@ -704,14 +706,14 @@ func (ctx *Context) handleGooglePhotosAlbumClearProgress(w http.ResponseWriter, 
 	albumClearOpsMu.RUnlock()
 
 	if !ok {
-		JSONResponse(w, map[string]any{
+		httputil.JSON(w, http.StatusOK, map[string]any{
 			"album_id": albumID,
 			"status":   "idle",
 		})
 		return
 	}
 
-	JSONResponse(w, map[string]any{
+	httputil.JSON(w, http.StatusOK, map[string]any{
 		"album_id":      progress.AlbumID,
 		"status":        progress.Status,
 		"total_items":   progress.TotalItems,
