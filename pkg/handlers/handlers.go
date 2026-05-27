@@ -2,10 +2,7 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"io"
-	"log"
-	"net/http"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/auth"
 	"github.com/denysvitali/pictures-sync-s3/pkg/captiveportal"
@@ -173,10 +170,3 @@ func (ctx *Context) manualSyncClient() ManualSyncRequester {
 	return ctx.daemonClient()
 }
 
-// JSONResponse writes a JSON response
-func JSONResponse(w http.ResponseWriter, data any) {
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		log.Printf("Failed to encode JSON response: %v", err)
-	}
-}

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/denysvitali/pictures-sync-s3/pkg/handlers"
+	"github.com/denysvitali/pictures-sync-s3/pkg/httputil"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 	"github.com/denysvitali/pictures-sync-s3/pkg/wifimanager"
 	"github.com/denysvitali/pictures-sync-s3/pkg/websocket"
@@ -341,7 +341,7 @@ func (m *MockBackend) HandleStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	handlers.JSONResponse(w, m.currentState)
+	httputil.JSON(w, http.StatusOK,m.currentState)
 }
 
 func (m *MockBackend) HandleHistory(w http.ResponseWriter, r *http.Request) {
@@ -349,7 +349,7 @@ func (m *MockBackend) HandleHistory(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	handlers.JSONResponse(w, m.syncHistory)
+	httputil.JSON(w, http.StatusOK,m.syncHistory)
 }
 
 func (m *MockBackend) HandleWSToken(w http.ResponseWriter, r *http.Request) {
@@ -359,7 +359,7 @@ func (m *MockBackend) HandleWSToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	token := websocket.CreateWSToken()
-	handlers.JSONResponse(w, map[string]string{
+	httputil.JSON(w, http.StatusOK,map[string]string{
 		"ws_token": token,
 	})
 }
@@ -384,7 +384,7 @@ func (m *MockBackend) HandleWiFiScan(w http.ResponseWriter, r *http.Request) {
 		networks[i].Signal += variation
 	}
 
-	handlers.JSONResponse(w, map[string]interface{}{
+	httputil.JSON(w, http.StatusOK,map[string]interface{}{
 		"networks": networks,
 	})
 }
@@ -395,7 +395,7 @@ func (m *MockBackend) HandleWiFiNetworks(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	handlers.JSONResponse(w, map[string]interface{}{
+	httputil.JSON(w, http.StatusOK,map[string]interface{}{
 		"networks": m.wifiNetworks,
 	})
 }
@@ -430,7 +430,7 @@ func (m *MockBackend) HandleWiFiConnect(w http.ResponseWriter, r *http.Request) 
 
 	// Simulate authentication failure
 	if requiresPassword && req.Password == "" {
-		handlers.JSONResponse(w, map[string]interface{}{
+		httputil.JSON(w, http.StatusOK,map[string]interface{}{
 			"success": false,
 			"error":   "Password required for encrypted network",
 		})
@@ -438,7 +438,7 @@ func (m *MockBackend) HandleWiFiConnect(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if requiresPassword && req.Password == "wrongpassword" {
-		handlers.JSONResponse(w, map[string]interface{}{
+		httputil.JSON(w, http.StatusOK,map[string]interface{}{
 			"success": false,
 			"error":   "Authentication failed: incorrect password",
 		})
@@ -460,7 +460,7 @@ func (m *MockBackend) HandleWiFiConnect(w http.ResponseWriter, r *http.Request) 
 		})
 	}
 
-	handlers.JSONResponse(w, map[string]interface{}{
+	httputil.JSON(w, http.StatusOK,map[string]interface{}{
 		"success": true,
 	})
 }
@@ -488,7 +488,7 @@ func (m *MockBackend) HandleWiFiDisconnect(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	handlers.JSONResponse(w, map[string]interface{}{
+	httputil.JSON(w, http.StatusOK,map[string]interface{}{
 		"success": true,
 	})
 }
@@ -510,13 +510,13 @@ func (m *MockBackend) HandleWiFiStatus(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		handlers.JSONResponse(w, map[string]interface{}{
+		httputil.JSON(w, http.StatusOK,map[string]interface{}{
 			"connected": true,
 			"ssid":      m.wifiNetworks[0].SSID,
 			"signal":    signal,
 		})
 	} else {
-		handlers.JSONResponse(w, map[string]interface{}{
+		httputil.JSON(w, http.StatusOK,map[string]interface{}{
 			"connected": false,
 			"error":     "Not connected to any network",
 		})
@@ -550,7 +550,7 @@ func (m *MockBackend) HandleWiFiReorder(w http.ResponseWriter, r *http.Request) 
 	}
 	m.wifiNetworks = reordered
 
-	handlers.JSONResponse(w, map[string]interface{}{
+	httputil.JSON(w, http.StatusOK,map[string]interface{}{
 		"success": true,
 	})
 }
@@ -558,7 +558,7 @@ func (m *MockBackend) HandleWiFiReorder(w http.ResponseWriter, r *http.Request) 
 func (m *MockBackend) HandleConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		handlers.JSONResponse(w, map[string]interface{}{
+		httputil.JSON(w, http.StatusOK,map[string]interface{}{
 			"config": m.rcloneConfig,
 		})
 	case http.MethodPost:
@@ -575,7 +575,7 @@ func (m *MockBackend) HandleConfig(w http.ResponseWriter, r *http.Request) {
 
 		// Simple validation - check for required sections
 		if !strings.Contains(req.Config, "[") || !strings.Contains(req.Config, "]") {
-			handlers.JSONResponse(w, map[string]interface{}{
+			httputil.JSON(w, http.StatusOK,map[string]interface{}{
 				"success": false,
 				"error":   "Invalid rclone config format: no sections found",
 			})
@@ -583,7 +583,7 @@ func (m *MockBackend) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 
 		m.rcloneConfig = req.Config
-		handlers.JSONResponse(w, map[string]interface{}{
+		httputil.JSON(w, http.StatusOK,map[string]interface{}{
 			"success": true,
 		})
 	default:
@@ -603,12 +603,12 @@ func (m *MockBackend) HandleConfigTest(w http.ResponseWriter, r *http.Request) {
 	// Simulate random test results
 	// #nosec G404 -- weak random is acceptable for mock test simulation
 	if rand.Float32() < 0.8 { // 80% success rate
-		handlers.JSONResponse(w, map[string]interface{}{
+		httputil.JSON(w, http.StatusOK,map[string]interface{}{
 			"success": true,
 			"message": "Configuration test successful! All remotes are accessible.",
 		})
 	} else {
-		handlers.JSONResponse(w, map[string]interface{}{
+		httputil.JSON(w, http.StatusOK,map[string]interface{}{
 			"success": false,
 			"error":   "Test failed: Unable to connect to backblaze remote. Please check your credentials.",
 		})
@@ -620,7 +620,7 @@ func (m *MockBackend) HandleDevices(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	handlers.JSONResponse(w, m.devicesList)
+	httputil.JSON(w, http.StatusOK,m.devicesList)
 }
 
 func (m *MockBackend) HandleSyncStart(w http.ResponseWriter, r *http.Request) {
@@ -641,7 +641,7 @@ func (m *MockBackend) HandleSyncStart(w http.ResponseWriter, r *http.Request) {
 
 	m.StartSyncSimulation()
 
-	handlers.JSONResponse(w, map[string]string{
+	httputil.JSON(w, http.StatusOK,map[string]string{
 		"status":  "ok",
 		"message": "Sync started",
 	})
@@ -660,7 +660,7 @@ func (m *MockBackend) HandleSyncCancel(w http.ResponseWriter, r *http.Request) {
 
 	m.CancelSync()
 
-	handlers.JSONResponse(w, map[string]string{
+	httputil.JSON(w, http.StatusOK,map[string]string{
 		"status":  "ok",
 		"message": "Sync cancelled",
 	})
@@ -690,7 +690,7 @@ func (m *MockBackend) HandleFiles(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	handlers.JSONResponse(w, map[string]interface{}{
+	httputil.JSON(w, http.StatusOK,map[string]interface{}{
 		"files": files,
 		"path":  path,
 	})
