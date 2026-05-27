@@ -105,11 +105,18 @@ func Recovery(next HandlerFunc) HandlerFunc {
 	}
 }
 
-// RequestLogger logs HTTP requests with method, path, and client IP
+// RequestLogger logs HTTP requests with method, path, client IP, and request ID.
+// It reads the request ID set by the RequestID middleware (if wired) so that
+// log lines can be correlated with the X-Request-ID response header.
 func RequestLogger(next HandlerFunc) HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) error {
 		clientIP := GetClientIP(r)
-		log.Printf("[HTTP] %s %s from %s", r.Method, r.URL.Path, clientIP)
+		reqID := RequestIDFromContext(r.Context())
+		if reqID != "" {
+			log.Printf("[HTTP] %s %s from %s req_id=%s", r.Method, r.URL.Path, clientIP, reqID)
+		} else {
+			log.Printf("[HTTP] %s %s from %s", r.Method, r.URL.Path, clientIP)
+		}
 		return next(w, r)
 	}
 }

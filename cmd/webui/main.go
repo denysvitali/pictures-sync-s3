@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"syscall"
@@ -20,6 +23,8 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/events"
 	"github.com/denysvitali/pictures-sync-s3/pkg/googlephotos"
 	"github.com/denysvitali/pictures-sync-s3/pkg/handlers"
+	"github.com/denysvitali/pictures-sync-s3/pkg/metrics"
+	"github.com/denysvitali/pictures-sync-s3/pkg/middleware"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ntpsync"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ota"
 	"github.com/denysvitali/pictures-sync-s3/pkg/paniclog"
@@ -39,6 +44,97 @@ import (
 // need CORS at all, and a wildcard is incompatible with allowCredentials=true.
 // Operators can opt in to additional origins via WEBUI_ALLOWED_ORIGINS.
 const defaultAllowedOrigins = ""
+
+// processStartTime is recorded once at init time so health endpoints can
+// compute uptime without depending on any external state.
+var processStartTime = time.Now()
+
+// buildVersion returns the VCS revision embedded by the Go toolchain, or
+// "unknown" when the binary was not built from a VCS checkout.
+func buildVersion() string {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, s := range info.Settings {
+			if s.Key == "vcs.revision" && s.Value != "" {
+				if len(s.Value) > 12 {
+					return s.Value[:12]
+				}
+				return s.Value
+			}
+		}
+	}
+	return "unknown"
+}
+
+// handleHealthz is a minimal liveness probe. It never touches disk, network,
+// or settings — it only confirms the process is alive and reports uptime.
+// No authentication required.
+func handleHealthz(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	uptime := time.Since(processStartTime).Seconds()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, `{"alive":true,"uptime_seconds":%s,"version":%q}`,
+		formatSeconds(uptime), buildVersion())
+}
+
+// formatSeconds formats a float64 second value with at most 3 decimal places
+// and no trailing zeros, suitable for JSON embedding without quotes.
+func formatSeconds(s float64) string {
+	if s == math.Trunc(s) {
+		return fmt.Sprintf("%.0f", s)
+	}
+	return fmt.Sprintf("%.3f", s)
+}
+
+// permPath is the persistent storage directory used by the appliance.
+const permPath = "/perm"
+
+// handleReadyz is a readiness probe that checks real infrastructure state.
+// Returns 200 when all subsystems are ready, 503 otherwise.
+// No authentication required.
+//
+// The stateMgr parameter is optional (may be nil during tests); when nil,
+// sd_card_detected is always reported as false.
+func makeReadyzHandler(stateMgr *state.Manager, appSettings *settings.Settings) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// 1. Check whether /perm is writable by creating a temp file.
+		permWritable := false
+		if f, err := os.CreateTemp(permPath, ".readyz-probe-*"); err == nil {
+			_ = f.Close()
+			_ = os.Remove(f.Name())
+			permWritable = true
+		}
+
+		// 2. Check whether an SD card is currently detected via the state manager.
+		sdCardDetected := false
+		if stateMgr != nil {
+			s := stateMgr.GetState()
+			sdCardDetected = s.SDCardMounted
+		}
+
+		// 3. Settings loaded — we already hold the pointer if Load() succeeded.
+		settingsLoaded := appSettings != nil
+
+		ready := permWritable && settingsLoaded
+
+		w.Header().Set("Content-Type", "application/json")
+		if ready {
+			w.WriteHeader(http.StatusOK)
+		} else {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+		fmt.Fprintf(w, `{"ready":%t,"perm_writable":%t,"sd_card_detected":%t,"settings_loaded":%t}`,
+			ready, permWritable, sdCardDetected, settingsLoaded)
+	}
+}
 
 const apiRequestTimeout = 30 * time.Second
 
@@ -368,12 +464,33 @@ func main() {
 	// against Basic Auth get throttled and locked out (50 attempts / 15 min).
 	authLimiter := ratelimit.NewLimiter(ratelimit.AuthConfig())
 
+	// Register unauthenticated infrastructure endpoints on a separate mux so
+	// they bypass Basic Auth. These are deliberately minimal and do not expose
+	// any sensitive data or functionality.
+	infraMux := http.NewServeMux()
+	infraMux.HandleFunc("/healthz", handleHealthz)
+	infraMux.Handle("/readyz", makeReadyzHandler(stateMgr, appSettings))
+	infraMux.Handle("/metrics", metrics.Handler())
+
+	// top-level router: infrastructure paths are served directly; everything
+	// else goes through the auth-protected DefaultServeMux.
+	authProtected := auth.BasicAuthMiddlewareWithProvider(passwordMgr, authLimiter)(http.DefaultServeMux)
+	router := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/healthz", "/readyz", "/metrics":
+			infraMux.ServeHTTP(w, r)
+		default:
+			authProtected.ServeHTTP(w, r)
+		}
+	})
+
 	// Wrap default mux with middleware chain: security headers -> CORS -> basic auth.
 	// Security headers are applied first so they're present on all responses (including auth failures).
-	authProtected := auth.BasicAuthMiddlewareWithProvider(passwordMgr, authLimiter)(http.DefaultServeMux)
 	handler := auth.SecurityHeadersMiddleware(
-		auth.CORSMiddleware(allowedOrigins, true)(authProtected),
+		auth.CORSMiddleware(allowedOrigins, true)(router),
 	)
+	handler = metrics.HTTPMiddleware(processStartTime, handler)
+	handler = middleware.RequestID(handler) // must be outermost for full request-ID coverage
 	handler = requestTimeoutMiddleware(apiRequestTimeout)(handler)
 	handler = panicPersistenceMiddleware(paniclog.DefaultPath)(handler)
 
