@@ -155,7 +155,8 @@ func main() {
 			if err := paniclog.Capture(paniclog.DefaultPath, "webui-main", recovered); err != nil {
 				log.Printf("Failed to persist panic information: %v", err)
 			}
-			panic(recovered)
+			log.Printf("Recovered from panic: %v (exiting for clean restart)", recovered)
+			os.Exit(1)
 		}
 	}()
 
