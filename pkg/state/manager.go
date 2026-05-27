@@ -170,6 +170,10 @@ func cloneState(s CurrentState) CurrentState {
 		}
 		out.AvailableDevices = devs
 	}
+	if s.Runtime != nil {
+		runtimeInfo := *s.Runtime
+		out.Runtime = &runtimeInfo
+	}
 	return out
 }
 

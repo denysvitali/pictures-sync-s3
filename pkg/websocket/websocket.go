@@ -15,6 +15,7 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/events"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ota"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
+	"github.com/denysvitali/pictures-sync-s3/pkg/systeminfo"
 	"github.com/gorilla/websocket"
 	"golang.org/x/time/rate"
 )
@@ -111,7 +112,7 @@ var (
 	// wsConfigMutex guards the mutable package-level config knobs above
 	// (connRateLimiter pointer, rate/burst, and authReadTimeout) which can be
 	// re-set in tests while connection handlers concurrently read them.
-	wsConfigMutex sync.RWMutex
+	wsConfigMutex       sync.RWMutex
 	allowedOrigins      = []string{} // Configurable whitelist (empty = same-host only by default)
 	allowedOriginsMutex sync.RWMutex
 	// trustLANOrigins controls whether origins on private/RFC1918 networks (and
@@ -598,6 +599,8 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager, otaManag
 		// daemon subscribe stream (see cmd/webui/main.go), so we no longer
 		// need to reload from disk here.
 		status := stateMgr.GetState()
+		runtimeInfo := systeminfo.Snapshot()
+		status.Runtime = &runtimeInfo
 		initialMessage := map[string]any{
 			"type": "state",
 			"data": status,
@@ -675,6 +678,8 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager, otaManag
 					// Channel was closed by Unsubscribe
 					return
 				}
+				runtimeInfo := systeminfo.Snapshot()
+				state.Runtime = &runtimeInfo
 				// Send state update
 				message := map[string]any{
 					"type": "state",

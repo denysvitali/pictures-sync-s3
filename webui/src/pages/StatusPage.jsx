@@ -187,6 +187,9 @@ function getOverviewCardID(status) {
 function SystemStatusCard({ status }) {
   const statusConf = SYNC_STATUS_CONFIG[status.status] || SYNC_STATUS_CONFIG.idle
   const cardInfo = getOverviewCardID(status)
+  const runtime = status.runtime || null
+  const memory = runtime?.memory || {}
+  const cgroup = runtime?.cgroup || {}
 
   return (
     <Card>
@@ -277,6 +280,44 @@ function SystemStatusCard({ status }) {
               value={cardInfo.value}
               ok
             />
+          </div>
+        )}
+
+        {runtime && (
+          <div className="pt-2 border-t border-surface-700/50 mt-2 space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <StatusRow
+                icon="clock"
+                label="System uptime"
+                value={formatDuration(runtime.system_uptime_seconds)}
+                ok
+              />
+              <StatusRow
+                icon="clock"
+                label="Web UI uptime"
+                value={formatDuration(runtime.process_uptime_seconds)}
+                ok
+              />
+              <StatusRow
+                icon="activity"
+                label="Web UI RSS"
+                value={formatBytes(memory.process_rss_bytes || memory.heap_alloc_bytes || 0)}
+                ok
+              />
+              <StatusRow
+                icon="activity"
+                label="Goroutines"
+                value={String(runtime.go?.goroutines ?? '--')}
+                ok
+              />
+            </div>
+            {cgroup.memory_current_bytes > 0 && (
+              <p className="text-xs text-surface-500">
+                Cgroup memory {formatBytes(cgroup.memory_current_bytes)}
+                {cgroup.memory_max_bytes > 0 ? ` / ${formatBytes(cgroup.memory_max_bytes)}` : ''}
+                {cgroup.oom_kill_count > 0 ? ` · OOM kills: ${cgroup.oom_kill_count}` : ''}
+              </p>
+            )}
           </div>
         )}
 

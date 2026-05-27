@@ -5,6 +5,8 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/denysvitali/pictures-sync-s3/pkg/systeminfo"
 )
 
 // HandleStatus returns current system status
@@ -24,6 +26,8 @@ func (ctx *Context) HandleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	runtimeInfo := systeminfo.Snapshot()
+	status.Runtime = &runtimeInfo
 	JSONResponse(w, status)
 }
 

@@ -1,6 +1,10 @@
 package state
 
-import "time"
+import (
+	"time"
+
+	"github.com/denysvitali/pictures-sync-s3/pkg/systeminfo"
+)
 
 const CurrentStateSchemaVersion = 1
 
@@ -65,16 +69,17 @@ type PartitionInfo struct {
 
 // CurrentState represents the current system state
 type CurrentState struct {
-	SchemaVersion     int          `json:"schema_version"`
-	Status            SyncStatus   `json:"status"`
-	Error             string       `json:"error,omitempty"`
-	CurrentSync       *SyncRecord  `json:"current_sync,omitempty"`
-	LastSync          *SyncRecord  `json:"last_sync,omitempty"`
-	SDCardMounted     bool         `json:"sdcard_mounted"`
-	SDCardPath        string       `json:"sdcard_path,omitempty"`
-	SDCardDevicePath  string       `json:"sdcard_device_path,omitempty"`
-	SDCardPhotoCount  int64        `json:"sdcard_photo_count"`
-	SDCardPhotoBytes  int64        `json:"sdcard_photo_bytes"`
-	AvailableDevices  []DeviceInfo `json:"available_devices,omitempty"`
-	NeedsDeviceSelect bool         `json:"needs_device_select"`
+	SchemaVersion     int                     `json:"schema_version"`
+	Status            SyncStatus              `json:"status"`
+	Error             string                  `json:"error,omitempty"`
+	CurrentSync       *SyncRecord             `json:"current_sync,omitempty"`
+	LastSync          *SyncRecord             `json:"last_sync,omitempty"`
+	SDCardMounted     bool                    `json:"sdcard_mounted"`
+	SDCardPath        string                  `json:"sdcard_path,omitempty"`
+	SDCardDevicePath  string                  `json:"sdcard_device_path,omitempty"`
+	SDCardPhotoCount  int64                   `json:"sdcard_photo_count"`
+	SDCardPhotoBytes  int64                   `json:"sdcard_photo_bytes"`
+	AvailableDevices  []DeviceInfo            `json:"available_devices,omitempty"`
+	NeedsDeviceSelect bool                    `json:"needs_device_select"`
+	Runtime           *systeminfo.RuntimeInfo `json:"runtime,omitempty"`
 }
