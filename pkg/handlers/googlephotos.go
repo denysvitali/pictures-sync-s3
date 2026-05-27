@@ -606,12 +606,12 @@ func (ctx *Context) runAlbumClear(client *googlephotos.Client, albumID string) {
 	// List all media items in the album.
 	items, err := client.ListAlbumMediaItems(apiCtx, albumID)
 	if err != nil {
-		log.Printf("[GooglePhotos] Failed to list album items: error_type=%T", err)
+		log.Printf("[GooglePhotos] Failed to list album items in %s: %v", albumID, err)
 		albumClearOpsMu.Lock()
 		albumClearOps[albumID] = &googlephotos.AlbumClearProgress{
 			AlbumID: albumID,
 			Status:  "error",
-			Error:   "Failed to list album items",
+			Error:   truncateErr(err.Error(), 500),
 		}
 		albumClearOpsMu.Unlock()
 		return
@@ -648,14 +648,18 @@ func (ctx *Context) runAlbumClear(client *googlephotos.Client, albumID string) {
 	}
 
 	if err := client.BatchRemoveMediaItemsWithProgress(apiCtx, albumID, ids, onProgress); err != nil {
-		log.Printf("[GooglePhotos] Failed to remove items from album: error_type=%T", err)
+		log.Printf("[GooglePhotos] Failed to remove items from album %s: %v", albumID, err)
+		surfaced := err.Error()
+		if googlephotos.IsPermissionDenied(err) {
+			surfaced = "Google Photos API refused to remove these items. The v1 API can only remove media items the app uploaded, and only from albums the app created. Items added via the Google Photos app/website cannot be removed by this app. Underlying error: " + surfaced
+		}
 		albumClearOpsMu.Lock()
 		albumClearOps[albumID] = &googlephotos.AlbumClearProgress{
 			AlbumID:      albumID,
 			Status:       "error",
 			TotalItems:   len(ids),
 			RemovedItems: albumClearOps[albumID].RemovedItems,
-			Error:        "Failed to remove items from album",
+			Error:        truncateErr(surfaced, 500),
 		}
 		albumClearOpsMu.Unlock()
 		return
@@ -720,4 +724,11 @@ func (ctx *Context) handleGooglePhotosAlbumClearProgress(w http.ResponseWriter, 
 		"removed_items": progress.RemovedItems,
 		"error":         progress.Error,
 	})
+}
+
+func truncateErr(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "…(truncated)"
 }

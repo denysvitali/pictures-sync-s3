@@ -13,9 +13,16 @@ import (
 
 const (
 	oauthAuthURL  = "https://accounts.google.com/o/oauth2/v2/auth"
-	oauthTokenURL = "https://oauth2.googleapis.com/token"
 	oauthScope    = "https://www.googleapis.com/auth/photoslibrary.readonly.appcreateddata https://www.googleapis.com/auth/photoslibrary.appendonly https://www.googleapis.com/auth/photoslibrary"
 )
+
+var oauthTokenURL = "https://oauth2.googleapis.com/token"
+
+// OAuthTokenURL returns the current OAuth token endpoint (exported for testing).
+func OAuthTokenURL() string { return oauthTokenURL }
+
+// SetOAuthTokenURL overrides the OAuth token endpoint (exported for testing).
+func SetOAuthTokenURL(u string) { oauthTokenURL = u }
 
 // StateStore manages PKCE state tokens for the OAuth flow
 type StateStore struct {

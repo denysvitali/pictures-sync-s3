@@ -10,7 +10,14 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/utils"
 )
 
-const defaultTokenFile = "/perm/pictures-sync/google-photos-token.json"
+// defaultTokenPath resolves the token file path at call time so that PERM_DIR
+// overrides set by tests (after package init) are respected.
+func defaultTokenPath() string {
+	if base := os.Getenv("PERM_DIR"); base != "" {
+		return filepath.Join(base, "pictures-sync", "google-photos-token.json")
+	}
+	return "/perm/pictures-sync/google-photos-token.json"
+}
 
 // TokenStore manages OAuth token persistence
 type TokenStore struct {
@@ -22,7 +29,7 @@ type TokenStore struct {
 // NewTokenStore creates a new token store
 func NewTokenStore(filePath string) *TokenStore {
 	if filePath == "" {
-		filePath = defaultTokenFile
+		filePath = defaultTokenPath()
 	}
 	return &TokenStore{
 		filePath: filePath,

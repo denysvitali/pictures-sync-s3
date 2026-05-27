@@ -455,27 +455,55 @@ function AlbumsPanel({ albums, loading, onClear, clearingId, clearProgress }) {
             const label = isClearing && progress?.status === 'clearing' && progress?.total_items > 0
               ? `Removing ${progress.removed_items}/${progress.total_items}...`
               : 'Clear'
+            const hasProgressCounts = Number(progress?.total_items) > 0 || Number(progress?.removed_items) > 0
+            const isError = progress?.status === 'error'
+            const errorMessage = isError ? (progress?.error || 'Failed to clear album') : ''
+            const errorLower = errorMessage.toLowerCase()
+            const showPermissionHint =
+              isError &&
+              (errorLower.includes('permission_denied') ||
+                errorLower.includes('no permission') ||
+                errorLower.includes('permission'))
             return (
               <li
                 key={album.id}
-                className="flex items-center justify-between gap-3 rounded-lg border border-surface-700/60 p-3"
+                className="rounded-lg border border-surface-700/60 p-3"
               >
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-surface-100 truncate">{album.title}</p>
-                  <p className="text-xs text-surface-500">
-                    {album.mediaItemsCount ? `${album.mediaItemsCount} items` : 'Empty'}
-                  </p>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-surface-100 truncate">{album.title}</p>
+                    <p className="text-xs text-surface-500">
+                      {album.mediaItemsCount ? `${album.mediaItemsCount} items` : 'Empty'}
+                    </p>
+                  </div>
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    loading={isClearing}
+                    disabled={isClearing}
+                    onClick={() => onClear(album.id, album.title)}
+                  >
+                    <Icon name="trash" className="w-4 h-4" />
+                    {label}
+                  </Button>
                 </div>
-                <Button
-                  variant="danger"
-                  size="sm"
-                  loading={isClearing}
-                  disabled={isClearing}
-                  onClick={() => onClear(album.id, album.title)}
-                >
-                  <Icon name="trash" className="w-4 h-4" />
-                  {label}
-                </Button>
+                {hasProgressCounts && (
+                  <p className="mt-2 text-xs text-surface-400">
+                    Removed {progress?.removed_items || 0}
+                    {Number(progress?.total_items) > 0 ? `/${progress.total_items}` : ''}
+                  </p>
+                )}
+                {isError && (
+                  <div className="mt-2 rounded-lg border border-rose-500/20 bg-rose-500/10 p-3">
+                    <p className="text-xs font-medium text-rose-400">Failed to clear album</p>
+                    <p className="mt-1 text-xs text-rose-300 break-words whitespace-pre-wrap">{errorMessage}</p>
+                    {showPermissionHint && (
+                      <p className="mt-2 text-xs text-rose-200/80 break-words">
+                        The Google Photos v1 API only allows removing items the app uploaded, from albums the app created. Items added through the Google Photos app or website cannot be cleared from here.
+                      </p>
+                    )}
+                  </div>
+                )}
               </li>
             )
           })}

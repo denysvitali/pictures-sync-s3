@@ -98,7 +98,7 @@ func (r *progressReader) Read(p []byte) (int, error) {
 // NewSyncManager creates a new sync manager for B2 to Google Photos
 func NewSyncManager(client *Client, syncMgr SyncManagerMinimal) *SyncManager {
 	store := newStateStore()
-	if client != nil && client.tokenStore != nil && client.tokenStore.filePath != defaultTokenFile {
+	if client != nil && client.tokenStore != nil && client.tokenStore.filePath != defaultTokenPath() {
 		store = newStateStoreAt(filepath.Join(filepath.Dir(client.tokenStore.filePath), googlePhotosStateFileName))
 	}
 	return &SyncManager{
@@ -200,10 +200,13 @@ func (sm *SyncManager) Sync(ctx context.Context) error {
 	// it upward across cards within this run.
 	sm.dynamicBatchSize.Store(int32(sm.options.batchSize))
 
-	// Bulk-preload albums: a single pagination through the user's albums fills
-	// the per-card cache so each syncCard skips a per-card ListAlbums round-trip
-	// chain. Best-effort — failures fall back to the per-card lookup.
-	sm.preloadAlbumCache(ctx, cards)
+	// Bulk-preload albums in the background: a single pagination fills the
+	// per-card cache so most syncCard calls skip the per-card lookup. Run
+	// asynchronously so a user with thousands of albums doesn't see the sync
+	// stalled on "Discovering cards" while pagination drains. Cards that race
+	// ahead of the preload fall back to the (now early-exiting) per-card
+	// FindAlbumByTitle.
+	go sm.preloadAlbumCache(ctx, cards)
 
 	sm.completeStage("discover")
 	sm.mu.Lock()

@@ -26,7 +26,7 @@ func (c *Client) UploadMediaReaderContext(ctx context.Context, r io.Reader, size
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("upload failed (%d): %s", resp.StatusCode, string(body))
+		return "", newAPIError("upload", resp.StatusCode, body)
 	}
 
 	return string(body), nil
@@ -58,7 +58,7 @@ func (c *Client) CreateAlbumContext(ctx context.Context, title string) (*Album, 
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("create album failed (%d): %s", resp.StatusCode, string(body))
+		return nil, newAPIError("createAlbum", resp.StatusCode, body)
 	}
 
 	var album Album
@@ -94,7 +94,7 @@ func (c *Client) ListAlbumsContext(ctx context.Context) ([]*Album, error) {
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("list albums failed (%d): %s", resp.StatusCode, string(body))
+			return nil, newAPIError("listAlbums", resp.StatusCode, body)
 		}
 
 		var result ListAlbumsResponse
@@ -117,20 +117,47 @@ func (c *Client) ListAlbumsContext(ctx context.Context) ([]*Album, error) {
 	return allAlbums, nil
 }
 
-// FindAlbumByTitleContext finds an album by its title.
+// FindAlbumByTitleContext finds an album by its title, stopping pagination as
+// soon as a match is found. For users with many albums this avoids paginating
+// the entire library when the target sits on an early page.
 func (c *Client) FindAlbumByTitleContext(ctx context.Context, title string) (*Album, error) {
-	albums, err := c.ListAlbumsContext(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, album := range albums {
-		if album.Title == title {
-			return album, nil
+	pageToken := ""
+	seenTokens := make(map[string]struct{})
+	for {
+		path := "/albums?pageSize=50"
+		if pageToken != "" {
+			path += "&pageToken=" + pageToken
 		}
+		resp, err := c.doRequestContext(ctx, "GET", path, nil)
+		if err != nil {
+			return nil, err
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("failed to read albums response: %w", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			return nil, newAPIError("listAlbums", resp.StatusCode, body)
+		}
+		var result ListAlbumsResponse
+		if err := json.Unmarshal(body, &result); err != nil {
+			return nil, fmt.Errorf("failed to parse albums response: %w", err)
+		}
+		for _, album := range result.Albums {
+			if album.Title == title {
+				return album, nil
+			}
+		}
+		if result.NextPageToken == "" {
+			return nil, nil
+		}
+		if _, dup := seenTokens[result.NextPageToken]; dup {
+			return nil, fmt.Errorf("find album by title: pagination loop detected at token %q", result.NextPageToken)
+		}
+		seenTokens[result.NextPageToken] = struct{}{}
+		pageToken = result.NextPageToken
 	}
-
-	return nil, nil
 }
 
 // chunkSlice invokes fn on consecutive slices of items of at most size elements.
@@ -177,7 +204,7 @@ func (c *Client) BatchCreateMediaItemsContext(ctx context.Context, albumID strin
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("batch create failed (%d): %s", resp.StatusCode, string(body))
+			return newAPIError("batchCreate", resp.StatusCode, body)
 		}
 
 		var result BatchCreateResponse
@@ -224,7 +251,7 @@ func (c *Client) ListAlbumMediaItems(ctx context.Context, albumID string) ([]*Me
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("list album media items failed (%d): %s", resp.StatusCode, string(body))
+			return nil, newAPIError("search", resp.StatusCode, body)
 		}
 
 		var result ListMediaItemsResponse
@@ -284,7 +311,7 @@ func (c *Client) BatchRemoveMediaItemsWithProgress(ctx context.Context, albumID 
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("batch remove failed (%d): %s", resp.StatusCode, string(body))
+			return newAPIError("batchRemoveMediaItems", resp.StatusCode, body)
 		}
 
 		removed += len(chunk)

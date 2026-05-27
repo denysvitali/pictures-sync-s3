@@ -13,7 +13,13 @@ import (
 	"time"
 )
 
-const apiBaseURL = "https://photoslibrary.googleapis.com/v1"
+var apiBaseURL = "https://photoslibrary.googleapis.com/v1"
+
+// GetAPIBaseURL returns the current API base URL (exported for testing).
+func GetAPIBaseURL() string { return apiBaseURL }
+
+// SetAPIBaseURL overrides the API base URL (exported for testing).
+func SetAPIBaseURL(u string) { apiBaseURL = u }
 
 // Client is an authenticated HTTP client for the Google Photos API
 type Client struct {
