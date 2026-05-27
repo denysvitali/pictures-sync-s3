@@ -250,7 +250,21 @@ func (c *Client) ListAlbumMediaItems(ctx context.Context, albumID string) ([]*Me
 // BatchRemoveMediaItems removes media items from an album.
 // Requests are automatically chunked to respect the 50-item API limit.
 func (c *Client) BatchRemoveMediaItems(ctx context.Context, albumID string, mediaItemIds []string) error {
+	return c.BatchRemoveMediaItemsWithProgress(ctx, albumID, mediaItemIds, nil)
+}
+
+// BatchRemoveMediaItemsWithProgress removes media items from an album with
+// per-chunk progress callbacks. onProgress is invoked after each 50-item
+// chunk completes with the cumulative removed count and total.
+func (c *Client) BatchRemoveMediaItemsWithProgress(ctx context.Context, albumID string, mediaItemIds []string, onProgress func(removed, total int)) error {
+	removed := 0
 	return chunkSlice(mediaItemIds, maxBatchSize, func(chunk []string) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		reqBody := BatchRemoveMediaItemsRequest{MediaItemIds: chunk}
 		jsonBody, err := json.Marshal(reqBody)
 		if err != nil {
@@ -271,6 +285,11 @@ func (c *Client) BatchRemoveMediaItems(ctx context.Context, albumID string, medi
 
 		if resp.StatusCode != http.StatusOK {
 			return fmt.Errorf("batch remove failed (%d): %s", resp.StatusCode, string(body))
+		}
+
+		removed += len(chunk)
+		if onProgress != nil {
+			onProgress(removed, len(mediaItemIds))
 		}
 		return nil
 	})

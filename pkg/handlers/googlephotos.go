@@ -558,8 +558,13 @@ func (ctx *Context) handleGooglePhotosAlbumClear(w http.ResponseWriter, r *http.
 		return
 	}
 
+	// Use a detached context with a generous timeout so album clearing
+	// survives the HTTP request timeout (30 s) for large albums.
+	apiCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
 	// List all media items in the album.
-	items, err := client.ListAlbumMediaItems(r.Context(), albumID)
+	items, err := client.ListAlbumMediaItems(apiCtx, albumID)
 	if err != nil {
 		log.Printf("[GooglePhotos] Failed to list album items: error_type=%T", err)
 		http.Error(w, "Failed to list album items", http.StatusInternalServerError)
@@ -579,7 +584,7 @@ func (ctx *Context) handleGooglePhotosAlbumClear(w http.ResponseWriter, r *http.
 		}
 	}
 
-	if err := client.BatchRemoveMediaItems(r.Context(), albumID, ids); err != nil {
+	if err := client.BatchRemoveMediaItems(apiCtx, albumID, ids); err != nil {
 		log.Printf("[GooglePhotos] Failed to remove items from album: error_type=%T", err)
 		http.Error(w, "Failed to remove items from album", http.StatusInternalServerError)
 		return

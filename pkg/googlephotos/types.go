@@ -232,6 +232,15 @@ type SyncProgress struct {
 	CardErrors               []CardError      `json:"card_errors,omitempty"`
 }
 
+// AlbumClearProgress tracks the progress of clearing a Google Photos album.
+type AlbumClearProgress struct {
+	AlbumID      string `json:"album_id"`
+	Status       string `json:"status"` // "clearing", "completed", "error"
+	TotalItems   int    `json:"total_items"`
+	RemovedItems int    `json:"removed_items"`
+	Error        string `json:"error,omitempty"`
+}
+
 // ConnectionStatus represents the Google Photos connection status
 type ConnectionStatus struct {
 	Connected   bool   `json:"connected"`
