@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/denysvitali/pictures-sync-s3/pkg/metrics"
 	"github.com/denysvitali/pictures-sync-s3/pkg/utils"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/accounting"
@@ -102,9 +103,11 @@ func (m *Manager) Sync(sourcePath, cardID string, totalFiles int, totalBytes int
 	<-monitorDone
 
 	if err != nil {
+		metrics.Inc("pictures_sync_error_total", map[string]string{"remote": m.remoteName, "reason": "unknown"})
 		return err
 	}
 
+	metrics.Inc("pictures_sync_success_total", map[string]string{"remote": m.remoteName})
 	log.Printf("Sync completed successfully")
 	return nil
 }

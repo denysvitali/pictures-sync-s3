@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/denysvitali/pictures-sync-s3/pkg/metrics"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 	"github.com/denysvitali/pictures-sync-s3/pkg/utils"
 	"github.com/rclone/rclone/fs"
@@ -235,6 +236,7 @@ func (m *Manager) SyncCardsToGooglePhotos(ctx context.Context) error {
 	<-monitorDone
 
 	if lastErr != nil {
+		metrics.Inc("pictures_sync_error_total", map[string]string{"remote": "googlephotos", "reason": "unknown"})
 		m.setGooglePhotosProgress(Progress{
 			Status:           "error",
 			TransferredFiles: processedFiles,
@@ -245,6 +247,7 @@ func (m *Manager) SyncCardsToGooglePhotos(ctx context.Context) error {
 		return lastErr
 	}
 
+	metrics.Inc("pictures_sync_success_total", map[string]string{"remote": "googlephotos"})
 	m.setGooglePhotosProgress(Progress{
 		Status:           "completed",
 		TransferredFiles: processedFiles,
