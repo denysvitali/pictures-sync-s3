@@ -875,14 +875,14 @@ func TestRemoteStatsParsingErrors(t *testing.T) {
 
 	testCases := []struct {
 		name        string
-		remoteStats map[string]interface{}
+		remoteStats map[string]any
 		expectPanic bool
 	}{
 		{
 			name: "Valid transferring array",
-			remoteStats: map[string]interface{}{
-				"transferring": []interface{}{
-					map[string]interface{}{
+			remoteStats: map[string]any{
+				"transferring": []any{
+					map[string]any{
 						"name": "file.jpg",
 						"size": int64(1024),
 					},
@@ -892,22 +892,22 @@ func TestRemoteStatsParsingErrors(t *testing.T) {
 		},
 		{
 			name: "Transferring not an array",
-			remoteStats: map[string]interface{}{
+			remoteStats: map[string]any{
 				"transferring": "not an array",
 			},
 			expectPanic: false, // Should handle gracefully
 		},
 		{
 			name: "Empty transferring array",
-			remoteStats: map[string]interface{}{
-				"transferring": []interface{}{},
+			remoteStats: map[string]any{
+				"transferring": []any{},
 			},
 			expectPanic: false,
 		},
 		{
 			name: "Transferring item wrong type",
-			remoteStats: map[string]interface{}{
-				"transferring": []interface{}{
+			remoteStats: map[string]any{
+				"transferring": []any{
 					"not a map",
 				},
 			},
@@ -915,9 +915,9 @@ func TestRemoteStatsParsingErrors(t *testing.T) {
 		},
 		{
 			name: "Name field wrong type",
-			remoteStats: map[string]interface{}{
-				"transferring": []interface{}{
-					map[string]interface{}{
+			remoteStats: map[string]any{
+				"transferring": []any{
+					map[string]any{
 						"name": 12345, // Should be string
 						"size": int64(1024),
 					},
@@ -941,8 +941,8 @@ func TestRemoteStatsParsingErrors(t *testing.T) {
 			var currentFile string
 			var currentFileSize int64
 
-			if transferring, ok := tc.remoteStats["transferring"].([]interface{}); ok && len(transferring) > 0 {
-				if transfer, ok := transferring[0].(map[string]interface{}); ok {
+			if transferring, ok := tc.remoteStats["transferring"].([]any); ok && len(transferring) > 0 {
+				if transfer, ok := transferring[0].(map[string]any); ok {
 					if name, ok := transfer["name"].(string); ok {
 						currentFile = name
 					}

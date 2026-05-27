@@ -423,7 +423,7 @@ func TestHandleGooglePhotosSyncProgressReportsRunningStatus(t *testing.T) {
 		t.Fatalf("Expected status 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var response map[string]interface{}
+	var response map[string]any
 	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
@@ -446,7 +446,7 @@ func TestHandleStatus_GET(t *testing.T) {
 		t.Errorf("Expected status 200, got %d", w.Code)
 	}
 
-	var response map[string]interface{}
+	var response map[string]any
 	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
@@ -534,7 +534,7 @@ func TestHandleHistory_GET(t *testing.T) {
 		t.Errorf("Expected status 200, got %d", w.Code)
 	}
 
-	var response []interface{}
+	var response []any
 	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
@@ -778,12 +778,12 @@ func TestHandleFileCards_GET(t *testing.T) {
 		t.Errorf("Expected status 200, got %d", w.Code)
 	}
 
-	var response map[string]interface{}
+	var response map[string]any
 	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
 
-	cards, ok := response["cards"].([]interface{})
+	cards, ok := response["cards"].([]any)
 	if !ok {
 		t.Error("Expected cards field in response")
 	}
@@ -806,7 +806,7 @@ func TestHandleFiles_GET(t *testing.T) {
 		t.Errorf("Expected status 200, got %d", w.Code)
 	}
 
-	var response map[string]interface{}
+	var response map[string]any
 	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
@@ -830,7 +830,7 @@ func TestHandleFilesPaginated_GET(t *testing.T) {
 		t.Errorf("Expected status 200, got %d", w.Code)
 	}
 
-	var response map[string]interface{}
+	var response map[string]any
 	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
@@ -983,7 +983,7 @@ func TestHandleSDCardFiles_NoCard(t *testing.T) {
 		t.Errorf("Expected status 400, got %d", w.Code)
 	}
 
-	var response map[string]interface{}
+	var response map[string]any
 	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
@@ -1013,7 +1013,7 @@ func TestHandleSDCardFiles_PathTraversal(t *testing.T) {
 
 		ctx.HandleSDCardFiles(w, req)
 
-		var response map[string]interface{}
+		var response map[string]any
 		json.NewDecoder(w.Body).Decode(&response)
 
 		if response["error"] == nil || response["error"] != "access denied" {

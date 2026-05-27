@@ -31,14 +31,14 @@ func TestSyncRecordJSONFields(t *testing.T) {
 	}
 
 	// Parse back as map to check field names
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	err = json.Unmarshal(jsonData, &parsed)
 	if err != nil {
 		t.Fatalf("Failed to unmarshal JSON: %v", err)
 	}
 
 	// Check that critical fields have correct JSON names
-	expectedFields := map[string]interface{}{
+	expectedFields := map[string]any{
 		"files_total":   float64(100),
 		"files_synced":  float64(25),
 		"bytes_total":   float64(1024 * 1024 * 50),
@@ -92,7 +92,7 @@ func TestCurrentStateJSONStructure(t *testing.T) {
 	}
 
 	// Parse as map
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	err = json.Unmarshal(jsonData, &parsed)
 	if err != nil {
 		t.Fatalf("Failed to unmarshal JSON: %v", err)
@@ -104,7 +104,7 @@ func TestCurrentStateJSONStructure(t *testing.T) {
 	}
 
 	// Check current_sync exists
-	currentSync, ok := parsed["current_sync"].(map[string]interface{})
+	currentSync, ok := parsed["current_sync"].(map[string]any)
 	if !ok {
 		t.Fatal("current_sync is not present or not an object in JSON")
 	}
@@ -149,7 +149,7 @@ func TestWebSocketDataFormat(t *testing.T) {
 	}
 
 	// This is what the JavaScript receives
-	var wsData map[string]interface{}
+	var wsData map[string]any
 	err = json.Unmarshal(jsonData, &wsData)
 	if err != nil {
 		t.Fatalf("Failed to unmarshal WebSocket data: %v", err)
@@ -157,7 +157,7 @@ func TestWebSocketDataFormat(t *testing.T) {
 
 	// Simulate JavaScript check: if (data.current_sync && data.status === 'syncing')
 	status, hasStatus := wsData["status"].(string)
-	currentSync, hasCurrentSync := wsData["current_sync"].(map[string]interface{})
+	currentSync, hasCurrentSync := wsData["current_sync"].(map[string]any)
 
 	if !hasStatus {
 		t.Error("WebSocket data missing 'status' field")

@@ -34,13 +34,13 @@ func (ctx *Context) HandleFileCards(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadGateway)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"error": fmt.Sprintf("Failed to list cards: %v", err),
 		})
 		return
 	}
 
-	JSONResponse(w, map[string]interface{}{
+	JSONResponse(w, map[string]any{
 		"cards": cards,
 	})
 }
@@ -77,7 +77,7 @@ func (ctx *Context) HandleFilesPaginated(w http.ResponseWriter, r *http.Request)
 		log.Printf("[Gallery] list cloud failed path=%q page=%d page_size=%d duration=%s error=%v", path, page, pageSize, time.Since(start), err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadGateway)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"error": fmt.Sprintf("Failed to list files: %v", err),
 		})
 		return
@@ -181,14 +181,14 @@ func (ctx *Context) HandleFiles(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[Gallery] Error listing files: %v", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadGateway)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"error": fmt.Sprintf("Failed to list files: %v", err),
 		})
 		return
 	}
 
 	log.Printf("[Gallery] Successfully listed %d files", len(files))
-	JSONResponse(w, map[string]interface{}{
+	JSONResponse(w, map[string]any{
 		"files": files,
 		"path":  path,
 	})
@@ -335,7 +335,7 @@ type SDCardFileInfo struct {
 	ModTime time.Time              `json:"mod_time"`
 	IsDir   bool                   `json:"is_dir"`
 	IsImage bool                   `json:"is_image"`
-	EXIF    map[string]interface{} `json:"exif,omitempty"`
+	EXIF    map[string]any `json:"exif,omitempty"`
 }
 
 // HandleSDCardFiles lists files on the SD card with EXIF metadata
@@ -359,7 +359,7 @@ func (ctx *Context) HandleSDCardFiles(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[Gallery] list sdcard failed path=%q duration=%s error=%v", requestedPath, time.Since(start), err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(daemonHTTPStatus(err))
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"error": daemonErrorMessage(err),
 		})
 		return
@@ -370,7 +370,7 @@ func (ctx *Context) HandleSDCardFiles(w http.ResponseWriter, r *http.Request) {
 }
 
 // extractEXIF extracts EXIF metadata from an image file
-func extractEXIF(filePath string) map[string]interface{} {
+func extractEXIF(filePath string) map[string]any {
 	// #nosec G304 -- filePath is within validated SD card mount directory
 	fileData, err := os.ReadFile(filePath)
 	if err != nil {
@@ -387,7 +387,7 @@ func extractEXIF(filePath string) map[string]interface{} {
 		return nil
 	}
 
-	data := make(map[string]interface{})
+	data := make(map[string]any)
 
 	// Helper function to find tag value
 	findTag := func(tagName string) *exif.ExifTag {

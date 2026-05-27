@@ -26,7 +26,7 @@ func (ctx *Context) HandleCaptivePortalStatus(w http.ResponseWriter, r *http.Req
 	}
 
 	if ctx.CaptivePortal == nil {
-		JSONResponse(w, map[string]interface{}{
+		JSONResponse(w, map[string]any{
 			"error":   "Captive portal authenticator not initialized",
 			"enabled": false,
 		})
@@ -97,7 +97,7 @@ func (ctx *Context) HandleCaptivePortalAuthenticate(w http.ResponseWriter, r *ht
 	conn, err := ctx.WiFiMgr.GetCurrentConnection()
 	if err != nil {
 		log.Printf("[API] Not connected to WiFi: %v", err)
-		JSONResponse(w, map[string]interface{}{
+		JSONResponse(w, map[string]any{
 			"success": false,
 			"error":   "Not connected to WiFi network",
 		})
@@ -117,7 +117,7 @@ func (ctx *Context) HandleCaptivePortalAuthenticate(w http.ResponseWriter, r *ht
 	status := ctx.CaptivePortal.GetAuthenticationStatus()
 	authenticated := status["authenticated"].(bool)
 
-	response := map[string]interface{}{
+	response := map[string]any{
 		"network": conn.SSID,
 		"success": true,
 	}
@@ -164,7 +164,7 @@ func (ctx *Context) HandleCaptivePortalTest(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	response := map[string]interface{}{}
+	response := map[string]any{}
 
 	// Get current network
 	conn, err := ctx.WiFiMgr.GetCurrentConnection()

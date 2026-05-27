@@ -472,7 +472,7 @@ token = {"access_token":"ya29.a0Aa4xrXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
 	configContent := string(content)
 
 	// This is what the API returns in JSON response
-	apiResponse := map[string]interface{}{
+	apiResponse := map[string]any{
 		"configured": true,
 		"content":    configContent, // CRITICAL: Full config with credentials
 	}

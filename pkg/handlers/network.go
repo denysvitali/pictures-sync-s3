@@ -45,16 +45,16 @@ func (ctx *Context) HandleNetworkInterfaces(w http.ResponseWriter, r *http.Reque
 	interfaces, err := net.Interfaces()
 	if err != nil {
 		log.Printf("Failed to get network interfaces: %v", err)
-		JSONResponse(w, map[string]interface{}{
-			"interfaces": []map[string]interface{}{},
+		JSONResponse(w, map[string]any{
+			"interfaces": []map[string]any{},
 			"error":      err.Error(),
 		})
 		return
 	}
 
-	var result []map[string]interface{}
+	var result []map[string]any
 	for _, iface := range interfaces {
-		ifaceInfo := make(map[string]interface{})
+		ifaceInfo := make(map[string]any)
 		ifaceInfo["name"] = iface.Name
 		ifaceInfo["mac"] = iface.HardwareAddr.String()
 		ifaceInfo["mtu"] = iface.MTU
@@ -102,7 +102,7 @@ func (ctx *Context) HandleNetworkInterfaces(w http.ResponseWriter, r *http.Reque
 		result = append(result, ifaceInfo)
 	}
 
-	JSONResponse(w, map[string]interface{}{
+	JSONResponse(w, map[string]any{
 		"interfaces": result,
 	})
 }
@@ -139,7 +139,7 @@ func (ctx *Context) HandleDNSLookup(w http.ResponseWriter, r *http.Request) {
 	ips, err := ctx.SSRFValidator.ValidateHostname(req.Hostname, clientIP)
 	if err != nil {
 		log.Printf("[SSRF] DNS lookup blocked for %s from %s: %v", req.Hostname, clientIP, err)
-		JSONResponse(w, map[string]interface{}{
+		JSONResponse(w, map[string]any{
 			"error": fmt.Sprintf("Request blocked: %v", err),
 		})
 		return
@@ -164,7 +164,7 @@ func (ctx *Context) HandleDNSLookup(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[SSRF] DNS lookup allowed for %s from %s, resolved %d addresses", req.Hostname, clientIP, len(addresses))
 
-	JSONResponse(w, map[string]interface{}{
+	JSONResponse(w, map[string]any{
 		"addresses":  addresses,
 		"raw_output": rawOutput.String(),
 	})
@@ -210,14 +210,14 @@ func (ctx *Context) HandlePing(w http.ResponseWriter, r *http.Request) {
 	ips, err := ctx.SSRFValidator.ValidateHostname(req.Hostname, clientIP)
 	if err != nil {
 		log.Printf("[SSRF] Ping blocked for %s from %s: %v", req.Hostname, clientIP, err)
-		JSONResponse(w, map[string]interface{}{
+		JSONResponse(w, map[string]any{
 			"error": fmt.Sprintf("Request blocked: %v", err),
 		})
 		return
 	}
 
 	if len(ips) == 0 {
-		JSONResponse(w, map[string]interface{}{
+		JSONResponse(w, map[string]any{
 			"error": "No IP addresses found for hostname",
 		})
 		return
@@ -243,14 +243,14 @@ func (ctx *Context) HandlePing(w http.ResponseWriter, r *http.Request) {
 }
 
 // performICMPPing executes ICMP ping using pro-bing
-func performICMPPing(hostname, ipAddr string, count int) map[string]interface{} {
+func performICMPPing(hostname, ipAddr string, count int) map[string]any {
 	var output strings.Builder
 
 	output.WriteString(fmt.Sprintf("PING %s (%s) 56 bytes of data\n\n", hostname, ipAddr))
 
 	pinger, err := probing.NewPinger(ipAddr)
 	if err != nil {
-		return map[string]interface{}{
+		return map[string]any{
 			"error": fmt.Sprintf("Failed to create pinger: %v", err),
 		}
 	}
@@ -274,7 +274,7 @@ func performICMPPing(hostname, ipAddr string, count int) map[string]interface{} 
 	// Run the pinger
 	err = pinger.Run()
 	if err != nil {
-		return map[string]interface{}{
+		return map[string]any{
 			"error": fmt.Sprintf("Ping failed: %v", err),
 		}
 	}
@@ -295,7 +295,7 @@ func performICMPPing(hostname, ipAddr string, count int) map[string]interface{} 
 	summary := fmt.Sprintf("%d packets transmitted, %d received, %.1f%% packet loss",
 		stats.PacketsSent, stats.PacketsRecv, stats.PacketLoss)
 
-	return map[string]interface{}{
+	return map[string]any{
 		"output":  output.String(),
 		"summary": summary,
 	}
@@ -309,7 +309,7 @@ func (ctx *Context) HandleNetworkDiagnostics(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	result := make(map[string]interface{})
+	result := make(map[string]any)
 
 	// Test DNS servers (ICMP ping) - these are hardcoded safe public IPs
 	result["dns_google"] = testICMPPing("8.8.8.8", 2*time.Second)

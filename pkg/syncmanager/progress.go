@@ -45,8 +45,8 @@ func (m *Manager) calculateProgress(stats *accounting.StatsInfo, totalFiles int,
 	// Try to get remote stats which includes current transfers and checks
 	if remoteStats, err := stats.RemoteStats(false); err == nil {
 		// First try transferring files (higher priority)
-		if transferring, ok := remoteStats["transferring"].([]interface{}); ok && len(transferring) > 0 {
-			if transfer, ok := transferring[0].(map[string]interface{}); ok {
+		if transferring, ok := remoteStats["transferring"].([]any); ok && len(transferring) > 0 {
+			if transfer, ok := transferring[0].(map[string]any); ok {
 				if name, ok := transfer["name"].(string); ok {
 					currentFile = name
 				}
@@ -54,9 +54,9 @@ func (m *Manager) calculateProgress(stats *accounting.StatsInfo, totalFiles int,
 					currentFileSize = size
 				}
 			}
-		} else if checking, ok := remoteStats["checking"].([]interface{}); ok && len(checking) > 0 {
+		} else if checking, ok := remoteStats["checking"].([]any); ok && len(checking) > 0 {
 			// If nothing transferring, show what's being checked
-			if check, ok := checking[0].(map[string]interface{}); ok {
+			if check, ok := checking[0].(map[string]any); ok {
 				if name, ok := check["name"].(string); ok {
 					currentFile = "[Checking] " + name
 				}

@@ -146,7 +146,7 @@ func BenchmarkHandleHistoryLarge(b *testing.B) {
 
 // BenchmarkJSONResponse benchmarks JSON serialization
 func BenchmarkJSONResponse(b *testing.B) {
-	data := map[string]interface{}{
+	data := map[string]any{
 		"status":         "syncing",
 		"files_synced":   500,
 		"files_total":    1000,
@@ -170,9 +170,9 @@ func BenchmarkJSONResponse(b *testing.B) {
 // BenchmarkJSONResponseLarge benchmarks large JSON responses
 func BenchmarkJSONResponseLarge(b *testing.B) {
 	// Create large history data
-	history := make([]map[string]interface{}, 1000)
+	history := make([]map[string]any, 1000)
 	for i := 0; i < 1000; i++ {
-		history[i] = map[string]interface{}{
+		history[i] = map[string]any{
 			"id":           fmt.Sprintf("sync-%d", i),
 			"card_id":      fmt.Sprintf("card-%d", i%100),
 			"start_time":   time.Now().Add(-time.Duration(i) * time.Hour).Format(time.RFC3339),

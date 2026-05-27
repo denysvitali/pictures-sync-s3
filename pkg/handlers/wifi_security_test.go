@@ -150,7 +150,7 @@ func TestSafeNetworkInfo_Structure(t *testing.T) {
 	}
 
 	// Verify JSON structure
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal(data, &result); err != nil {
 		t.Fatalf("Failed to unmarshal: %v", err)
 	}

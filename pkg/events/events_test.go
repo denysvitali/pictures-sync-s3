@@ -88,7 +88,7 @@ func TestEmit(t *testing.T) {
 	mgr := NewManager()
 	ch := mgr.Subscribe()
 
-	testData := map[string]interface{}{
+	testData := map[string]any{
 		"key": "value",
 	}
 
@@ -191,7 +191,7 @@ func TestConcurrentEmit(t *testing.T) {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			mgr.Emit(EventInfo, "concurrent", map[string]interface{}{
+			mgr.Emit(EventInfo, "concurrent", map[string]any{
 				"num": n,
 			})
 		}(i)
@@ -593,7 +593,7 @@ func TestEmitInfo(t *testing.T) {
 	mgr := NewManager()
 	ch := mgr.Subscribe()
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"key1": "value1",
 		"key2": 42,
 	}

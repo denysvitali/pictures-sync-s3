@@ -359,7 +359,7 @@ func TestPowerFailureDuringSettingsSave(t *testing.T) {
 
 		// On next boot, load fails
 		data, _ := os.ReadFile(tmpFile)
-		err := json.Unmarshal(data, &map[string]interface{}{})
+		err := json.Unmarshal(data, &map[string]any{})
 
 		if err != nil {
 			t.Log("BUG FOUND: Settings corruption causes load failure")
@@ -684,7 +684,7 @@ func TestWiFiConfigCorruption(t *testing.T) {
 
 		// Try to load
 		data, _ := os.ReadFile(wifiConfigPath)
-		var config map[string]interface{}
+		var config map[string]any
 		err := json.Unmarshal(data, &config)
 
 		if err != nil {

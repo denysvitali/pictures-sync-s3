@@ -15,18 +15,18 @@ type HandlerFunc func(w http.ResponseWriter, r *http.Request) error
 // ErrorResponse represents a standard error response
 type ErrorResponse struct {
 	Error   string                 `json:"error"`
-	Details map[string]interface{} `json:"details,omitempty"`
+	Details map[string]any `json:"details,omitempty"`
 }
 
 // WriteJSON writes a JSON response with proper headers
-func WriteJSON(w http.ResponseWriter, statusCode int, data interface{}) error {
+func WriteJSON(w http.ResponseWriter, statusCode int, data any) error {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	return json.NewEncoder(w).Encode(data)
 }
 
 // WriteError writes a standard error response
-func WriteError(w http.ResponseWriter, statusCode int, message string, details map[string]interface{}) {
+func WriteError(w http.ResponseWriter, statusCode int, message string, details map[string]any) {
 	if err := WriteJSON(w, statusCode, ErrorResponse{
 		Error:   message,
 		Details: details,
@@ -38,7 +38,7 @@ func WriteError(w http.ResponseWriter, statusCode int, message string, details m
 // DecodeJSON decodes JSON request body with size limit validation. It drains
 // and closes the request body before returning so HTTP/1.1 keep-alive
 // connections can be reused even when callers forget to close r.Body.
-func DecodeJSON(r *http.Request, v interface{}, maxBytes int64) error {
+func DecodeJSON(r *http.Request, v any, maxBytes int64) error {
 	if r.Body == nil {
 		return io.EOF
 	}

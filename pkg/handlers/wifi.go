@@ -115,7 +115,7 @@ func (ctx *Context) HandleWiFiScan(w http.ResponseWriter, r *http.Request) {
 	// Apply sorting
 	sortedNetworks := sortWiFiNetworks(networks, req.SortBy)
 
-	JSONResponse(w, map[string]interface{}{
+	JSONResponse(w, map[string]any{
 		"networks": sortedNetworks,
 	})
 }
@@ -152,7 +152,7 @@ func (ctx *Context) HandleWiFiNetworks(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	JSONResponse(w, map[string]interface{}{
+	JSONResponse(w, map[string]any{
 		"networks": safeNetworks,
 	})
 }
@@ -180,14 +180,14 @@ func (ctx *Context) HandleWiFiConnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := ctx.WiFiMgr.AddNetwork(req.SSID, req.Password); err != nil {
-		JSONResponse(w, map[string]interface{}{
+		JSONResponse(w, map[string]any{
 			"success": false,
 			"error":   err.Error(),
 		})
 		return
 	}
 
-	JSONResponse(w, map[string]interface{}{
+	JSONResponse(w, map[string]any{
 		"success": true,
 	})
 }
@@ -214,14 +214,14 @@ func (ctx *Context) HandleWiFiDisconnect(w http.ResponseWriter, r *http.Request)
 	}
 
 	if err := ctx.WiFiMgr.RemoveNetwork(req.SSID); err != nil {
-		JSONResponse(w, map[string]interface{}{
+		JSONResponse(w, map[string]any{
 			"success": false,
 			"error":   err.Error(),
 		})
 		return
 	}
 
-	JSONResponse(w, map[string]interface{}{
+	JSONResponse(w, map[string]any{
 		"success": true,
 	})
 }
@@ -240,14 +240,14 @@ func (ctx *Context) HandleWiFiStatus(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := ctx.WiFiMgr.GetCurrentConnection()
 	if err != nil {
-		JSONResponse(w, map[string]interface{}{
+		JSONResponse(w, map[string]any{
 			"connected": false,
 			"error":     err.Error(),
 		})
 		return
 	}
 
-	JSONResponse(w, map[string]interface{}{
+	JSONResponse(w, map[string]any{
 		"connected": true,
 		"ssid":      conn.SSID,
 		"signal":    conn.Signal,
@@ -276,14 +276,14 @@ func (ctx *Context) HandleWiFiReorder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := ctx.WiFiMgr.ReorderNetworks(req.SSIDs); err != nil {
-		JSONResponse(w, map[string]interface{}{
+		JSONResponse(w, map[string]any{
 			"success": false,
 			"error":   err.Error(),
 		})
 		return
 	}
 
-	JSONResponse(w, map[string]interface{}{
+	JSONResponse(w, map[string]any{
 		"success": true,
 	})
 }

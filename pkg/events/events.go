@@ -46,7 +46,7 @@ type Event struct {
 	Type      EventType              `json:"type"`
 	Timestamp time.Time              `json:"timestamp"`
 	Message   string                 `json:"message"`
-	Data      map[string]interface{} `json:"data,omitempty"`
+	Data      map[string]any `json:"data,omitempty"`
 }
 
 // Manager manages event distribution
@@ -119,7 +119,7 @@ func (m *Manager) Unsubscribe(ch chan Event) {
 }
 
 // Emit sends an event to all subscribers
-func (m *Manager) Emit(eventType EventType, message string, data map[string]interface{}) {
+func (m *Manager) Emit(eventType EventType, message string, data map[string]any) {
 	event := Event{
 		Type:      eventType,
 		Timestamp: time.Now(),
@@ -153,7 +153,7 @@ func (m *Manager) publish(event Event) {
 
 // EmitSDCardInserted emits an SD card insertion event
 func (m *Manager) EmitSDCardInserted(deviceName, mountPath string) {
-	m.Emit(EventSDCardInserted, "SD card inserted", map[string]interface{}{
+	m.Emit(EventSDCardInserted, "SD card inserted", map[string]any{
 		"device_name": deviceName,
 		"mount_path":  mountPath,
 	})
@@ -161,14 +161,14 @@ func (m *Manager) EmitSDCardInserted(deviceName, mountPath string) {
 
 // EmitSDCardRemoved emits an SD card removal event
 func (m *Manager) EmitSDCardRemoved(deviceName string) {
-	m.Emit(EventSDCardRemoved, "SD card removed", map[string]interface{}{
+	m.Emit(EventSDCardRemoved, "SD card removed", map[string]any{
 		"device_name": deviceName,
 	})
 }
 
 // EmitPhotosDetected emits a photos detected event
 func (m *Manager) EmitPhotosDetected(count int, totalBytes int64) {
-	m.Emit(EventPhotosDetected, "Photos detected on SD card", map[string]interface{}{
+	m.Emit(EventPhotosDetected, "Photos detected on SD card", map[string]any{
 		"photo_count": count,
 		"total_bytes": totalBytes,
 		"total_mb":    float64(totalBytes) / (1024 * 1024),
@@ -177,21 +177,21 @@ func (m *Manager) EmitPhotosDetected(count int, totalBytes int64) {
 
 // EmitCardIDFound emits a card ID found event
 func (m *Manager) EmitCardIDFound(cardID string) {
-	m.Emit(EventCardIDFound, "Found existing card ID", map[string]interface{}{
+	m.Emit(EventCardIDFound, "Found existing card ID", map[string]any{
 		"card_id": cardID,
 	})
 }
 
 // EmitCardIDCreated emits a card ID creation event
 func (m *Manager) EmitCardIDCreated(cardID string) {
-	m.Emit(EventCardIDCreated, "Created new card ID", map[string]interface{}{
+	m.Emit(EventCardIDCreated, "Created new card ID", map[string]any{
 		"card_id": cardID,
 	})
 }
 
 // EmitReformatDetected emits a reformat detection event
 func (m *Manager) EmitReformatDetected(cardID, newCardID string, percentageOfLast float64) {
-	m.Emit(EventReformatDetected, "Card reformat detected", map[string]interface{}{
+	m.Emit(EventReformatDetected, "Card reformat detected", map[string]any{
 		"old_card_id":        cardID,
 		"new_card_id":        newCardID,
 		"percentage_of_last": percentageOfLast,
@@ -200,7 +200,7 @@ func (m *Manager) EmitReformatDetected(cardID, newCardID string, percentageOfLas
 
 // EmitSyncStarted emits a sync started event
 func (m *Manager) EmitSyncStarted(cardID string, totalFiles int, totalBytes int64) {
-	m.Emit(EventSyncStarted, "Sync operation started", map[string]interface{}{
+	m.Emit(EventSyncStarted, "Sync operation started", map[string]any{
 		"card_id":     cardID,
 		"total_files": totalFiles,
 		"total_bytes": totalBytes,
@@ -209,7 +209,7 @@ func (m *Manager) EmitSyncStarted(cardID string, totalFiles int, totalBytes int6
 
 // EmitSyncProgress emits a sync progress event
 func (m *Manager) EmitSyncProgress(filesSynced, bytesSynced int64, currentFile string, transferSpeed float64, eta string) {
-	m.Emit(EventSyncProgress, "Sync progress update", map[string]interface{}{
+	m.Emit(EventSyncProgress, "Sync progress update", map[string]any{
 		"files_synced":   filesSynced,
 		"bytes_synced":   bytesSynced,
 		"current_file":   currentFile,
@@ -220,7 +220,7 @@ func (m *Manager) EmitSyncProgress(filesSynced, bytesSynced int64, currentFile s
 
 // EmitSyncCompleted emits a sync completion event
 func (m *Manager) EmitSyncCompleted(cardID string, totalFiles int64, totalBytes int64, duration time.Duration) {
-	m.Emit(EventSyncCompleted, "Sync completed successfully", map[string]interface{}{
+	m.Emit(EventSyncCompleted, "Sync completed successfully", map[string]any{
 		"card_id":     cardID,
 		"total_files": totalFiles,
 		"total_bytes": totalBytes,
@@ -230,7 +230,7 @@ func (m *Manager) EmitSyncCompleted(cardID string, totalFiles int64, totalBytes 
 
 // EmitSyncFailed emits a sync failure event
 func (m *Manager) EmitSyncFailed(cardID string, err error) {
-	m.Emit(EventSyncFailed, "Sync operation failed", map[string]interface{}{
+	m.Emit(EventSyncFailed, "Sync operation failed", map[string]any{
 		"card_id": cardID,
 		"error":   err.Error(),
 	})
@@ -238,7 +238,7 @@ func (m *Manager) EmitSyncFailed(cardID string, err error) {
 
 // EmitStatusChanged emits a status change event
 func (m *Manager) EmitStatusChanged(oldStatus, newStatus string) {
-	m.Emit(EventStatusChanged, "System status changed", map[string]interface{}{
+	m.Emit(EventStatusChanged, "System status changed", map[string]any{
 		"old_status": oldStatus,
 		"new_status": newStatus,
 	})
@@ -246,7 +246,7 @@ func (m *Manager) EmitStatusChanged(oldStatus, newStatus string) {
 
 // EmitError emits an error event
 func (m *Manager) EmitError(message string, err error) {
-	data := map[string]interface{}{}
+	data := map[string]any{}
 	if err != nil {
 		data["error"] = err.Error()
 	}
@@ -254,6 +254,6 @@ func (m *Manager) EmitError(message string, err error) {
 }
 
 // EmitInfo emits an info event
-func (m *Manager) EmitInfo(message string, data map[string]interface{}) {
+func (m *Manager) EmitInfo(message string, data map[string]any) {
 	m.Emit(EventInfo, message, data)
 }

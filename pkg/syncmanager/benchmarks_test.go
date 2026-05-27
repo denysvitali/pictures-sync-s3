@@ -21,7 +21,7 @@ func BenchmarkProgressParsing(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, line := range logLines {
-			var parsed map[string]interface{}
+			var parsed map[string]any
 			_ = json.Unmarshal([]byte(line), &parsed)
 		}
 	}
@@ -82,7 +82,7 @@ key = testkey123
 // BenchmarkStateUpdates measures state update performance
 func BenchmarkStateUpdates(b *testing.B) {
 	mockState := &mockStateManager{
-		updates: make(map[string]interface{}),
+		updates: make(map[string]any),
 	}
 
 	b.ResetTimer()
@@ -122,7 +122,7 @@ func BenchmarkLogLineBuffer(b *testing.B) {
 		lines := bytes.Split(buffer.Bytes(), []byte("\n"))
 		for _, line := range lines {
 			if len(line) > 0 {
-				var parsed map[string]interface{}
+				var parsed map[string]any
 				_ = json.Unmarshal(line, &parsed)
 			}
 		}
@@ -132,7 +132,7 @@ func BenchmarkLogLineBuffer(b *testing.B) {
 // BenchmarkConcurrentStateAccess measures concurrent state access patterns
 func BenchmarkConcurrentStateAccess(b *testing.B) {
 	mockState := &mockStateManager{
-		updates: make(map[string]interface{}),
+		updates: make(map[string]any),
 	}
 
 	b.RunParallel(func(pb *testing.PB) {
@@ -156,7 +156,7 @@ func BenchmarkRetryBackoff(b *testing.B) {
 
 // mockStateManager for benchmarking
 type mockStateManager struct {
-	updates map[string]interface{}
+	updates map[string]any
 }
 
 func (m *mockStateManager) UpdateSyncProgress(filesSynced, filesTotal, bytesTransferred int64) {
@@ -190,7 +190,7 @@ func BenchmarkMemoryAllocation(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		// Simulate typical sync operation allocations
-		stats := make(map[string]interface{})
+		stats := make(map[string]any)
 		stats["bytes"] = int64(1024 * 1024)
 		stats["files"] = int64(100)
 		stats["elapsed"] = 30.5
@@ -224,7 +224,7 @@ func BenchmarkJSONUnmarshal(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		var result map[string]interface{}
+		var result map[string]any
 		_ = json.Unmarshal(jsonData, &result)
 	}
 }
@@ -273,7 +273,7 @@ func formatRemotePath(remote, path, cardID string) string {
 
 // BenchmarkChannelOperations measures channel communication performance
 func BenchmarkChannelOperations(b *testing.B) {
-	ch := make(chan interface{}, 100)
+	ch := make(chan any, 100)
 	done := make(chan bool)
 
 	go func() {

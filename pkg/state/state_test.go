@@ -192,7 +192,7 @@ func TestJSONSerialization(t *testing.T) {
 	}
 
 	// Parse the JSON to verify structure
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	err = json.Unmarshal(jsonData, &parsed)
 	if err != nil {
 		t.Fatalf("Failed to unmarshal JSON: %v", err)
@@ -204,7 +204,7 @@ func TestJSONSerialization(t *testing.T) {
 	}
 
 	// Verify current_sync exists and has correct structure
-	currentSync, ok := parsed["current_sync"].(map[string]interface{})
+	currentSync, ok := parsed["current_sync"].(map[string]any)
 	if !ok {
 		t.Fatal("current_sync is not present or not an object in JSON")
 	}
