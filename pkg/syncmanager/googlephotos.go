@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"path"
 	"path/filepath"
 	"strings"
@@ -299,23 +300,10 @@ func (m *Manager) syncCardToGooglePhotos(ctx context.Context, srcPath, dstPath s
 	// Copy files into the album root. Rclone's googlephotos backend treats
 	// subdirectories under album/<name> as part of the album title, so preserving
 	// source paths like DJI_001/file.jpg would create album "<name>/DJI_001".
+	// listObjects already filters to photo/video extensions during the walk.
 	objects, beforeBytes := m.listObjects(ctx, srcFs)
-	origCount := len(objects)
-
-	// Filter to photo/video only — skip RAW files and other unsupported formats.
-	var filtered []fs.Object
-	var filteredBytes int64
-	for _, obj := range objects {
-		if isPhotoOrVideo(obj.Remote()) {
-			filtered = append(filtered, obj)
-			filteredBytes += obj.Size()
-		}
-	}
-	objects = filtered
-	beforeBytes = filteredBytes
 	beforeCount := len(objects)
-	rawSkipped := origCount - beforeCount
-	log.Printf("Google Photos sync: %d files (%s) to upload (%d RAW/non-media skipped)", beforeCount, formatBytes(beforeBytes), rawSkipped)
+	log.Printf("Google Photos sync: %d files (%s) to upload", beforeCount, formatBytes(beforeBytes))
 
 	// Load persistent upload state to avoid re-uploading files that Google Photos
 	// may not list while processing (especially videos).
@@ -438,16 +426,45 @@ type googlePhotosCopyJob struct {
 	albumName string
 }
 
+// isRaspberryPi returns true when the binary is running on a Raspberry Pi.
+// It reads /proc/cpuinfo and looks for the "Raspberry Pi" hardware identifier.
+// The result is used to cap upload workers to a Pi-safe default.
+func isRaspberryPi() bool {
+	data, err := os.ReadFile("/proc/cpuinfo")
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(data), "Raspberry Pi")
+}
+
+// googlePhotosTransferCount returns the number of parallel upload workers to
+// use for Google Photos transfers.
+//
+// Defaults (no override set):
+//   - Raspberry Pi detected: 2 workers (keeps the Pi responsive)
+//   - All other platforms:    2 workers (conservative default)
+//
+// The caller can override via m.transfers (e.g. from settings or an env var).
+// The hard cap is 4 to avoid hitting Google Photos rate limits.
 func (m *Manager) googlePhotosTransferCount() int {
 	m.mu.Lock()
 	transfers := m.transfers
 	m.mu.Unlock()
 
+	const defaultWorkers = 2
+	const maxWorkers = 4
+	const piMaxWorkers = 2
+
 	if transfers < 1 {
-		return 4
+		transfers = defaultWorkers
 	}
-	if transfers > 16 {
-		return 16
+	if transfers > maxWorkers {
+		transfers = maxWorkers
+	}
+	// On a Raspberry Pi, always cap to piMaxWorkers regardless of the override,
+	// to avoid starving the OS under sustained I/O + network load.
+	if isRaspberryPi() && transfers > piMaxWorkers {
+		transfers = piMaxWorkers
 	}
 	return transfers
 }
@@ -531,32 +548,38 @@ func (m *Manager) countFiles(ctx context.Context, f fs.Fs) (int, int64) {
 	return m.countFilesInDir(ctx, f, "")
 }
 
-// countFilesInDir recursively counts files in a directory.
+// countFilesInDir recursively counts photo/video files in a directory.
+// It walks the directory tree incrementally — one rclone List call per
+// directory — without materialising the full entry list into a slice,
+// keeping peak memory proportional to directory depth rather than total
+// file count (O(depth) instead of O(n)).
 func (m *Manager) countFilesInDir(ctx context.Context, f fs.Fs, dir string) (int, int64) {
 	entries, err := f.List(ctx, dir)
 	if err != nil {
 		return 0, 0
 	}
 	var count int
-	var bytes int64
+	var totalBytes int64
 	for _, entry := range entries {
 		select {
 		case <-ctx.Done():
-			return count, bytes
+			return count, totalBytes
 		default:
 		}
-		if obj, ok := entry.(fs.Object); ok {
-			if isPhotoOrVideo(obj.Remote()) {
+		switch e := entry.(type) {
+		case fs.Object:
+			// Filter by extension during the walk — no secondary pass needed.
+			if isPhotoOrVideo(e.Remote()) {
 				count++
-				bytes += obj.Size()
+				totalBytes += e.Size()
 			}
-		} else if dirEntry, ok := entry.(fs.Directory); ok {
-			subCount, subBytes := m.countFilesInDir(ctx, f, dirEntry.Remote())
+		case fs.Directory:
+			subCount, subBytes := m.countFilesInDir(ctx, f, e.Remote())
 			count += subCount
-			bytes += subBytes
+			totalBytes += subBytes
 		}
 	}
-	return count, bytes
+	return count, totalBytes
 }
 
 func (m *Manager) listObjects(ctx context.Context, f fs.Fs) ([]fs.Object, int64) {
@@ -570,23 +593,27 @@ func (m *Manager) listObjectsInDir(ctx context.Context, f fs.Fs, dir string) ([]
 	}
 
 	var objects []fs.Object
-	var bytes int64
+	var totalBytes int64
 	for _, entry := range entries {
 		select {
 		case <-ctx.Done():
-			return objects, bytes
+			return objects, totalBytes
 		default:
 		}
-		if obj, ok := entry.(fs.Object); ok {
-			objects = append(objects, obj)
-			bytes += obj.Size()
-		} else if dirEntry, ok := entry.(fs.Directory); ok {
-			subObjects, subBytes := m.listObjectsInDir(ctx, f, dirEntry.Remote())
+		switch e := entry.(type) {
+		case fs.Object:
+			// Filter by extension here so the caller never needs a second pass.
+			if isPhotoOrVideo(e.Remote()) {
+				objects = append(objects, e)
+				totalBytes += e.Size()
+			}
+		case fs.Directory:
+			subObjects, subBytes := m.listObjectsInDir(ctx, f, e.Remote())
 			objects = append(objects, subObjects...)
-			bytes += subBytes
+			totalBytes += subBytes
 		}
 	}
-	return objects, bytes
+	return objects, totalBytes
 }
 
 // monitorGooglePhotosProgress monitors Google Photos sync progress.

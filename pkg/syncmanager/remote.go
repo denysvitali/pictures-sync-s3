@@ -164,8 +164,12 @@ func (m *Manager) ListCardIDs() ([]FileInfo, error) {
 	return cardDirs, nil
 }
 
-// ListFilesPaginated lists files with pagination support
-func (m *Manager) ListFilesPaginated(path string, page, pageSize int) (*FileListResult, error) {
+// ListFilesPaginated lists files with pagination support.
+// It iterates rclone's directory listing exactly once, converting only the
+// entries that fall within the requested page window to FileInfo values.
+// Entries outside the window are counted but not materialised, so peak
+// memory scales with pageSize rather than the total number of remote entries.
+func (m *Manager) ListFilesPaginated(reqPath string, page, pageSize int) (*FileListResult, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -173,39 +177,92 @@ func (m *Manager) ListFilesPaginated(path string, page, pageSize int) (*FileList
 		pageSize = 100 // Default page size
 	}
 
-	// Get all files first (we'll optimize this later with streaming)
-	allFiles, err := m.ListFiles(path)
-	if err != nil {
+	// Validate and clean path (mirror ListFiles).
+	if strings.Contains(reqPath, "..") {
+		return nil, fmt.Errorf("invalid path: contains directory traversal")
+	}
+	cleanedPath := strings.TrimPrefix(strings.TrimPrefix(filepath.Clean(reqPath), "/"), "\\")
+
+	rcloneConfigMu.Lock()
+	defer rcloneConfigMu.Unlock()
+	if err := m.loadRcloneConfigLocked(); err != nil {
 		return nil, err
 	}
 
-	total := len(allFiles)
-	totalPages := (total + pageSize - 1) / pageSize
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
 
-	// Calculate slice bounds for pagination
+	var fullPath string
+	if cleanedPath == "" || cleanedPath == "/" {
+		fullPath = m.remoteName + ":" + m.remotePath
+	} else {
+		fullPath = m.remoteName + ":" + filepath.Join(m.remotePath, cleanedPath)
+	}
+
+	fsys, err := fs.NewFs(ctx, fullPath)
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("timeout accessing remote path (check network and remote configuration)")
+		}
+		return nil, fmt.Errorf("failed to access remote path: %w", err)
+	}
+
+	entries, err := fsys.List(ctx, "")
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("timeout listing files (remote may be slow or unreachable)")
+		}
+		return nil, fmt.Errorf("failed to list entries: %w", err)
+	}
+
+	// Single pass: count total and collect only the page window.
 	start := (page - 1) * pageSize
 	end := start + pageSize
+	total := len(entries)
 
-	if start >= total {
-		// Page beyond available data
-		return &FileListResult{
-			Files:      []FileInfo{},
-			Path:       path,
-			Total:      total,
-			Page:       page,
-			PageSize:   pageSize,
-			TotalPages: totalPages,
-			HasMore:    false,
-		}, nil
+	pageFiles := make([]FileInfo, 0, min(pageSize, max(0, total-start)))
+	for i, entry := range entries {
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("timeout while processing files")
+		}
+		if i < start || i >= end {
+			// Outside the page window — count only, do not convert.
+			continue
+		}
+		switch item := entry.(type) {
+		case fs.Directory:
+			name := item.Remote()
+			itemPath := name
+			if cleanedPath != "" && cleanedPath != "/" {
+				itemPath = filepath.Join(cleanedPath, name)
+			}
+			pageFiles = append(pageFiles, FileInfo{
+				Name:    name,
+				Path:    itemPath,
+				Size:    0,
+				ModTime: item.ModTime(ctx),
+				IsDir:   true,
+			})
+		case fs.Object:
+			name := item.Remote()
+			itemPath := name
+			if cleanedPath != "" && cleanedPath != "/" {
+				itemPath = filepath.Join(cleanedPath, name)
+			}
+			pageFiles = append(pageFiles, FileInfo{
+				Name:    name,
+				Path:    itemPath,
+				Size:    item.Size(),
+				ModTime: item.ModTime(ctx),
+				IsDir:   false,
+			})
+		}
 	}
 
-	if end > total {
-		end = total
-	}
-
+	totalPages := (total + pageSize - 1) / pageSize
 	return &FileListResult{
-		Files:      allFiles[start:end],
-		Path:       path,
+		Files:      pageFiles,
+		Path:       reqPath,
 		Total:      total,
 		Page:       page,
 		PageSize:   pageSize,

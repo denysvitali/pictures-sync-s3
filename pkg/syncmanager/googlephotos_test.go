@@ -42,14 +42,15 @@ func TestGooglePhotosFlatRemoteDisambiguatesDuplicateBasenames(t *testing.T) {
 }
 
 func TestGooglePhotosTransferCount(t *testing.T) {
+	// New defaults: 2 workers, hard cap 4 (was 4 / 16).
 	tests := []struct {
 		name      string
 		transfers int
 		want      int
 	}{
-		{name: "default", transfers: 0, want: 4},
-		{name: "configured", transfers: 8, want: 8},
-		{name: "capped", transfers: 64, want: 16},
+		{name: "default", transfers: 0, want: 2},
+		{name: "configured", transfers: 3, want: 3},
+		{name: "capped", transfers: 64, want: 4},
 	}
 
 	for _, tt := range tests {
