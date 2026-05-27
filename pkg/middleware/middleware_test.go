@@ -116,7 +116,7 @@ func TestWriteJSON(t *testing.T) {
 func TestWriteError(t *testing.T) {
 	w := httptest.NewRecorder()
 
-	WriteError(w, http.StatusBadRequest, "test error", map[string]interface{}{
+	WriteError(w, http.StatusBadRequest, "test error", map[string]any{
 		"field": "test_field",
 	})
 
@@ -344,6 +344,153 @@ func TestRecovery_NoDoubleWriteAfterPartialResponse(t *testing.T) {
 	body := w.Body.String()
 	if body != "partial-body" {
 		t.Errorf("Expected body to be exactly %q (no appended error JSON), got %q", "partial-body", body)
+	}
+}
+
+// failingResponseWriter forces WriteJSON's json.Encoder to fail so we can
+// exercise the WriteError logging path that handles a write error.
+type failingResponseWriter struct {
+	header http.Header
+	code   int
+}
+
+func (f *failingResponseWriter) Header() http.Header {
+	if f.header == nil {
+		f.header = http.Header{}
+	}
+	return f.header
+}
+func (f *failingResponseWriter) WriteHeader(code int)         { f.code = code }
+func (f *failingResponseWriter) Write(b []byte) (int, error) { return 0, io.ErrClosedPipe }
+
+// TestWriteError_WriteFailure exercises the branch where WriteJSON returns an
+// error inside WriteError (the log.Printf path). It must not panic.
+func TestWriteError_WriteFailure(t *testing.T) {
+	f := &failingResponseWriter{}
+	WriteError(f, http.StatusInternalServerError, "boom", nil)
+	if f.code != http.StatusInternalServerError {
+		t.Errorf("Expected status 500, got %d", f.code)
+	}
+}
+
+// TestDecodeJSON_NilBody verifies DecodeJSON gracefully returns io.EOF when
+// the request body is nil rather than panicking.
+func TestDecodeJSON_NilBody(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/test", nil)
+	req.Body = nil
+	var result map[string]string
+	err := DecodeJSON(req, &result, 1024)
+	if err != io.EOF {
+		t.Errorf("Expected io.EOF for nil body, got %v", err)
+	}
+}
+
+// TestDecodeJSON_NoMaxBytes verifies that maxBytes <= 0 disables the size
+// limiter (covers the `if maxBytes > 0` false branch).
+func TestDecodeJSON_NoMaxBytes(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/test", bytes.NewBufferString(`{"key":"value"}`))
+	var result map[string]string
+	if err := DecodeJSON(req, &result, 0); err != nil {
+		t.Errorf("Unexpected error with maxBytes=0: %v", err)
+	}
+	if result["key"] != "value" {
+		t.Errorf("Expected key=value, got %v", result)
+	}
+}
+
+// TestGetClientIP_UntrustedProxySource verifies that X-Forwarded-For /
+// X-Real-IP are ignored when RemoteAddr is a public (non-private, non-loopback)
+// address — the spoofing-prevention path.
+func TestGetClientIP_UntrustedProxySource(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.RemoteAddr = "8.8.8.8:1234"
+	req.Header.Set("X-Forwarded-For", "203.0.113.1")
+	req.Header.Set("X-Real-IP", "203.0.113.2")
+
+	ip := GetClientIP(req)
+	if ip != "8.8.8.8" {
+		t.Errorf("Expected untrusted RemoteAddr to be used, got %s", ip)
+	}
+}
+
+// TestGetClientIP_LoopbackTrusted verifies loopback RemoteAddr is treated as
+// a trusted proxy source and forwarded headers are honored.
+func TestGetClientIP_LoopbackTrusted(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.RemoteAddr = "127.0.0.1:1234"
+	req.Header.Set("X-Forwarded-For", "203.0.113.5")
+
+	if ip := GetClientIP(req); ip != "203.0.113.5" {
+		t.Errorf("Expected loopback to trust XFF, got %s", ip)
+	}
+}
+
+// TestGetClientIP_IPv6LoopbackTrusted ensures bracketed IPv6 loopback is also
+// treated as a trusted proxy source (covers the bracket-stripping branch).
+func TestGetClientIP_IPv6LoopbackTrusted(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.RemoteAddr = "[::1]:1234"
+	req.Header.Set("X-Real-IP", "203.0.113.7")
+
+	if ip := GetClientIP(req); ip != "203.0.113.7" {
+		t.Errorf("Expected IPv6 loopback to trust X-Real-IP, got %s", ip)
+	}
+}
+
+// TestRecovery_Integration runs Recovery against a real httptest.NewServer to
+// confirm a panic in the wrapped handler still produces a usable 500 response
+// over a live HTTP connection.
+func TestRecovery_Integration(t *testing.T) {
+	handler := Recovery(func(w http.ResponseWriter, r *http.Request) error {
+		panic("integration boom")
+	})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = handler(w, r)
+	}))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/whatever")
+	if err != nil {
+		t.Fatalf("HTTP GET failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("Expected 500, got %d", resp.StatusCode)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	var er ErrorResponse
+	if err := json.Unmarshal(body, &er); err != nil {
+		t.Fatalf("Expected JSON error body, got %q (err=%v)", string(body), err)
+	}
+	if er.Error == "" {
+		t.Error("Expected non-empty error message")
+	}
+}
+
+// TestRequestLogger_Integration confirms RequestLogger forwards to the next
+// handler and preserves status codes over a real HTTP server.
+func TestRequestLogger_Integration(t *testing.T) {
+	handler := RequestLogger(func(w http.ResponseWriter, r *http.Request) error {
+		w.WriteHeader(http.StatusTeapot)
+		return nil
+	})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = handler(w, r)
+	}))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatalf("HTTP GET failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusTeapot {
+		t.Errorf("Expected 418, got %d", resp.StatusCode)
 	}
 }
 
