@@ -166,10 +166,10 @@ func (ctx *Context) HandleSystemStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httputil.JSON(w, http.StatusOK, map[string]any{
-		"since":   since.Unix(),
-		"until":   until.Unix(),
-		"interval": 5,
-		"points":  points,
+		"since":    since.Unix(),
+		"until":    until.Unix(),
+		"interval": 10,
+		"points":   points,
 	})
 }
 

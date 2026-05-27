@@ -1,25 +1,20 @@
 package systeminfo
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
 
+func clearStateForTest() {
+	clearActiveRecordsForTest()
+}
+
 func TestStatsCollector_ReadWrite(t *testing.T) {
-	tmpDir := t.TempDir()
-	SetStatsFilePath(filepath.Join(tmpDir, "stats.bin"))
-	defer SetStatsFilePath(defaultStatsFilePath())
+	clearStateForTest()
 
 	c := NewStatsCollector()
 	c.interval = 100 * time.Millisecond
 	c.retention = time.Hour
-
-	// Ensure header
-	if err := c.ensureHeader(); err != nil {
-		t.Fatalf("ensureHeader failed: %v", err)
-	}
 
 	now := time.Now()
 	records := []StatsRecord{
@@ -73,16 +68,10 @@ func TestStatsCollector_ReadWrite(t *testing.T) {
 }
 
 func TestStatsCollector_Compact(t *testing.T) {
-	tmpDir := t.TempDir()
-	SetStatsFilePath(filepath.Join(tmpDir, "stats.bin"))
-	defer SetStatsFilePath(defaultStatsFilePath())
+	clearStateForTest()
 
 	c := NewStatsCollector()
 	c.retention = time.Hour
-
-	if err := c.ensureHeader(); err != nil {
-		t.Fatalf("ensureHeader failed: %v", err)
-	}
 
 	now := time.Now()
 	old := StatsRecord{Timestamp: now.Add(-2 * time.Hour).Unix(), CPUPercent: 1.0, RSSBytes: 100, TotalMemBytes: 1000}
@@ -125,41 +114,24 @@ func TestParseMeminfoKB(t *testing.T) {
 	}
 }
 
-func TestDefaultStatsFilePath(t *testing.T) {
-	path := defaultStatsFilePath()
-	if path == "" {
-		t.Error("defaultStatsFilePath returned empty string")
+func TestDefaultStatsCollectorConfig(t *testing.T) {
+	c := NewStatsCollector()
+	if c.interval != 10*time.Second {
+		t.Fatalf("expected default interval 10s, got %s", c.interval)
 	}
-	if !filepath.IsAbs(path) {
-		t.Errorf("defaultStatsFilePath not absolute: %s", path)
+	if c.retention != 24*time.Hour {
+		t.Fatalf("expected default retention 24h, got %s", c.retention)
 	}
 }
 
-func TestStatsCollector_ReadMissingFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	SetStatsFilePath(filepath.Join(tmpDir, "nonexistent.bin"))
-	defer SetStatsFilePath(defaultStatsFilePath())
+func TestStatsCollector_ReadMissing(t *testing.T) {
+	clearStateForTest()
 
 	records, err := ReadStats(time.Now().Add(-time.Hour), time.Now())
 	if err != nil {
-		t.Fatalf("ReadStats on missing file failed: %v", err)
+		t.Fatalf("ReadStats on empty collector failed: %v", err)
 	}
 	if len(records) != 0 {
-		t.Fatalf("expected 0 records for missing file, got %d", len(records))
-	}
-}
-
-func TestStatsCollector_InvalidFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	path := filepath.Join(tmpDir, "bad.bin")
-	SetStatsFilePath(path)
-	defer SetStatsFilePath(defaultStatsFilePath())
-
-	// Write garbage
-	os.WriteFile(path, []byte("not a stats file"), 0640)
-
-	_, err := ReadStats(time.Now().Add(-time.Hour), time.Now())
-	if err == nil {
-		t.Fatal("expected error for invalid file")
+		t.Fatalf("expected 0 records for empty collector, got %d", len(records))
 	}
 }

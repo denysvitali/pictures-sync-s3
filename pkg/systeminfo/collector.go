@@ -3,43 +3,38 @@ package systeminfo
 import (
 	"bufio"
 	"bytes"
-	"encoding/binary"
-	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
-	"math"
 	"sync"
 	"time"
-
-	"github.com/denysvitali/pictures-sync-s3/pkg/utils"
 )
 
 const (
-	statsMagic      = "PSS3"
-	statsVersion    = 1
-	statsRecordSize = 28
-	defaultInterval = 5 * time.Second
-	defaultRetention = 7 * 24 * time.Hour // 7 days
+	defaultInterval  = 10 * time.Second
+	defaultRetention = 24 * time.Hour
 )
 
-var statsFilePath = defaultStatsFilePath()
+var (
+	activeCollectorMu sync.RWMutex
+	activeCollector   *StatsCollector
+)
 
-func defaultStatsFilePath() string {
-	baseDir := "/perm"
-	if _, err := os.Stat(baseDir); os.IsNotExist(err) {
-		baseDir = os.TempDir()
-	}
-	if envDir := os.Getenv("PERM_DIR"); envDir != "" {
-		baseDir = envDir
-	}
-	return filepath.Join(baseDir, "pictures-sync", "system-stats.bin")
+func setActiveCollector(c *StatsCollector) {
+	activeCollectorMu.Lock()
+	activeCollector = c
+	activeCollectorMu.Unlock()
+}
+
+func getActiveCollector() *StatsCollector {
+	activeCollectorMu.RLock()
+	c := activeCollector
+	activeCollectorMu.RUnlock()
+	return c
 }
 
 // StatsRecord represents a single system stats sample.
-// Stored in little-endian binary format: 28 bytes per record.
 type StatsRecord struct {
 	Timestamp     int64   // Unix seconds
 	CPUPercent    float32 // 0-100
@@ -59,15 +54,19 @@ type StatsCollector struct {
 	lastCPUTotal uint64
 	lastCPUIdle  uint64
 	lastCPUTime  time.Time
+
+	records []StatsRecord
 }
 
 // NewStatsCollector creates a new stats collector.
 func NewStatsCollector() *StatsCollector {
-	return &StatsCollector{
+	c := &StatsCollector{
 		interval:  defaultInterval,
 		retention: defaultRetention,
 		stopCh:    make(chan struct{}),
 	}
+	setActiveCollector(c)
+	return c
 }
 
 // Start begins recording stats in a background goroutine.
@@ -86,17 +85,6 @@ func (c *StatsCollector) Stop() {
 }
 
 func (c *StatsCollector) run() {
-	if err := utils.EnsureDir(filepath.Dir(statsFilePath), 0750); err != nil {
-		log.Printf("stats collector: failed to create directory: %v", err)
-		return
-	}
-
-	// Ensure file has valid header
-	if err := c.ensureHeader(); err != nil {
-		log.Printf("stats collector: failed to initialize stats file: %v", err)
-		return
-	}
-
 	ticker := time.NewTicker(c.interval)
 	defer ticker.Stop()
 
@@ -123,26 +111,6 @@ func (c *StatsCollector) run() {
 	}
 }
 
-func (c *StatsCollector) ensureHeader() error {
-	info, err := os.Stat(statsFilePath)
-	if err == nil && info.Size() >= 8 {
-		// File exists and has header
-		return nil
-	}
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-
-	// Write header
-	header := make([]byte, 8)
-	copy(header[0:4], statsMagic)
-	header[4] = statsVersion
-	binary.LittleEndian.PutUint16(header[5:7], statsRecordSize)
-	header[7] = 0 // reserved
-
-	return os.WriteFile(statsFilePath, header, 0640)
-}
-
 func (c *StatsCollector) collect() error {
 	cpuPct := c.sampleCPU()
 	rss, totalMem := c.sampleMemory()
@@ -158,21 +126,45 @@ func (c *StatsCollector) collect() error {
 }
 
 func (c *StatsCollector) appendRecord(record StatsRecord) error {
-	// Use O_APPEND for atomic small writes on Linux
-	f, err := os.OpenFile(statsFilePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0640)
-	if err != nil {
-		return err
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.records = append(c.records, record)
+
+	// Keep only records within retention and bounded by configured resolution.
+	c.truncateLocked()
+
+	return nil
+}
+
+func (c *StatsCollector) truncateLocked() {
+	if len(c.records) == 0 {
+		return
 	}
-	defer f.Close()
 
-	buf := make([]byte, statsRecordSize)
-	binary.LittleEndian.PutUint64(buf[0:8], uint64(record.Timestamp))
-	binary.LittleEndian.PutUint32(buf[8:12], math.Float32bits(record.CPUPercent))
-	binary.LittleEndian.PutUint64(buf[12:20], record.RSSBytes)
-	binary.LittleEndian.PutUint64(buf[20:28], record.TotalMemBytes)
+	if c.retention <= 0 {
+		c.records = nil
+		return
+	}
 
-	_, err = f.Write(buf)
-	return err
+	cutoff := time.Now().Add(-c.retention).Unix()
+	oldest := 0
+	for oldest < len(c.records) && c.records[oldest].Timestamp < cutoff {
+		oldest++
+	}
+	if oldest > 0 {
+		copy(c.records, c.records[oldest:])
+		c.records = c.records[:len(c.records)-oldest]
+	}
+
+	maxRecords := int(c.retention.Seconds() / defaultInterval.Seconds())
+	if maxRecords <= 0 {
+		maxRecords = 1
+	}
+
+	if len(c.records) > maxRecords {
+		c.records = c.records[len(c.records)-maxRecords:]
+	}
 }
 
 // sampleCPU reads /proc/stat and returns CPU usage percentage since last call.
@@ -269,42 +261,10 @@ func parseMeminfoKB(line string) uint64 {
 
 // Compact removes records older than the retention period.
 func (c *StatsCollector) Compact() error {
-	cutoff := time.Now().Add(-c.retention).Unix()
-
-	records, err := readAllRecords()
-	if err != nil {
-		return err
-	}
-
-	// Filter old records
-	var kept []StatsRecord
-	for _, r := range records {
-		if r.Timestamp >= cutoff {
-			kept = append(kept, r)
-		}
-	}
-
-	// If nothing changed, skip rewrite
-	if len(kept) == len(records) {
-		return nil
-	}
-
-	// Rewrite file atomically
-	buf := make([]byte, 8+len(kept)*statsRecordSize)
-	copy(buf[0:4], statsMagic)
-	buf[4] = statsVersion
-	binary.LittleEndian.PutUint16(buf[5:7], statsRecordSize)
-	buf[7] = 0
-
-	for i, r := range kept {
-		off := 8 + i*statsRecordSize
-		binary.LittleEndian.PutUint64(buf[off:off+8], uint64(r.Timestamp))
-		binary.LittleEndian.PutUint32(buf[off+8:off+12], math.Float32bits(r.CPUPercent))
-		binary.LittleEndian.PutUint64(buf[off+12:off+20], r.RSSBytes)
-		binary.LittleEndian.PutUint64(buf[off+20:off+28], r.TotalMemBytes)
-	}
-
-	return utils.AtomicWrite(statsFilePath, buf, 0640)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.truncateLocked()
+	return nil
 }
 
 // ReadStats returns records within the given time range.
@@ -327,52 +287,30 @@ func ReadStats(since, until time.Time) ([]StatsRecord, error) {
 }
 
 func readAllRecords() ([]StatsRecord, error) {
-	data, err := os.ReadFile(statsFilePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	if len(data) < 8 {
+	active := getActiveCollector()
+	if active == nil {
 		return nil, nil
 	}
 
-	// Validate header
-	if string(data[0:4]) != statsMagic {
-		return nil, fmt.Errorf("invalid stats file magic")
-	}
-	if data[4] != statsVersion {
-		return nil, fmt.Errorf("unsupported stats file version: %d", data[4])
-	}
-
-	recordSize := int(binary.LittleEndian.Uint16(data[5:7]))
-	if recordSize != statsRecordSize {
-		return nil, fmt.Errorf("unexpected record size: %d", recordSize)
-	}
-
-	data = data[8:]
-	numRecords := len(data) / statsRecordSize
-
-	records := make([]StatsRecord, 0, numRecords)
-	for i := 0; i < numRecords; i++ {
-		off := i * statsRecordSize
-		if off+statsRecordSize > len(data) {
-			break // partial record at end, ignore
-		}
-		records = append(records, StatsRecord{
-			Timestamp:     int64(binary.LittleEndian.Uint64(data[off : off+8])),
-			CPUPercent:    math.Float32frombits(binary.LittleEndian.Uint32(data[off+8 : off+12])),
-			RSSBytes:      binary.LittleEndian.Uint64(data[off+12 : off+20]),
-			TotalMemBytes: binary.LittleEndian.Uint64(data[off+20 : off+28]),
-		})
-	}
-
+	active.mu.RLock()
+	defer active.mu.RUnlock()
+	records := make([]StatsRecord, len(active.records))
+	copy(records, active.records)
 	return records, nil
 }
 
-// SetStatsFilePath sets the stats file path (for testing).
-func SetStatsFilePath(path string) {
-	statsFilePath = path
+func resetForTests() {
+	activeCollectorMu.Lock()
+	activeCollector = nil
+	activeCollectorMu.Unlock()
+}
+
+func clearActiveRecordsForTest() {
+	active := getActiveCollector()
+	if active == nil {
+		return
+	}
+	active.mu.Lock()
+	active.records = nil
+	active.mu.Unlock()
 }
