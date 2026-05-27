@@ -15,6 +15,7 @@ import {
   getGooglePhotosSyncProgress,
   getGooglePhotosAlbums,
   clearGooglePhotosAlbum,
+  getGooglePhotosAlbumClearProgress,
 } from '../api.js'
 
 function describeError(err) {
@@ -412,7 +413,7 @@ function SyncStartingPanel() {
   )
 }
 
-function AlbumsPanel({ albums, loading, onClear, clearingId }) {
+function AlbumsPanel({ albums, loading, onClear, clearingId, clearProgress }) {
   if (loading) {
     return (
       <Card>
@@ -448,29 +449,36 @@ function AlbumsPanel({ albums, loading, onClear, clearingId }) {
           These are the albums created by this app. You can clear an album to remove all its photos from Google Photos.
         </p>
         <ul className="space-y-2">
-          {albums.map((album) => (
-            <li
-              key={album.id}
-              className="flex items-center justify-between gap-3 rounded-lg border border-surface-700/60 p-3"
-            >
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-surface-100 truncate">{album.title}</p>
-                <p className="text-xs text-surface-500">
-                  {album.mediaItemsCount ? `${album.mediaItemsCount} items` : 'Empty'}
-                </p>
-              </div>
-              <Button
-                variant="danger"
-                size="sm"
-                loading={clearingId === album.id}
-                disabled={clearingId === album.id}
-                onClick={() => onClear(album.id, album.title)}
+          {albums.map((album) => {
+            const progress = clearProgress?.[album.id]
+            const isClearing = clearingId === album.id
+            const label = isClearing && progress?.status === 'clearing' && progress?.total_items > 0
+              ? `Removing ${progress.removed_items}/${progress.total_items}...`
+              : 'Clear'
+            return (
+              <li
+                key={album.id}
+                className="flex items-center justify-between gap-3 rounded-lg border border-surface-700/60 p-3"
               >
-                <Icon name="trash" className="w-4 h-4" />
-                Clear
-              </Button>
-            </li>
-          ))}
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-surface-100 truncate">{album.title}</p>
+                  <p className="text-xs text-surface-500">
+                    {album.mediaItemsCount ? `${album.mediaItemsCount} items` : 'Empty'}
+                  </p>
+                </div>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  loading={isClearing}
+                  disabled={isClearing}
+                  onClick={() => onClear(album.id, album.title)}
+                >
+                  <Icon name="trash" className="w-4 h-4" />
+                  {label}
+                </Button>
+              </li>
+            )
+          })}
         </ul>
       </div>
     </Card>
@@ -521,8 +529,10 @@ export default function GooglePhotosPage() {
   const [albums, setAlbums] = useState(null)
   const [albumsLoading, setAlbumsLoading] = useState(false)
   const [clearingAlbumId, setClearingAlbumId] = useState(null)
+  const [clearProgress, setClearProgress] = useState({})
   const progressIntervalRef = useRef(null)
   const statusIntervalRef = useRef(null)
+  const clearProgressIntervalRef = useRef(null)
   const hasLoadedStatusRef = useRef(false)
 
   const applySyncProgress = useCallback((data) => {
@@ -593,14 +603,46 @@ export default function GooglePhotosPage() {
       if (!window.confirm(`Clear all photos from "${albumTitle}"? This cannot be undone.`)) return
 
       setClearingAlbumId(albumId)
+      setClearProgress((prev) => ({ ...prev, [albumId]: { status: 'clearing', removed_items: 0, total_items: 0 } }))
+
+      let pollInterval = null
+      const stopPolling = () => {
+        if (pollInterval) {
+          clearInterval(pollInterval)
+          pollInterval = null
+        }
+      }
+
       try {
-        const data = await clearGooglePhotosAlbum(deviceUrl, albumId)
-        toast.success(`Cleared ${data?.removed || 0} item(s) from "${albumTitle}"`)
-        loadAlbums()
+        await clearGooglePhotosAlbum(deviceUrl, albumId)
+
+        pollInterval = setInterval(async () => {
+          try {
+            const data = await getGooglePhotosAlbumClearProgress(deviceUrl, albumId)
+            setClearProgress((prev) => ({ ...prev, [albumId]: data }))
+
+            if (data?.status === 'completed' || data?.status === 'error' || data?.status === 'idle') {
+              stopPolling()
+              setClearingAlbumId(null)
+              if (data?.status === 'completed') {
+                toast.success(`Cleared ${data?.removed_items || 0} item(s) from "${albumTitle}"`)
+                loadAlbums()
+              } else if (data?.status === 'error') {
+                toast.error(`Failed to clear album: ${data?.error || 'Unknown error'}`)
+              }
+            }
+          } catch (err) {
+            stopPolling()
+            setClearingAlbumId(null)
+            toast.error(`Failed to clear album: ${describeError(err)}`)
+          }
+        }, 1000)
+
+        clearProgressIntervalRef.current = pollInterval
       } catch (err) {
-        toast.error(`Failed to clear album: ${describeError(err)}`)
-      } finally {
+        stopPolling()
         setClearingAlbumId(null)
+        toast.error(`Failed to start clearing: ${describeError(err)}`)
       }
     },
     [deviceUrl, toast, loadAlbums]
@@ -619,7 +661,12 @@ export default function GooglePhotosPage() {
   useEffect(() => {
     if (!deviceUrl) return
     statusIntervalRef.current = setInterval(loadStatus, 10000)
-    return () => clearInterval(statusIntervalRef.current)
+    return () => {
+      clearInterval(statusIntervalRef.current)
+      if (clearProgressIntervalRef.current) {
+        clearInterval(clearProgressIntervalRef.current)
+      }
+    }
   }, [deviceUrl, loadStatus])
 
   useEffect(() => {
@@ -810,6 +857,7 @@ export default function GooglePhotosPage() {
           loading={albumsLoading}
           onClear={handleClearAlbum}
           clearingId={clearingAlbumId}
+          clearProgress={clearProgress}
         />
       )}
 
