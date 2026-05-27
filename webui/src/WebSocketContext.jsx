@@ -164,6 +164,16 @@ export function WebSocketProvider({ children }) {
 
   return (
     <WebSocketContext.Provider value={value}>
+      {!wsConnected && deviceUrl && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed top-0 left-0 right-0 z-50 flex items-center justify-center gap-2 px-4 py-2 bg-warning/90 text-surface-900 text-xs font-medium backdrop-blur-sm"
+        >
+          <span className="inline-block w-2 h-2 rounded-full bg-surface-900 opacity-70 animate-pulse" aria-hidden="true" />
+          Connection lost — retrying…
+        </div>
+      )}
       {children}
     </WebSocketContext.Provider>
   )

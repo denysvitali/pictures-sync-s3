@@ -15,7 +15,7 @@ export function ToastProvider({ children }) {
     const key = `${variant}:${message}`
 
     const lastTime = recentRef.current.get(key)
-    if (lastTime && now - lastTime < DEDUP_WINDOW_MS) {
+    if (variant !== 'danger' && lastTime && now - lastTime < DEDUP_WINDOW_MS) {
       return null
     }
     recentRef.current.set(key, now)

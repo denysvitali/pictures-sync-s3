@@ -91,9 +91,11 @@ export function Modal({
       window.clearTimeout(id)
       document.body.style.overflow = prevOverflow
       const prev = previousFocusRef.current
-      if (prev && typeof prev.focus === 'function') {
-        prev.focus()
-      }
+      queueMicrotask(() => {
+        if (prev && typeof prev.focus === 'function') {
+          prev.focus()
+        }
+      })
     }
   }, [open, initialFocusRef])
 

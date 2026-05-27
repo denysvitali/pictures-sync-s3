@@ -174,7 +174,7 @@ function SystemStatusCard({ status }) {
             aria-atomic="true"
           >
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs text-surface-400">
+              <span id="sync-progress-label" className="text-xs text-surface-400">
                 {getProgressLabel(status.current_sync)}
               </span>
               <span className="text-xs font-medium text-brand-400">
@@ -187,7 +187,7 @@ function SystemStatusCard({ status }) {
               aria-valuemin={0}
               aria-valuemax={100}
               aria-valuenow={getProgressPercent(status.current_sync)}
-              aria-label={getProgressLabel(status.current_sync)}
+              aria-labelledby={status.current_sync.current_file ? 'sync-current-file sync-progress-label' : 'sync-progress-label'}
             >
               <div
                 className="h-full bg-brand-500 rounded-full transition-all duration-150"
@@ -195,7 +195,7 @@ function SystemStatusCard({ status }) {
               />
             </div>
             {status.current_sync.current_file && (
-              <p className="text-xs text-surface-500 mt-2 truncate">
+              <p id="sync-current-file" className="text-xs text-surface-500 mt-2 truncate">
                 {status.current_sync.current_file}
               </p>
             )}
