@@ -62,6 +62,8 @@ func TestWatchdogReboots(t *testing.T) {
 		LogPath:          logPath,
 		MaxLogBytes:      1 << 20,
 		RebootOnFailure:  true,
+		InternetTargets:  []string{"www.example.com"},
+		TailscaleCheck:   func(context.Context) error { return nil },
 		Gateway: func(string) (net.IP, error) {
 			return net.IPv4(192, 168, 1, 1), nil
 		},
@@ -118,6 +120,8 @@ func TestWatchdogRecoveryResetsCounter(t *testing.T) {
 		LogPath:          filepath.Join(dir, "netwatchdog.log"),
 		MaxLogBytes:      1 << 20,
 		RebootOnFailure:  true,
+		InternetTargets:  []string{"www.example.com"},
+		TailscaleCheck:   func(context.Context) error { return nil },
 		Gateway: func(string) (net.IP, error) {
 			return net.IPv4(192, 168, 1, 1), nil
 		},
@@ -151,8 +155,37 @@ func TestWatchdogRecoveryResetsCounter(t *testing.T) {
 func TestCheckOnceTreatsSetupHotspotAsHealthy(t *testing.T) {
 	var gatewayCalls atomic.Int32
 	cfg := Config{
-		Interface:   "lo",
-		SetupModeIP: net.IPv4(127, 0, 0, 1),
+		Interface:      "lo",
+		SetupModeIP:    net.IPv4(127, 0, 0, 1),
+		TailscaleCheck: func(context.Context) error { return nil },
+		Gateway: func(string) (net.IP, error) {
+			gatewayCalls.Add(1)
+			return nil, errors.New("gateway should not be checked")
+		},
+		Ping: func(context.Context, string) error {
+			t.Fatal("ping should not be called while setup hotspot is active")
+			return nil
+		},
+	}
+
+	ok, msg := New(cfg).checkOnce(context.Background())
+	if !ok {
+		t.Fatalf("checkOnce() ok = false, msg = %q", msg)
+	}
+	if !strings.Contains(msg, "setup hotspot active") {
+		t.Fatalf("checkOnce() msg = %q, want setup hotspot message", msg)
+	}
+	if gatewayCalls.Load() != 0 {
+		t.Fatalf("gateway was called %d times, want 0", gatewayCalls.Load())
+	}
+}
+
+func TestCheckOnceTreatsSetupHotspotAsHealthyAcrossAnyInterface(t *testing.T) {
+	var gatewayCalls atomic.Int32
+	cfg := Config{
+		Interface:      "",
+		SetupModeIP:    net.IPv4(127, 0, 0, 1),
+		TailscaleCheck: func(context.Context) error { return nil },
 		Gateway: func(string) (net.IP, error) {
 			gatewayCalls.Add(1)
 			return nil, errors.New("gateway should not be checked")
@@ -184,5 +217,57 @@ func TestPersistLogRotates(t *testing.T) {
 	}
 	if _, err := os.Stat(path + ".1"); err != nil {
 		t.Fatalf("expected rotated file: %v", err)
+	}
+}
+
+func TestCheckOnceFailsWhenInternetAndTailscaleMissing(t *testing.T) {
+	var pingCalls atomic.Int32
+	cfg := Config{
+		Interface:   "lo",
+		SetupModeIP: nil,
+		Gateway: func(string) (net.IP, error) {
+			return net.IPv4(192, 168, 1, 1), nil
+		},
+		InternetTargets: []string{"bad.google.com"},
+		Ping: func(context.Context, string) error {
+			pingCalls.Add(1)
+			return errors.New("unreachable")
+		},
+		TailscaleCheck: func(context.Context) error {
+			return errors.New("tailscale not ready")
+		},
+	}
+	_, msg := New(cfg).checkOnce(context.Background())
+	if !strings.Contains(msg, "internet check failed") {
+		t.Fatalf("checkOnce() msg = %q, want internet check failure first", msg)
+	}
+	if pingCalls.Load() == 0 {
+		t.Fatalf("expected ping checks to run")
+	}
+}
+
+func TestCheckInternetConnectivityFallsBackToNextHost(t *testing.T) {
+	var seen []string
+	cfg := Config{
+		Interface: "lo",
+		Gateway: func(string) (net.IP, error) {
+			return net.IPv4(127, 0, 0, 1), nil
+		},
+		InternetTargets: []string{"bad.example.com", "also-bad.example.com", "www.example.com"},
+		Ping: func(_ context.Context, host string) error {
+			seen = append(seen, host)
+			if len(seen) == 3 {
+				return nil
+			}
+			return errors.New("unreachable")
+		},
+		TailscaleCheck: func(context.Context) error { return nil },
+	}
+
+	if err := New(cfg).checkInternetConnectivity(context.Background()); err != nil {
+		t.Fatalf("expected internet connectivity to succeed via fallback host, got %v", err)
+	}
+	if len(seen) != 3 {
+		t.Fatalf("expected 3 ping attempts (fallback path), got %d", len(seen))
 	}
 }
