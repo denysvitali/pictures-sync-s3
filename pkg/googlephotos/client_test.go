@@ -114,6 +114,7 @@ func TestStartAuthRequestsCurrentGooglePhotosScopes(t *testing.T) {
 	wantScopes := []string{
 		"https://www.googleapis.com/auth/photoslibrary.readonly.appcreateddata",
 		"https://www.googleapis.com/auth/photoslibrary.appendonly",
+		"https://www.googleapis.com/auth/photoslibrary",
 	}
 
 	if len(gotScopes) != len(wantScopes) {
