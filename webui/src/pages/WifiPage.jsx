@@ -304,6 +304,7 @@ export default function WifiPage() {
   const [savedNetworks, setSavedNetworks] = useState([])
   const [scannedNetworks, setScannedNetworks] = useState([])
   const [scanning, setScanning] = useState(false)
+  const [connecting, setConnecting] = useState(false)
   const [showSaved, setShowSaved] = useState(true)
   const [showScanned, setShowScanned] = useState(false)
 
@@ -347,6 +348,8 @@ export default function WifiPage() {
   }
 
   async function handleConnect(ssid, password) {
+    if (connecting) return
+    setConnecting(true)
     try {
       const res = await connectWifi(deviceUrl, ssid, password)
       if (res?.success === false) {
@@ -357,10 +360,14 @@ export default function WifiPage() {
       await fetchSavedNetworks()
     } catch (err) {
       toast.error(`Connection failed: ${describeError(err)}`)
+    } finally {
+      setConnecting(false)
     }
   }
 
   async function handleDisconnect(ssid) {
+    if (connecting) return
+    setConnecting(true)
     try {
       const res = await disconnectWifi(deviceUrl, ssid)
       if (res?.success === false) {
@@ -371,6 +378,8 @@ export default function WifiPage() {
       await fetchSavedNetworks()
     } catch (err) {
       toast.error(`Disconnect failed: ${describeError(err)}`)
+    } finally {
+      setConnecting(false)
     }
   }
 
@@ -420,6 +429,7 @@ export default function WifiPage() {
             variant="secondary"
             size="sm"
             loading={scanning}
+            disabled={connecting}
             onClick={handleScan}
           >
             <Icon name="arrow-path" className="w-4 h-4" />
@@ -435,17 +445,19 @@ export default function WifiPage() {
             <CardTitle>Available Networks</CardTitle>
             <StatusBadge variant="info">{scannedNetworks.length} found</StatusBadge>
           </CardHeader>
-          <div className="space-y-2">
-            {scannedNetworks.map((network) => (
-              <ScannedNetworkItem
-                key={network.ssid}
-                network={network}
-                currentSsid={status?.connected ? status.ssid : null}
-                onConnect={handleConnect}
-                onDisconnect={handleDisconnect}
-              />
-            ))}
-          </div>
+          <fieldset disabled={connecting} className="contents">
+            <div className="space-y-2">
+              {scannedNetworks.map((network) => (
+                <ScannedNetworkItem
+                  key={network.ssid}
+                  network={network}
+                  currentSsid={status?.connected ? status.ssid : null}
+                  onConnect={handleConnect}
+                  onDisconnect={handleDisconnect}
+                />
+              ))}
+            </div>
+          </fieldset>
         </Card>
       )}
 
@@ -472,20 +484,22 @@ export default function WifiPage() {
             {savedNetworks.length === 0 ? (
               <p className="text-sm text-surface-400 py-2">No saved networks. Scan to find available networks.</p>
             ) : (
-              <div className="space-y-2" role="list" aria-label="Saved WiFi networks ordered by priority">
-                {savedNetworks.map((network, idx) => (
-                  <SavedNetworkItem
-                    key={network.ssid}
-                    network={network}
-                    index={idx}
-                    total={savedNetworks.length}
-                    onMoveUp={handleMoveUp}
-                    onMoveDown={handleMoveDown}
-                    onDisconnect={handleDisconnect}
-                    isConnected={status?.connected && status.ssid === network.ssid}
-                  />
-                ))}
-              </div>
+              <fieldset disabled={connecting} className="contents">
+                <div className="space-y-2" role="list" aria-label="Saved WiFi networks ordered by priority">
+                  {savedNetworks.map((network, idx) => (
+                    <SavedNetworkItem
+                      key={network.ssid}
+                      network={network}
+                      index={idx}
+                      total={savedNetworks.length}
+                      onMoveUp={handleMoveUp}
+                      onMoveDown={handleMoveDown}
+                      onDisconnect={handleDisconnect}
+                      isConnected={status?.connected && status.ssid === network.ssid}
+                    />
+                  ))}
+                </div>
+              </fieldset>
             )}
           </>
         )}
