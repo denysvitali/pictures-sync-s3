@@ -239,6 +239,20 @@ type ConnectionStatus struct {
 	Email       string `json:"email,omitempty"`
 }
 
+// ListMediaItemsResponse is the response from listing media items in an album
+type ListMediaItemsResponse struct {
+	MediaItems    []*MediaItem `json:"mediaItems,omitempty"`
+	NextPageToken string       `json:"nextPageToken,omitempty"`
+}
+
+// BatchRemoveMediaItemsRequest removes media items from an album
+type BatchRemoveMediaItemsRequest struct {
+	MediaItemIds []string `json:"mediaItemIds"`
+}
+
+// BatchRemoveMediaItemsResponse is the response from batch removing media items
+type BatchRemoveMediaItemsResponse struct{}
+
 // IsPhotoOrVideo returns true if the file extension is a photo or video (not RAW)
 func IsPhotoOrVideo(filename string) bool {
 	ext := lowerExt(filename)

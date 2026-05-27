@@ -350,6 +350,7 @@ func main() {
 	http.HandleFunc("/api/googlephotos/sync/progress", ctx.HandleGooglePhotosSyncProgress)
 	http.HandleFunc("/api/googlephotos/sync/history/export", ctx.HandleGooglePhotosSyncHistoryExport)
 	http.HandleFunc("/api/googlephotos/albums", ctx.HandleGooglePhotosAlbums)
+	http.HandleFunc("/api/googlephotos/albums/", ctx.HandleGooglePhotosAlbums)
 	http.HandleFunc("/ws", websocket.HandleWebSocketWithDmesg(stateMgr, eventMgr, dmesgMgr, otaMgr))
 
 	// SPA route and static assets for React frontend

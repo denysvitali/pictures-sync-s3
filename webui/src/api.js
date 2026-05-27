@@ -244,6 +244,10 @@ export const cancelGooglePhotosSync = (d) =>
   apiRequest('/api/googlephotos/sync/cancel', { deviceUrl: d, method: 'POST' })
 export const getGooglePhotosSyncProgress = (d) =>
   apiRequest('/api/googlephotos/sync/progress', { deviceUrl: d })
+export const getGooglePhotosAlbums = (d) =>
+  apiRequest('/api/googlephotos/albums', { deviceUrl: d })
+export const clearGooglePhotosAlbum = (d, albumId) =>
+  apiRequest(`/api/googlephotos/albums/${albumId}`, { deviceUrl: d, method: 'DELETE' })
 
 export function getWebSocketUrl(deviceUrl) {
   const base = normalizeBaseUrl(deviceUrl)

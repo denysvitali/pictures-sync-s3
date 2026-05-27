@@ -55,6 +55,25 @@ func saveGooglePhotosRcloneState(s googlePhotosRcloneState) error {
 	return utils.SaveJSON(filepath.Join(state.PermDir, googlePhotosRcloneStateFile), &s, 0600)
 }
 
+// ClearGooglePhotosAlbumState removes all upload tracking entries for a given
+// album from the local rclone Google Photos state. This lets the next sync
+// re-upload files after the album has been cleared on the remote.
+func ClearGooglePhotosAlbumState(albumName string) error {
+	s := loadGooglePhotosRcloneState()
+	prefix := albumName + "/"
+	changed := false
+	for key := range s.Uploaded {
+		if strings.HasPrefix(key, prefix) {
+			delete(s.Uploaded, key)
+			changed = true
+		}
+	}
+	if changed {
+		return saveGooglePhotosRcloneState(s)
+	}
+	return nil
+}
+
 // SyncCardsToGooglePhotos syncs all card directories from the B2 remote to
 // Google Photos using rclone's googlephotos backend. It lists cards from the
 // B2 remote, then syncs each card's DCIM folder to gphotos:card-{id}.

@@ -13,6 +13,7 @@ import (
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/googlephotos"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
+	"github.com/denysvitali/pictures-sync-s3/pkg/syncmanager"
 	"github.com/denysvitali/pictures-sync-s3/pkg/utils"
 	"github.com/denysvitali/pictures-sync-s3/pkg/validation"
 )
@@ -398,8 +399,138 @@ func (ctx *Context) HandleGooglePhotosSyncHistoryExport(w http.ResponseWriter, r
 	http.Error(w, "Not found", http.StatusNotFound)
 }
 
-// HandleGooglePhotosAlbums returns 404 — album management via native API removed.
-// Albums are created automatically during sync via rclone.
+// HandleGooglePhotosAlbums handles album operations.
+// DELETE /api/googlephotos/albums/{albumId} — removes all media items from an album.
 func (ctx *Context) HandleGooglePhotosAlbums(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "Album management is not available with rclone-based Google Photos sync. Albums are created automatically during sync.", http.StatusNotFound)
+	if r.Method == http.MethodDelete {
+		ctx.handleGooglePhotosAlbumClear(w, r)
+		return
+	}
+	if r.Method == http.MethodGet {
+		ctx.handleGooglePhotosAlbumList(w, r)
+		return
+	}
+	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+}
+
+func (ctx *Context) handleGooglePhotosAlbumList(w http.ResponseWriter, r *http.Request) {
+	clientID := ""
+	clientSecret := ""
+	if ctx.AppSettings != nil {
+		clientID = ctx.AppSettings.GetGooglePhotosClientID()
+		clientSecret = ctx.AppSettings.GetGooglePhotosClientSecret()
+	}
+	if clientID == "" || clientSecret == "" {
+		http.Error(w, "Google Photos credentials not configured", http.StatusPreconditionFailed)
+		return
+	}
+
+	tokenStore := googlephotos.NewTokenStore("")
+	client := googlephotos.NewClient(clientID, clientSecret, tokenStore)
+	if !client.IsAuthenticated() {
+		JSONResponse(w, map[string]interface{}{"albums": []any{}})
+		return
+	}
+
+	albums, err := client.ListAlbums()
+	if err != nil {
+		log.Printf("[GooglePhotos] Failed to list albums: %v", err)
+		http.Error(w, "Failed to list albums", http.StatusInternalServerError)
+		return
+	}
+
+	// Only return app-managed albums (Card {id}).
+	var managed []*googlephotos.Album
+	for _, a := range albums {
+		if strings.HasPrefix(a.Title, "Card ") {
+			managed = append(managed, a)
+		}
+	}
+	JSONResponse(w, map[string]interface{}{"albums": managed})
+}
+
+func (ctx *Context) handleGooglePhotosAlbumClear(w http.ResponseWriter, r *http.Request) {
+	// Extract album ID from path: /api/googlephotos/albums/{albumId}
+	path := strings.Trim(r.URL.Path, "/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 4 {
+		http.Error(w, "Missing album ID", http.StatusBadRequest)
+		return
+	}
+	albumID := parts[3]
+	if albumID == "" {
+		http.Error(w, "Missing album ID", http.StatusBadRequest)
+		return
+	}
+
+	clientID := ""
+	clientSecret := ""
+	if ctx.AppSettings != nil {
+		clientID = ctx.AppSettings.GetGooglePhotosClientID()
+		clientSecret = ctx.AppSettings.GetGooglePhotosClientSecret()
+	}
+	if clientID == "" || clientSecret == "" {
+		http.Error(w, "Google Photos credentials not configured", http.StatusPreconditionFailed)
+		return
+	}
+
+	tokenStore := googlephotos.NewTokenStore("")
+	client := googlephotos.NewClient(clientID, clientSecret, tokenStore)
+	if !client.IsAuthenticated() {
+		http.Error(w, "Not authenticated with Google Photos", http.StatusUnauthorized)
+		return
+	}
+
+	// List all media items in the album.
+	items, err := client.ListAlbumMediaItems(r.Context(), albumID)
+	if err != nil {
+		log.Printf("[GooglePhotos] Failed to list album %s items: %v", albumID, err)
+		http.Error(w, fmt.Sprintf("Failed to list album items: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if len(items) == 0 {
+		JSONResponse(w, map[string]interface{}{"cleared": true, "removed": 0})
+		return
+	}
+
+	// Batch remove media items from the album.
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		if item.ID != "" {
+			ids = append(ids, item.ID)
+		}
+	}
+
+	if err := client.BatchRemoveMediaItems(r.Context(), albumID, ids); err != nil {
+		log.Printf("[GooglePhotos] Failed to remove items from album %s: %v", albumID, err)
+		http.Error(w, fmt.Sprintf("Failed to remove items: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Clear local upload state so the next sync can re-upload these files.
+	albumName := ""
+	for _, a := range items {
+		if a.Filename != "" {
+			// Try to infer album name from album ID via listing; fallback to album ID.
+			break
+		}
+	}
+	// Best effort: clear state for any album matching this album ID.
+	// Since we don't have the album title from the items, try to get it.
+	albums, _ := client.ListAlbums()
+	for _, a := range albums {
+		if a.ID == albumID {
+			albumName = a.Title
+			break
+		}
+	}
+	if albumName != "" {
+		if err := syncmanager.ClearGooglePhotosAlbumState(albumName); err != nil {
+			log.Printf("[GooglePhotos] Failed to clear local state for album %s: %v", albumName, err)
+		}
+	}
+
+	log.Printf("[GooglePhotos] Cleared %d item(s) from album %s", len(ids), albumID)
+	JSONResponse(w, map[string]interface{}{"cleared": true, "removed": len(ids)})
 }

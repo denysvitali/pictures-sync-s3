@@ -190,3 +190,77 @@ func (c *Client) BatchCreateMediaItemsContext(ctx context.Context, albumID strin
 
 	return &result, nil
 }
+
+// ListAlbumMediaItems lists all media items in a specific album.
+func (c *Client) ListAlbumMediaItems(ctx context.Context, albumID string) ([]*MediaItem, error) {
+	var allItems []*MediaItem
+	pageToken := ""
+
+	for {
+		path := fmt.Sprintf("/mediaItems:search?pageSize=100")
+		if pageToken != "" {
+			path = fmt.Sprintf("/mediaItems:search?pageSize=100&pageToken=%s", pageToken)
+		}
+
+		reqBody := map[string]string{"albumId": albumID}
+		jsonBody, err := json.Marshal(reqBody)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal search request: %w", err)
+		}
+
+		resp, err := c.doRequestContext(ctx, "POST", path, bytes.NewReader(jsonBody))
+		if err != nil {
+			return nil, err
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("failed to read media items response: %w", err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("list album media items failed (%d): %s", resp.StatusCode, string(body))
+		}
+
+		var result ListMediaItemsResponse
+		if err := json.Unmarshal(body, &result); err != nil {
+			return nil, fmt.Errorf("failed to parse media items response: %w", err)
+		}
+
+		allItems = append(allItems, result.MediaItems...)
+
+		if result.NextPageToken == "" {
+			break
+		}
+		pageToken = result.NextPageToken
+	}
+
+	return allItems, nil
+}
+
+// BatchRemoveMediaItems removes media items from an album.
+func (c *Client) BatchRemoveMediaItems(ctx context.Context, albumID string, mediaItemIds []string) error {
+	reqBody := BatchRemoveMediaItemsRequest{MediaItemIds: mediaItemIds}
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("failed to marshal batch remove request: %w", err)
+	}
+
+	resp, err := c.doRequestContext(ctx, "POST", fmt.Sprintf("/albums/%s:batchRemoveMediaItems", albumID), bytes.NewReader(jsonBody))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read batch remove response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("batch remove failed (%d): %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}

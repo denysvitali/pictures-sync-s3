@@ -13,6 +13,8 @@ import {
   startGooglePhotosSync,
   cancelGooglePhotosSync,
   getGooglePhotosSyncProgress,
+  getGooglePhotosAlbums,
+  clearGooglePhotosAlbum,
 } from '../api.js'
 
 function describeError(err) {
@@ -410,6 +412,71 @@ function SyncStartingPanel() {
   )
 }
 
+function AlbumsPanel({ albums, loading, onClear, clearingId }) {
+  if (loading) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Albums</CardTitle>
+        </CardHeader>
+        <div className="flex items-center gap-2 text-sm text-surface-400">
+          <LoadingSpinner size="sm" />
+          Loading albums...
+        </div>
+      </Card>
+    )
+  }
+
+  if (!albums || albums.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Albums</CardTitle>
+        </CardHeader>
+        <p className="text-sm text-surface-400">No app-managed albums found yet. Run a sync to create them.</p>
+      </Card>
+    )
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Albums</CardTitle>
+      </CardHeader>
+      <div className="space-y-2">
+        <p className="text-xs text-surface-500">
+          These are the albums created by this app. You can clear an album to remove all its photos from Google Photos.
+        </p>
+        <ul className="space-y-2">
+          {albums.map((album) => (
+            <li
+              key={album.id}
+              className="flex items-center justify-between gap-3 rounded-lg border border-surface-700/60 p-3"
+            >
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-surface-100 truncate">{album.title}</p>
+                <p className="text-xs text-surface-500">
+                  {album.mediaItemsCount ? `${album.mediaItemsCount} items` : 'Empty'}
+                </p>
+              </div>
+              <Button
+                variant="danger"
+                size="sm"
+                loading={clearingId === album.id}
+                disabled={clearingId === album.id}
+                onClick={() => onClear(album.id, album.title)}
+              >
+                <Icon name="trash" className="w-4 h-4" />
+                Clear
+              </Button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </Card>
+  )
+}
+
 function InfoPanel() {
   return (
     <Card>
@@ -451,6 +518,9 @@ export default function GooglePhotosPage() {
   const [disconnecting, setDisconnecting] = useState(false)
   const [progress, setProgress] = useState(null)
   const [statusError, setStatusError] = useState(null)
+  const [albums, setAlbums] = useState(null)
+  const [albumsLoading, setAlbumsLoading] = useState(false)
+  const [clearingAlbumId, setClearingAlbumId] = useState(null)
   const progressIntervalRef = useRef(null)
   const statusIntervalRef = useRef(null)
   const hasLoadedStatusRef = useRef(false)
@@ -504,9 +574,47 @@ export default function GooglePhotosPage() {
     setLoading(false)
   }, [loadStatus, loadSyncProgress])
 
+  const loadAlbums = useCallback(async () => {
+    if (!deviceUrl) return
+    setAlbumsLoading(true)
+    try {
+      const data = await getGooglePhotosAlbums(deviceUrl)
+      setAlbums(data?.albums || [])
+    } catch (err) {
+      setAlbums([])
+    } finally {
+      setAlbumsLoading(false)
+    }
+  }, [deviceUrl])
+
+  const handleClearAlbum = useCallback(
+    async (albumId, albumTitle) => {
+      if (!deviceUrl) return
+      if (!window.confirm(`Clear all photos from "${albumTitle}"? This cannot be undone.`)) return
+
+      setClearingAlbumId(albumId)
+      try {
+        const data = await clearGooglePhotosAlbum(deviceUrl, albumId)
+        toast.success(`Cleared ${data?.removed || 0} item(s) from "${albumTitle}"`)
+        loadAlbums()
+      } catch (err) {
+        toast.error(`Failed to clear album: ${describeError(err)}`)
+      } finally {
+        setClearingAlbumId(null)
+      }
+    },
+    [deviceUrl, toast, loadAlbums]
+  )
+
   useEffect(() => {
     loadAll()
   }, [loadAll])
+
+  useEffect(() => {
+    if (status?.connected) {
+      loadAlbums()
+    }
+  }, [status?.connected, loadAlbums])
 
   useEffect(() => {
     if (!deviceUrl) return
@@ -695,6 +803,15 @@ export default function GooglePhotosPage() {
       />
 
       {showProgress ? (progress ? <ProgressPanel progress={progress} /> : <SyncStartingPanel />) : null}
+
+      {isConnected && (
+        <AlbumsPanel
+          albums={albums}
+          loading={albumsLoading}
+          onClear={handleClearAlbum}
+          clearingId={clearingAlbumId}
+        />
+      )}
 
       <InfoPanel />
     </div>
