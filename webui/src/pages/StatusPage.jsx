@@ -1,10 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useDevice } from '../DeviceContext.jsx'
+import { useWebSocket } from '../WebSocketContext.jsx'
 import { useToast } from '../components/Toast.jsx'
 import {
   getStatus,
-  getWSToken,
-  getWebSocketUrl,
   getHistory,
   getDevices,
   startSync,
@@ -128,42 +127,6 @@ function getProgressLabel(sync) {
   if (phase === 'checking') return `Checking ${current} of ${total} files`
   if (phase === 'uploading') return `Uploading ${current} of ${total} files`
   return `${current} of ${total} files`
-}
-
-function isSameSync(prevSync, nextSync) {
-  if (!prevSync || !nextSync) return false
-  if (prevSync.id && nextSync.id) return prevSync.id === nextSync.id
-  if (prevSync.start_time && nextSync.start_time) return prevSync.start_time === nextSync.start_time
-  return Boolean(
-    prevSync.card_id &&
-    nextSync.card_id &&
-    prevSync.card_id === nextSync.card_id &&
-    prevSync.files_total === nextSync.files_total
-  )
-}
-
-function mergeStatusProgress(prevStatus, nextStatus) {
-  if (!prevStatus || !nextStatus) return nextStatus
-
-  const prevSync = prevStatus.current_sync
-  const nextSync = nextStatus.current_sync
-  if (nextStatus.status !== 'syncing' || !isSameSync(prevSync, nextSync)) {
-    return nextStatus
-  }
-
-  const prevFiles = Number(prevSync.files_synced || 0)
-  const nextFiles = Number(nextSync.files_synced || 0)
-  const prevBytes = Number(prevSync.bytes_synced || 0)
-  const nextBytes = Number(nextSync.bytes_synced || 0)
-
-  if (nextFiles < prevFiles || nextBytes < prevBytes) {
-    return {
-      ...nextStatus,
-      current_sync: prevSync,
-    }
-  }
-
-  return nextStatus
 }
 
 function getOverviewCardID(status) {
@@ -781,9 +744,9 @@ function FormatSDCardModal({ open, onClose, devicePath, onConfirm, loading }) {
 
 export default function StatusPage() {
   const { deviceUrl } = useDevice()
+  const { status, wsConnected, wsError, setStatus } = useWebSocket()
   const toast = useToast()
 
-  const [status, setStatus] = useState(null)
   const [history, setHistory] = useState([])
   const [devices, setDevices] = useState([])
   const [loading, setLoading] = useState(true)
@@ -795,10 +758,8 @@ export default function StatusPage() {
   const [panicClearLoading, setPanicClearLoading] = useState(false)
   const [error, setError] = useState(null)
   const [formatModal, setFormatModal] = useState({ open: false, devicePath: '' })
-  const [wsConnected, setWsConnected] = useState(false)
   const consecutiveErrorsRef = useRef(0)
   const timerRef = useRef(null)
-  const wsReconnectRef = useRef(null)
   const lastSyncIdRef = useRef(null)
   const lastMountedRef = useRef(null)
 
@@ -811,7 +772,20 @@ export default function StatusPage() {
         getStatus(deviceUrl),
         getHistory(deviceUrl),
       ])
-      setStatus((currentStatus) => mergeStatusProgress(currentStatus, statusData))
+      setStatus((currentStatus) => {
+        // Simple merge: prefer fetched data but preserve progress during sync
+        if (!currentStatus || !statusData) return statusData
+        if (currentStatus.status === 'syncing' && statusData.status === 'syncing') {
+          const prevFiles = Number(currentStatus.current_sync?.files_synced || 0)
+          const nextFiles = Number(statusData.current_sync?.files_synced || 0)
+          const prevBytes = Number(currentStatus.current_sync?.bytes_synced || 0)
+          const nextBytes = Number(statusData.current_sync?.bytes_synced || 0)
+          if (nextFiles < prevFiles || nextBytes < prevBytes) {
+            return { ...statusData, current_sync: currentStatus.current_sync }
+          }
+        }
+        return statusData
+      })
       setHistory(Array.isArray(historyData) ? historyData : [])
       try {
         const devicesData = await getDevices(deviceUrl)
@@ -836,103 +810,34 @@ export default function StatusPage() {
     } finally {
       setLoading(false)
     }
-  }, [deviceUrl, toast])
+  }, [deviceUrl, toast, setStatus])
 
   useEffect(() => {
     fetchData()
   }, [fetchData])
 
+  // Refresh history and devices when sync completes or card mounts
   useEffect(() => {
-    if (!deviceUrl) return undefined
+    if (!status || !deviceUrl) return
 
-    let cancelled = false
-    let reconnectAttempts = 0
-    let socket = null
-    lastSyncIdRef.current = null
-    lastMountedRef.current = null
-
-    const refreshHistory = async (syncID) => {
-      if (!syncID || lastSyncIdRef.current === syncID) return
+    const syncID = status.last_sync?.id
+    if (syncID && lastSyncIdRef.current !== syncID) {
       lastSyncIdRef.current = syncID
-      try {
-        const historyData = await getHistory(deviceUrl)
-        if (!cancelled) setHistory(Array.isArray(historyData) ? historyData : [])
-      } catch {
-        // Status updates are still useful if history refresh fails.
-      }
+      getHistory(deviceUrl)
+        .then((data) => setHistory(Array.isArray(data) ? data : []))
+        .catch(() => {})
     }
 
-    const refreshDevices = async (mounted) => {
-      if (lastMountedRef.current === mounted) return
+    const mounted = Boolean(status.sdcard_mounted)
+    if (lastMountedRef.current !== mounted) {
       lastMountedRef.current = mounted
-      try {
-        const devicesData = await getDevices(deviceUrl)
-        if (!cancelled) setDevices(Array.isArray(devicesData) ? devicesData : [])
-      } catch {
-        if (!cancelled) setDevices([])
-      }
+      getDevices(deviceUrl)
+        .then((data) => setDevices(Array.isArray(data) ? data : []))
+        .catch(() => setDevices([]))
     }
+  }, [status, deviceUrl])
 
-    const scheduleReconnect = () => {
-      if (cancelled) return
-      const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 15000)
-      reconnectAttempts += 1
-      wsReconnectRef.current = window.setTimeout(connect, delay)
-    }
-
-    const connect = async () => {
-      try {
-        const tokenData = await getWSToken(deviceUrl)
-        if (cancelled) return
-
-        socket = new WebSocket(getWebSocketUrl(deviceUrl))
-        socket.onopen = () => {
-          reconnectAttempts = 0
-          socket.send(JSON.stringify({ type: 'auth', token: tokenData.ws_token }))
-          if (!cancelled) setWsConnected(true)
-        }
-        socket.onmessage = (event) => {
-          let message = null
-          try {
-            message = JSON.parse(event.data)
-          } catch {
-            return
-          }
-
-          if (message.type === 'state' && message.data) {
-            setStatus((currentStatus) => mergeStatusProgress(currentStatus, message.data))
-            setError(null)
-            setLoading(false)
-            consecutiveErrorsRef.current = 0
-            refreshHistory(message.data.last_sync?.id)
-            refreshDevices(Boolean(message.data.sdcard_mounted))
-          }
-        }
-        socket.onclose = () => {
-          if (!cancelled) setWsConnected(false)
-          scheduleReconnect()
-        }
-        socket.onerror = () => socket?.close()
-      } catch {
-        if (!cancelled) setWsConnected(false)
-        scheduleReconnect()
-      }
-    }
-
-    connect()
-
-    return () => {
-      cancelled = true
-      if (wsReconnectRef.current) window.clearTimeout(wsReconnectRef.current)
-      if (socket) socket.close()
-      setWsConnected(false)
-    }
-  }, [deviceUrl])
-
-  // Fallback polling: only while the WebSocket is disconnected, so the page
-  // still updates if the realtime stream is unreachable (e.g. proxy issue).
-  // The WebSocket pushes live state updates when connected, so no polling is
-  // needed in that case.
+  // Fallback polling: only while the WebSocket is disconnected.
   useEffect(() => {
     if (!deviceUrl || wsConnected) return undefined
 
@@ -950,6 +855,13 @@ export default function StatusPage() {
       if (timerRef.current) window.clearTimeout(timerRef.current)
     }
   }, [deviceUrl, wsConnected, fetchData])
+
+  // Sync wsError into local error state when we have no status yet
+  useEffect(() => {
+    if (wsError && !status) {
+      setError(wsError)
+    }
+  }, [wsError, status])
 
   const handleStartSync = async () => {
     setActionLoading(true)

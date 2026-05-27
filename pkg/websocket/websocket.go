@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/denysvitali/pictures-sync-s3/pkg/dmesg"
 	"github.com/denysvitali/pictures-sync-s3/pkg/events"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ota"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
@@ -503,8 +504,19 @@ func CleanupExpiredWSTokens(ctx context.Context) {
 	}
 }
 
-// HandleWebSocket provides real-time status updates
+// HandleWebSocket provides real-time status updates.
+// For dmesg streaming use HandleWebSocketWithDmesg.
 func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager, otaManagers ...*ota.Manager) http.HandlerFunc {
+	return handleWebSocket(stateMgr, eventMgr, nil, otaManagers...)
+}
+
+// HandleWebSocketWithDmesg provides real-time status updates including live
+// kernel log lines from the given dmesg manager.
+func HandleWebSocketWithDmesg(stateMgr *state.Manager, eventMgr *events.Manager, dmesgMgr *dmesg.Manager, otaManagers ...*ota.Manager) http.HandlerFunc {
+	return handleWebSocket(stateMgr, eventMgr, dmesgMgr, otaManagers...)
+}
+
+func handleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager, dmesgMgr *dmesg.Manager, otaManagers ...*ota.Manager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Extract client IP for rate limiting
 		clientIP := r.RemoteAddr
@@ -593,6 +605,11 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager, otaManag
 		defer eventMgr.Unsubscribe(events)
 		if otaMgr != nil {
 			defer otaMgr.Unsubscribe(otaUpdates)
+		}
+		var dmesgUpdates chan dmesg.Line
+		if dmesgMgr != nil {
+			dmesgUpdates = dmesgMgr.Subscribe()
+			defer dmesgMgr.Unsubscribe(dmesgUpdates)
 		}
 
 		// Send initial state. The stateMgr cache is kept up to date by the
@@ -713,6 +730,21 @@ func HandleWebSocket(stateMgr *state.Manager, eventMgr *events.Manager, otaManag
 				message := map[string]any{
 					"type": "ota_status",
 					"data": otaStatus,
+				}
+				_ = conn.SetWriteDeadline(time.Now().Add(writeDeadline))
+				if err := conn.WriteJSON(message); err != nil {
+					return
+				}
+			case dmesgLine, ok := <-dmesgUpdates:
+				if dmesgUpdates == nil {
+					continue
+				}
+				if !ok {
+					return
+				}
+				message := map[string]any{
+					"type": "dmesg",
+					"data": dmesgLine,
 				}
 				_ = conn.SetWriteDeadline(time.Now().Add(writeDeadline))
 				if err := conn.WriteJSON(message); err != nil {

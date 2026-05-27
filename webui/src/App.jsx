@@ -137,6 +137,7 @@ export default function App() {
     gallery: 'Gallery',
     googlephotos: 'Google Photos',
     stats: 'System Stats',
+    dmesg: 'Kernel Log',
     config: 'Settings',
   }
 

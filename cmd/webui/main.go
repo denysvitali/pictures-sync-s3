@@ -16,6 +16,7 @@ import (
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/auth"
 	"github.com/denysvitali/pictures-sync-s3/pkg/daemoncontrol"
+	"github.com/denysvitali/pictures-sync-s3/pkg/dmesg"
 	"github.com/denysvitali/pictures-sync-s3/pkg/events"
 	"github.com/denysvitali/pictures-sync-s3/pkg/googlephotos"
 	"github.com/denysvitali/pictures-sync-s3/pkg/handlers"
@@ -205,6 +206,14 @@ func main() {
 		statsCollector.Stop()
 	}()
 
+	// Start dmesg tailer for live kernel log streaming
+	dmesgMgr := dmesg.NewManager()
+	dmesgMgr.Start()
+	go func() {
+		<-shutdownCtx.Done()
+		dmesgMgr.Stop()
+	}()
+
 	// Initialize event manager. In the webui process this only acts as a
 	// local pub/sub cache: every event it emits originates from the daemon's
 	// subscribe stream (see startDaemonSubscription below), and nothing in
@@ -341,7 +350,7 @@ func main() {
 	http.HandleFunc("/api/googlephotos/sync/progress", ctx.HandleGooglePhotosSyncProgress)
 	http.HandleFunc("/api/googlephotos/sync/history/export", ctx.HandleGooglePhotosSyncHistoryExport)
 	http.HandleFunc("/api/googlephotos/albums", ctx.HandleGooglePhotosAlbums)
-	http.HandleFunc("/ws", websocket.HandleWebSocket(stateMgr, eventMgr, otaMgr))
+	http.HandleFunc("/ws", websocket.HandleWebSocketWithDmesg(stateMgr, eventMgr, dmesgMgr, otaMgr))
 
 	// SPA route and static assets for React frontend
 	http.HandleFunc("/static/", webui.HandleStatic)

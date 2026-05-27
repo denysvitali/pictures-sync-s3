@@ -7,6 +7,7 @@ const GalleryPage = lazy(() => import('./pages/GalleryPage.jsx'))
 const ConfigPage = lazy(() => import('./pages/ConfigPage.jsx'))
 const GooglePhotosPage = lazy(() => import('./pages/GooglePhotosPage.jsx'))
 const StatsPage = lazy(() => import('./pages/StatsPage.jsx'))
+const DmesgPage = lazy(() => import('./pages/DmesgPage.jsx'))
 
 export const routes = [
   { id: 'status', label: 'Overview', path: '#/status', icon: 'home', Component: StatusPage },
@@ -15,6 +16,7 @@ export const routes = [
   { id: 'gallery', label: 'Gallery', path: '#/gallery', icon: 'image', Component: GalleryPage },
   { id: 'googlephotos', label: 'Google Photos', path: '#/googlephotos', icon: 'cloud', Component: GooglePhotosPage },
   { id: 'stats', label: 'Stats', path: '#/stats', icon: 'chart', Component: StatsPage },
+  { id: 'dmesg', label: 'Kernel Log', path: '#/dmesg', icon: 'terminal', Component: DmesgPage },
   { id: 'config', label: 'Settings', path: '#/config', icon: 'settings', Component: ConfigPage },
 ]
 
