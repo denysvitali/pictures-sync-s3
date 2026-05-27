@@ -74,3 +74,6 @@ benchmark.txt
 
 # CI/CD artifacts
 *.sarif
+
+# Claude Code
+.claude/
