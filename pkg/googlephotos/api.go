@@ -153,42 +153,55 @@ func (c *Client) BatchCreateMediaItems(albumID string, items []*NewMediaItem) (*
 	return c.BatchCreateMediaItemsContext(context.Background(), albumID, items)
 }
 
+const maxBatchSize = 50
+
 // BatchCreateMediaItemsContext creates multiple media items in a single request.
+// If more than 50 items are provided they are sent in multiple chunked requests.
 func (c *Client) BatchCreateMediaItemsContext(ctx context.Context, albumID string, items []*NewMediaItem) (*BatchCreateResponse, error) {
-	reqBody := BatchCreateRequest{
-		NewMediaItems: items,
-	}
-	if albumID != "" {
-		reqBody.AlbumID = albumID
-		reqBody.AlbumPosition = &AlbumPosition{Position: "LAST_IN_ALBUM"}
+	var combined BatchCreateResponse
+	for i := 0; i < len(items); i += maxBatchSize {
+		end := i + maxBatchSize
+		if end > len(items) {
+			end = len(items)
+		}
+		chunk := items[i:end]
+
+		reqBody := BatchCreateRequest{
+			NewMediaItems: chunk,
+		}
+		if albumID != "" {
+			reqBody.AlbumID = albumID
+			reqBody.AlbumPosition = &AlbumPosition{Position: "LAST_IN_ALBUM"}
+		}
+
+		jsonBody, err := json.Marshal(reqBody)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal batch create request: %w", err)
+		}
+
+		resp, err := c.doRequestContext(ctx, "POST", "/mediaItems:batchCreate", bytes.NewReader(jsonBody))
+		if err != nil {
+			return nil, err
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("failed to read batch create response: %w", err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("batch create failed (%d): %s", resp.StatusCode, string(body))
+		}
+
+		var result BatchCreateResponse
+		if err := json.Unmarshal(body, &result); err != nil {
+			return nil, fmt.Errorf("failed to parse batch create response: %w", err)
+		}
+		combined.NewMediaItemResults = append(combined.NewMediaItemResults, result.NewMediaItemResults...)
 	}
 
-	jsonBody, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal batch create request: %w", err)
-	}
-
-	resp, err := c.doRequestContext(ctx, "POST", "/mediaItems:batchCreate", bytes.NewReader(jsonBody))
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read batch create response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("batch create failed (%d): %s", resp.StatusCode, string(body))
-	}
-
-	var result BatchCreateResponse
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("failed to parse batch create response: %w", err)
-	}
-
-	return &result, nil
+	return &combined, nil
 }
 
 // ListAlbumMediaItems lists all media items in a specific album.
@@ -240,26 +253,35 @@ func (c *Client) ListAlbumMediaItems(ctx context.Context, albumID string) ([]*Me
 }
 
 // BatchRemoveMediaItems removes media items from an album.
+// Requests are automatically chunked to respect the 50-item API limit.
 func (c *Client) BatchRemoveMediaItems(ctx context.Context, albumID string, mediaItemIds []string) error {
-	reqBody := BatchRemoveMediaItemsRequest{MediaItemIds: mediaItemIds}
-	jsonBody, err := json.Marshal(reqBody)
-	if err != nil {
-		return fmt.Errorf("failed to marshal batch remove request: %w", err)
-	}
+	for i := 0; i < len(mediaItemIds); i += maxBatchSize {
+		end := i + maxBatchSize
+		if end > len(mediaItemIds) {
+			end = len(mediaItemIds)
+		}
+		chunk := mediaItemIds[i:end]
 
-	resp, err := c.doRequestContext(ctx, "POST", fmt.Sprintf("/albums/%s:batchRemoveMediaItems", albumID), bytes.NewReader(jsonBody))
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
+		reqBody := BatchRemoveMediaItemsRequest{MediaItemIds: chunk}
+		jsonBody, err := json.Marshal(reqBody)
+		if err != nil {
+			return fmt.Errorf("failed to marshal batch remove request: %w", err)
+		}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read batch remove response: %w", err)
-	}
+		resp, err := c.doRequestContext(ctx, "POST", fmt.Sprintf("/albums/%s:batchRemoveMediaItems", albumID), bytes.NewReader(jsonBody))
+		if err != nil {
+			return err
+		}
 
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("batch remove failed (%d): %s", resp.StatusCode, string(body))
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return fmt.Errorf("failed to read batch remove response: %w", err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("batch remove failed (%d): %s", resp.StatusCode, string(body))
+		}
 	}
 
 	return nil
