@@ -119,8 +119,8 @@ func TestDefaultStatsCollectorConfig(t *testing.T) {
 	if c.interval != 10*time.Second {
 		t.Fatalf("expected default interval 10s, got %s", c.interval)
 	}
-	if c.retention != 24*time.Hour {
-		t.Fatalf("expected default retention 24h, got %s", c.retention)
+	if c.retention != 7*24*time.Hour {
+		t.Fatalf("expected default retention 7d, got %s", c.retention)
 	}
 }
 

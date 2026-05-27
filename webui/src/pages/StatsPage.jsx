@@ -20,7 +20,7 @@ function formatTime(ts) {
 function TimeSeriesChart({ data, valueKey, color, fillColor, label, unit = '', yMax, formatValue }) {
   const [hoverIdx, setHoverIdx] = useState(null)
 
-  const { path, points, viewBox, padLeft, padTop, chartW, chartH, toY, maxVal } = useMemo(() => {
+  const { path, areaPath, points, viewBox, padLeft, padTop, chartW, chartH, toY, maxVal } = useMemo(() => {
     if (data.length === 0) {
       return { path: '', points: [], viewBox: '0 0 100 100', padLeft: 0, padTop: 0, chartW: 0, chartH: 0, toY: () => 0, maxVal: 1 }
     }
@@ -127,7 +127,7 @@ function TimeSeriesChart({ data, valueKey, color, fillColor, label, unit = '', y
           />
         ))}
 
-        <path d={viewBox.areaPath} fill={fillColor} fillOpacity={0.15} />
+        <path d={areaPath} fill={fillColor} fillOpacity={0.15} />
         <path d={path} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" />
 
         {yTickVals.map((v, i) => (
@@ -254,18 +254,23 @@ export default function StatsPage() {
           ))}
         </div>
 
-        {latest && (
-          <div className="flex items-center gap-4 text-sm">
-            <span className="text-surface-400">
-              CPU: <span className="font-semibold text-surface-200">{latest.cpu_percent.toFixed(1)}%</span>
-            </span>
-            <span className="text-surface-400">
-              RAM: <span className="font-semibold text-surface-200">{formatBytes(latest.rss_bytes)}</span>
-              {' / '}
-              <span className="text-surface-500">{formatBytes(latest.total_mem_bytes)}</span>
-            </span>
-          </div>
-        )}
+        <div className="flex items-center gap-4">
+          {loading && points.length > 0 && (
+            <LoadingSpinner size="sm" />
+          )}
+          {latest && (
+            <div className="flex items-center gap-4 text-sm">
+              <span className="text-surface-400">
+                CPU: <span className="font-semibold text-surface-200">{latest.cpu_percent.toFixed(1)}%</span>
+              </span>
+              <span className="text-surface-400">
+                RAM: <span className="font-semibold text-surface-200">{formatBytes(latest.rss_bytes)}</span>
+                {' / '}
+                <span className="text-surface-500">{formatBytes(latest.total_mem_bytes)}</span>
+              </span>
+            </div>
+          )}
+        </div>
       </div>
 
       {error && (

@@ -13,7 +13,7 @@ import (
 
 const (
 	defaultInterval  = 10 * time.Second
-	defaultRetention = 24 * time.Hour
+	defaultRetention = 7 * 24 * time.Hour // 7 days, matches longest UI option
 )
 
 var (
