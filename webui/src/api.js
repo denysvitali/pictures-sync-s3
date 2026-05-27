@@ -207,8 +207,18 @@ export const restartAppServices = (d, services = ['pictures-sync', 'webui']) =>
 export const getSystemPanic = (d) => apiRequest('/api/system/panic', { deviceUrl: d })
 export const clearSystemPanic = (d) =>
   apiRequest('/api/system/panic', { deviceUrl: d, method: 'DELETE' })
-export const getSystemStats = (d, hours = 24) =>
-  apiRequest('/api/system/stats', { deviceUrl: d, query: { hours } })
+export const getSystemStats = (d, opts = {}) => {
+  if (typeof opts === 'number') {
+    return apiRequest('/api/system/stats', { deviceUrl: d, query: { hours: opts } })
+  }
+  const { since, until, resolution, hours } = opts
+  const query = {}
+  if (since !== undefined) query.since = since
+  if (until !== undefined) query.until = until
+  if (resolution !== undefined && resolution !== null) query.resolution = resolution
+  if (hours !== undefined && since === undefined) query.hours = hours
+  return apiRequest('/api/system/stats', { deviceUrl: d, query })
+}
 export const getDevices = (d) => apiRequest('/api/devices', { deviceUrl: d })
 export const selectDevice = (d, devicePath) =>
   apiRequest('/api/devices/select', { deviceUrl: d, method: 'POST', body: { device_path: devicePath } })

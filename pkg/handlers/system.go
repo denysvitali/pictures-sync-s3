@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -199,9 +200,55 @@ func (ctx *Context) HandleSystemStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hours := httputil.QueryParamIntRange(r, "hours", 24, 1, 168)
-	until := time.Now()
-	since := until.Add(-time.Duration(hours) * time.Hour)
+	now := time.Now()
+	q := r.URL.Query()
+
+	// Time window. `since` / `until` (Unix seconds) take precedence over
+	// `hours` (back-compat). Falls back to 24h ending now.
+	var since, until time.Time
+	sinceParam := strings.TrimSpace(q.Get("since"))
+	untilParam := strings.TrimSpace(q.Get("until"))
+
+	if untilParam != "" {
+		if v, err := strconv.ParseInt(untilParam, 10, 64); err == nil && v > 0 {
+			until = time.Unix(v, 0)
+		}
+	}
+	if until.IsZero() {
+		until = now
+	}
+
+	if sinceParam != "" {
+		if v, err := strconv.ParseInt(sinceParam, 10, 64); err == nil && v > 0 {
+			since = time.Unix(v, 0)
+		}
+	}
+	if since.IsZero() {
+		hours := httputil.QueryParamIntRange(r, "hours", 24, 1, 168)
+		since = until.Add(-time.Duration(hours) * time.Hour)
+	}
+
+	if !since.Before(until) {
+		// Guard against inverted/zero spans — clamp to a 1h window.
+		since = until.Add(-time.Hour)
+	}
+
+	// Resolution. Accept an integer seconds value or "auto"/""/0 for auto.
+	resParam := strings.TrimSpace(strings.ToLower(q.Get("resolution")))
+	var resolution int
+	switch resParam {
+	case "", "auto", "0":
+		resolution = systeminfo.AutoResolution(since.Unix(), until.Unix(), 500)
+	default:
+		if v, err := strconv.Atoi(resParam); err == nil && v > 0 {
+			resolution = v
+		} else {
+			resolution = systeminfo.AutoResolution(since.Unix(), until.Unix(), 500)
+		}
+	}
+	if resolution < 10 {
+		resolution = 10
+	}
 
 	records, err := systeminfo.ReadStats(since, until)
 	if err != nil {
@@ -209,28 +256,50 @@ func (ctx *Context) HandleSystemStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	buckets := systeminfo.Downsample(records, resolution)
+
 	type point struct {
-		Timestamp     int64   `json:"timestamp"`
-		CPUPercent    float32 `json:"cpu_percent"`
-		RSSBytes      uint64  `json:"rss_bytes"`
-		TotalMemBytes uint64  `json:"total_mem_bytes"`
+		Timestamp        int64   `json:"timestamp"`
+		CPUPercent       float32 `json:"cpu_percent"`
+		RSSBytes         uint64  `json:"rss_bytes"`
+		TotalMemBytes    uint64  `json:"total_mem_bytes"`
+		Load1            float32 `json:"load1"`
+		Load5            float32 `json:"load5"`
+		Load15           float32 `json:"load15"`
+		SwapUsedBytes    uint64  `json:"swap_used_bytes"`
+		SwapTotalBytes   uint64  `json:"swap_total_bytes"`
+		DiskUsedBytes    uint64  `json:"disk_used_bytes"`
+		DiskTotalBytes   uint64  `json:"disk_total_bytes"`
+		NetRxBytesPerSec uint64  `json:"net_rx_bytes_per_sec"`
+		NetTxBytesPerSec uint64  `json:"net_tx_bytes_per_sec"`
 	}
 
-	points := make([]point, len(records))
-	for i, r := range records {
+	points := make([]point, len(buckets))
+	for i, b := range buckets {
 		points[i] = point{
-			Timestamp:     r.Timestamp,
-			CPUPercent:    r.CPUPercent,
-			RSSBytes:      r.RSSBytes,
-			TotalMemBytes: r.TotalMemBytes,
+			Timestamp:        b.Timestamp,
+			CPUPercent:       b.CPUPercent,
+			RSSBytes:         b.RSSBytes,
+			TotalMemBytes:    b.TotalMemBytes,
+			Load1:            b.Load1,
+			Load5:            b.Load5,
+			Load15:           b.Load15,
+			SwapUsedBytes:    b.SwapUsedBytes,
+			SwapTotalBytes:   b.SwapTotalBytes,
+			DiskUsedBytes:    b.DiskUsedBytes,
+			DiskTotalBytes:   b.DiskTotalBytes,
+			NetRxBytesPerSec: b.NetRxBytesPS,
+			NetTxBytesPerSec: b.NetTxBytesPS,
 		}
 	}
 
 	httputil.JSON(w, http.StatusOK, map[string]any{
-		"since":    since.Unix(),
-		"until":    until.Unix(),
-		"interval": 10,
-		"points":   points,
+		"since":      since.Unix(),
+		"until":      until.Unix(),
+		"interval":   10,
+		"resolution": resolution,
+		"count":      len(points),
+		"points":     points,
 	})
 }
 

@@ -6,7 +6,7 @@ const HistoryPage = lazy(() => import('./pages/HistoryPage.jsx'))
 const GalleryPage = lazy(() => import('./pages/GalleryPage.jsx'))
 const ConfigPage = lazy(() => import('./pages/ConfigPage.jsx'))
 const GooglePhotosPage = lazy(() => import('./pages/GooglePhotosPage.jsx'))
-const StatsPage = lazy(() => import('./pages/StatsPage.jsx'))
+const StatsPage = lazy(() => import('./pages/StatsPage.tsx'))
 const DmesgPage = lazy(() => import('./pages/DmesgPage.jsx'))
 
 export const routes = [
