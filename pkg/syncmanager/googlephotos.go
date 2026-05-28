@@ -131,9 +131,12 @@ func (m *Manager) SyncCardsToGooglePhotos(ctx context.Context) error {
 
 	log.Printf("Starting Google Photos sync for %d card(s)", len(cards))
 
-	// Create context with a generous overall timeout so a hung backend
-	// cannot block the sync forever.
-	syncCtx, cancel := context.WithTimeout(ctx, 2*time.Hour)
+	// No global deadline: a full first-time backlog can be hundreds of GB
+	// at Google Photos' per-stream throttle, easily exceeding any fixed
+	// timeout. Hung backends are caught by rclone's per-call timeouts plus
+	// our retry/backoff; user-initiated cancel still works via
+	// googlePhotosCancel.
+	syncCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	m.mu.Lock()
