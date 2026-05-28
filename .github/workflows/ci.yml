@@ -68,6 +68,16 @@ jobs:
           go test -short -race -coverprofile=coverage.out -covermode=atomic ./...
         timeout-minutes: 15
 
+      - name: Install staticcheck
+        run: go install honnef.co/go/tools/cmd/staticcheck@latest
+
+      - name: Run staticcheck (advisory)
+        # NOTE: continue-on-error is set during initial roll-out so existing
+        # findings do not break CI. Remove once the codebase is clean to make
+        # staticcheck a required gate.
+        run: staticcheck ./...
+        continue-on-error: true
+
       - name: Generate coverage report
         run: |
           go tool cover -html=coverage.out -o coverage.html
