@@ -394,7 +394,7 @@ func (sm *SyncManager) sortAllAlbumsByShootTime(ctx context.Context, cards []syn
 		sm.mu.Unlock()
 
 		sortCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
-		_, err := sm.client.SortAlbumByShootTime(sortCtx, albumID, sm.syncMgr, func(p SortProgress) {
+		_, err := sm.client.SortAlbumByShootTime(sortCtx, albumID, func(p SortProgress) {
 			sm.mu.Lock()
 			if sm.progress != nil {
 				sm.progress.CurrentPhase = fmt.Sprintf("Sorting %s: %s (%d/%d)", albumTitle, p.Status, p.CurrentItem, p.TotalItems)

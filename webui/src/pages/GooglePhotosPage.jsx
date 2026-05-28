@@ -16,6 +16,8 @@ import {
   getGooglePhotosAlbums,
   clearGooglePhotosAlbum,
   getGooglePhotosAlbumClearProgress,
+  sortGooglePhotosAlbum,
+  getGooglePhotosAlbumSortProgress,
 } from '../api.js'
 
 function describeError(err) {
@@ -413,7 +415,7 @@ function SyncStartingPanel() {
   )
 }
 
-function AlbumsPanel({ albums, loading, onClear, clearingId, clearProgress }) {
+function AlbumsPanel({ albums, loading, onClear, clearingId, clearProgress, onSort, sortingId, sortProgress }) {
   if (loading) {
     return (
       <Card>
@@ -452,7 +454,7 @@ function AlbumsPanel({ albums, loading, onClear, clearingId, clearProgress }) {
           {albums.map((album) => {
             const progress = clearProgress?.[album.id]
             const isClearing = clearingId === album.id
-            const label = isClearing && progress?.status === 'clearing' && progress?.total_items > 0
+            const clearLabel = isClearing && progress?.status === 'clearing' && progress?.total_items > 0
               ? `Removing ${progress.removed_items}/${progress.total_items}...`
               : 'Clear'
             const hasProgressCounts = Number(progress?.total_items) > 0 || Number(progress?.removed_items) > 0
@@ -464,6 +466,14 @@ function AlbumsPanel({ albums, loading, onClear, clearingId, clearProgress }) {
               (errorLower.includes('permission_denied') ||
                 errorLower.includes('no permission') ||
                 errorLower.includes('permission'))
+
+            const sp = sortProgress?.[album.id]
+            const isSorting = sortingId === album.id
+            const sortLabel = isSorting && sp?.status !== 'completed' && sp?.status !== 'error'
+              ? `Sorting...`
+              : 'Sort'
+            const sortError = sp?.status === 'error' ? (sp?.error || 'Failed to sort album') : ''
+
             return (
               <li
                 key={album.id}
@@ -476,22 +486,40 @@ function AlbumsPanel({ albums, loading, onClear, clearingId, clearProgress }) {
                       {album.mediaItemsCount ? `${album.mediaItemsCount} items` : 'Empty'}
                     </p>
                   </div>
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    loading={isClearing}
-                    disabled={isClearing}
-                    onClick={() => onClear(album.id, album.title)}
-                  >
-                    <Icon name="trash" className="w-4 h-4" />
-                    {label}
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      loading={isSorting}
+                      disabled={isSorting || isClearing}
+                      onClick={() => onSort(album.id, album.title)}
+                    >
+                      <Icon name="sort" className="w-4 h-4" />
+                      {sortLabel}
+                    </Button>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      loading={isClearing}
+                      disabled={isClearing || isSorting}
+                      onClick={() => onClear(album.id, album.title)}
+                    >
+                      <Icon name="trash" className="w-4 h-4" />
+                      {clearLabel}
+                    </Button>
+                  </div>
                 </div>
                 {hasProgressCounts && (
                   <p className="mt-2 text-xs text-surface-400">
                     Removed {progress?.removed_items || 0}
                     {Number(progress?.total_items) > 0 ? `/${progress.total_items}` : ''}
                   </p>
+                )}
+                {sortError && (
+                  <div className="mt-2 rounded-lg border border-rose-500/20 bg-rose-500/10 p-3">
+                    <p className="text-xs font-medium text-rose-400">Failed to sort album</p>
+                    <p className="mt-1 text-xs text-rose-300 break-words whitespace-pre-wrap">{sortError}</p>
+                  </div>
                 )}
                 {isError && (
                   <div className="mt-2 rounded-lg border border-rose-500/20 bg-rose-500/10 p-3">
@@ -558,9 +586,12 @@ export default function GooglePhotosPage() {
   const [albumsLoading, setAlbumsLoading] = useState(false)
   const [clearingAlbumId, setClearingAlbumId] = useState(null)
   const [clearProgress, setClearProgress] = useState({})
+  const [sortingAlbumId, setSortingAlbumId] = useState(null)
+  const [sortProgress, setSortProgress] = useState({})
   const progressIntervalRef = useRef(null)
   const statusIntervalRef = useRef(null)
   const clearProgressIntervalRef = useRef(null)
+  const sortProgressIntervalRef = useRef(null)
   const hasLoadedStatusRef = useRef(false)
 
   const applySyncProgress = useCallback((data) => {
@@ -676,6 +707,56 @@ export default function GooglePhotosPage() {
     [deviceUrl, toast, loadAlbums]
   )
 
+  const handleSortAlbum = useCallback(
+    async (albumId, albumTitle) => {
+      if (!deviceUrl) return
+
+      setSortingAlbumId(albumId)
+      setSortProgress((prev) => ({ ...prev, [albumId]: { status: 'listing', total_items: 0, added_items: 0 } }))
+
+      let pollInterval = null
+      const stopPolling = () => {
+        if (pollInterval) {
+          clearInterval(pollInterval)
+          pollInterval = null
+        }
+      }
+
+      try {
+        await sortGooglePhotosAlbum(deviceUrl, albumId)
+
+        pollInterval = setInterval(async () => {
+          try {
+            const data = await getGooglePhotosAlbumSortProgress(deviceUrl, albumId)
+            setSortProgress((prev) => ({ ...prev, [albumId]: data }))
+
+            if (data?.status === 'completed' || data?.status === 'error' || data?.status === 'idle') {
+              stopPolling()
+              setSortingAlbumId(null)
+              if (data?.status === 'completed') {
+                toast.success(`Sorted "${albumTitle}" — ${data?.total_items || 0} items reordered`)
+                loadAlbums()
+              } else if (data?.status === 'error') {
+                toast.error(`Failed to sort album: ${data?.error || 'Unknown error'}`)
+              }
+            }
+          } catch (err) {
+            stopPolling()
+            setSortingAlbumId(null)
+            toast.error(`Failed to sort album: ${describeError(err)}`)
+          }
+        }, 1000)
+
+        sortProgressIntervalRef.current = pollInterval
+      } catch (err) {
+        stopPolling()
+        setSortingAlbumId(null)
+        toast.error(`Failed to start sorting: ${describeError(err)}`)
+      }
+    },
+    [deviceUrl, toast, loadAlbums]
+  )
+
   useEffect(() => {
     loadAll()
   }, [loadAll])
@@ -693,6 +774,9 @@ export default function GooglePhotosPage() {
       clearInterval(statusIntervalRef.current)
       if (clearProgressIntervalRef.current) {
         clearInterval(clearProgressIntervalRef.current)
+      }
+      if (sortProgressIntervalRef.current) {
+        clearInterval(sortProgressIntervalRef.current)
       }
     }
   }, [deviceUrl, loadStatus])
@@ -886,6 +970,9 @@ export default function GooglePhotosPage() {
           onClear={handleClearAlbum}
           clearingId={clearingAlbumId}
           clearProgress={clearProgress}
+          onSort={handleSortAlbum}
+          sortingId={sortingAlbumId}
+          sortProgress={sortProgress}
         />
       )}
 

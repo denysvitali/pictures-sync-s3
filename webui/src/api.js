@@ -260,6 +260,10 @@ export const clearGooglePhotosAlbum = (d, albumId) =>
   apiRequest(`/api/googlephotos/albums/${albumId}`, { deviceUrl: d, method: 'DELETE' })
 export const getGooglePhotosAlbumClearProgress = (d, albumId) =>
   apiRequest(`/api/googlephotos/albums/${albumId}/clear/progress`, { deviceUrl: d })
+export const sortGooglePhotosAlbum = (d, albumId) =>
+  apiRequest(`/api/googlephotos/albums/${albumId}/sort`, { deviceUrl: d, method: 'POST' })
+export const getGooglePhotosAlbumSortProgress = (d, albumId) =>
+  apiRequest(`/api/googlephotos/albums/${albumId}/sort/progress`, { deviceUrl: d })
 
 export function getWebSocketUrl(deviceUrl) {
   const base = normalizeBaseUrl(deviceUrl)

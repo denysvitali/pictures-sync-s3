@@ -254,6 +254,11 @@ type ListMediaItemsResponse struct {
 	NextPageToken string       `json:"nextPageToken,omitempty"`
 }
 
+// BatchAddMediaItemsRequest adds existing media items to an album
+type BatchAddMediaItemsRequest struct {
+	MediaItemIds []string `json:"mediaItemIds"`
+}
+
 // BatchRemoveMediaItemsRequest removes media items from an album
 type BatchRemoveMediaItemsRequest struct {
 	MediaItemIds []string `json:"mediaItemIds"`

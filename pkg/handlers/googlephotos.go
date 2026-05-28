@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/http"
@@ -491,19 +490,36 @@ var (
 	albumClearOpsMu sync.RWMutex
 )
 
+// albumSortOps tracks in-progress album sort operations keyed by album ID.
+var (
+	albumSortOps   = make(map[string]*googlephotos.SortProgress)
+	albumSortOpsMu sync.RWMutex
+)
+
 // HandleGooglePhotosAlbums handles album operations.
 // DELETE /api/googlephotos/albums/{albumId} — removes all media items from an album.
+// POST /api/googlephotos/albums/{albumId}/sort — sort album by shoot time.
 // GET  /api/googlephotos/albums/{albumId}/clear/progress — get clear progress.
+// GET  /api/googlephotos/albums/{albumId}/sort/progress — get sort progress.
 func (ctx *Context) HandleGooglePhotosAlbums(w http.ResponseWriter, r *http.Request) {
+	path := strings.Trim(r.URL.Path, "/")
+	parts := strings.Split(path, "/")
+
+	if r.Method == http.MethodPost && len(parts) >= 5 && parts[4] == "sort" {
+		ctx.handleGooglePhotosAlbumSort(w, r)
+		return
+	}
 	if r.Method == http.MethodDelete {
 		ctx.handleGooglePhotosAlbumClear(w, r)
 		return
 	}
 	if r.Method == http.MethodGet {
-		path := strings.Trim(r.URL.Path, "/")
-		parts := strings.Split(path, "/")
 		if len(parts) >= 6 && parts[4] == "clear" && parts[5] == "progress" {
 			ctx.handleGooglePhotosAlbumClearProgress(w, r)
+			return
+		}
+		if len(parts) >= 6 && parts[4] == "sort" && parts[5] == "progress" {
+			ctx.handleGooglePhotosAlbumSortProgress(w, r)
 			return
 		}
 		ctx.handleGooglePhotosAlbumList(w, r)
@@ -733,6 +749,111 @@ func (ctx *Context) handleGooglePhotosAlbumClearProgress(w http.ResponseWriter, 
 	})
 }
 
+func (ctx *Context) handleGooglePhotosAlbumSort(w http.ResponseWriter, r *http.Request) {
+	// Extract album ID from path: /api/googlephotos/albums/{albumId}/sort
+	path := strings.Trim(r.URL.Path, "/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 4 {
+		http.Error(w, "Missing album ID", http.StatusBadRequest)
+		return
+	}
+	albumID := parts[3]
+	if albumID == "" {
+		http.Error(w, "Missing album ID", http.StatusBadRequest)
+		return
+	}
+
+	clientID := ""
+	clientSecret := ""
+	if ctx.AppSettings != nil {
+		clientID = ctx.AppSettings.GetGooglePhotosClientID()
+		clientSecret = ctx.AppSettings.GetGooglePhotosClientSecret()
+	}
+	if clientID == "" || clientSecret == "" {
+		http.Error(w, "Google Photos credentials not configured", http.StatusPreconditionFailed)
+		return
+	}
+
+	tokenStore := googlephotos.NewTokenStore("")
+	client := googlephotos.NewClient(clientID, clientSecret, tokenStore)
+	if !client.IsAuthenticated() {
+		http.Error(w, "Not authenticated with Google Photos", http.StatusUnauthorized)
+		return
+	}
+
+	// Reject if a sort is already running for this album.
+	albumSortOpsMu.RLock()
+	existing, busy := albumSortOps[albumID]
+	albumSortOpsMu.RUnlock()
+	if busy && existing.Status != "completed" && existing.Status != "error" {
+		http.Error(w, "Album sort already in progress", http.StatusConflict)
+		return
+	}
+
+	go ctx.runAlbumSort(client, albumID)
+
+	httputil.JSON(w, http.StatusOK, map[string]any{"started": true, "album_id": albumID})
+}
+
+func (ctx *Context) runAlbumSort(client *googlephotos.Client, albumID string) {
+	sortCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	albumSortOpsMu.Lock()
+	albumSortOps[albumID] = &googlephotos.SortProgress{Status: "listing"}
+	albumSortOpsMu.Unlock()
+
+	progress, err := client.SortAlbumByShootTime(sortCtx, albumID, func(p googlephotos.SortProgress) {
+		albumSortOpsMu.Lock()
+		albumSortOps[albumID] = &p
+		albumSortOpsMu.Unlock()
+	})
+
+	albumSortOpsMu.Lock()
+	if err != nil {
+		albumSortOps[albumID] = &googlephotos.SortProgress{Status: "error", Error: err.Error()}
+	} else {
+		albumSortOps[albumID] = &progress
+	}
+	albumSortOpsMu.Unlock()
+}
+
+func (ctx *Context) handleGooglePhotosAlbumSortProgress(w http.ResponseWriter, r *http.Request) {
+	// Extract album ID from path: /api/googlephotos/albums/{albumId}/sort/progress
+	path := strings.Trim(r.URL.Path, "/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 4 {
+		http.Error(w, "Missing album ID", http.StatusBadRequest)
+		return
+	}
+	albumID := parts[3]
+	if albumID == "" {
+		http.Error(w, "Missing album ID", http.StatusBadRequest)
+		return
+	}
+
+	albumSortOpsMu.RLock()
+	progress, ok := albumSortOps[albumID]
+	albumSortOpsMu.RUnlock()
+
+	if !ok {
+		httputil.JSON(w, http.StatusOK, map[string]any{
+			"album_id": albumID,
+			"status":   "idle",
+		})
+		return
+	}
+
+	httputil.JSON(w, http.StatusOK, map[string]any{
+		"album_id":      albumID,
+		"status":        progress.Status,
+		"total_items":   progress.TotalItems,
+		"added_items":   progress.AddedItems,
+		"new_album_id":  progress.NewAlbumID,
+		"error":         progress.Error,
+	})
+}
+
 func truncateErr(s string, max int) string {
 	if len(s) <= max {
 		return s
@@ -771,29 +892,11 @@ func (ctx *Context) sortGooglePhotosAlbumsByShootTime() {
 
 		log.Printf("[GooglePhotos] Sorting album %s by shoot time", album.Title)
 
-		cardName := album.Title
-		dl := &syncManagerFileDownloader{
-			syncMgr:  ctx.SyncMgr,
-			cardName: cardName,
-		}
-
 		sortCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-		_, err := client.SortAlbumByShootTime(sortCtx, album.ID, dl, nil)
+		_, err := client.SortAlbumByShootTime(sortCtx, album.ID, nil)
 		cancel()
 		if err != nil {
 			log.Printf("[GooglePhotos] Sort: failed to sort album %s: %v", album.Title, err)
 		}
 	}
-}
-
-// syncManagerFileDownloader implements googlephotos.FileDownloader by
-// resolving filenames to full B2 paths via the sync manager's GetFile.
-type syncManagerFileDownloader struct {
-	syncMgr  SyncManager
-	cardName string
-}
-
-func (d *syncManagerFileDownloader) GetFile(filename string, w io.Writer) error {
-	fullPath := d.cardName + "/DCIM/" + filename
-	return d.syncMgr.GetFile(fullPath, w)
 }
