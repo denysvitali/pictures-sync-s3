@@ -52,6 +52,7 @@ func TestSortAlbumByShootTime_Reorders(t *testing.T) {
 
 	var addedIDs []string
 	var deletedOldAlbum bool
+	var renamedTitle string
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -73,6 +74,12 @@ func TestSortAlbumByShootTime_Reorders(t *testing.T) {
 		case r.URL.Path == "/v1/albums/album-1" && r.Method == "DELETE":
 			deletedOldAlbum = true
 			json.NewEncoder(w).Encode("{}")
+
+		case r.URL.Path == "/v1/albums/new-album-id" && r.Method == "PATCH":
+			var req map[string]string
+			json.NewDecoder(r.Body).Decode(&req)
+			renamedTitle = req["title"]
+			json.NewEncoder(w).Encode(Album{ID: "new-album-id", Title: req["title"]})
 
 		default:
 			http.Error(w, fmt.Sprintf("unexpected: %s %s", r.Method, r.URL.Path), http.StatusNotFound)
@@ -99,6 +106,9 @@ func TestSortAlbumByShootTime_Reorders(t *testing.T) {
 	}
 	if !deletedOldAlbum {
 		t.Error("expected old album to be deleted")
+	}
+	if renamedTitle != "card-ABC" {
+		t.Errorf("expected sorted album renamed back to original title card-ABC, got %q", renamedTitle)
 	}
 
 	// Verify items were added in chronological order.

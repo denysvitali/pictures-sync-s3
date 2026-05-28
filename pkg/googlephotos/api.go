@@ -371,6 +371,36 @@ func (c *Client) BatchAddMediaItemsWithProgress(ctx context.Context, albumID str
 }
 
 // DeleteAlbumContext deletes an album created by the app.
+// UpdateAlbumTitleContext renames an album the app created via albums.patch.
+func (c *Client) UpdateAlbumTitleContext(ctx context.Context, albumID, title string) (*Album, error) {
+	reqBody := map[string]interface{}{
+		"title": title,
+	}
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal album patch request: %w", err)
+	}
+
+	resp, err := c.doRequestContext(ctx, "PATCH", "/albums/"+albumID+"?updateMask=title", bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, err
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
+	resp.Body.Close()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read album patch response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, newAPIError("patchAlbum", resp.StatusCode, body)
+	}
+
+	var album Album
+	if err := json.Unmarshal(body, &album); err != nil {
+		return nil, fmt.Errorf("failed to parse album patch response: %w", err)
+	}
+	return &album, nil
+}
+
 func (c *Client) DeleteAlbumContext(ctx context.Context, albumID string) error {
 	resp, err := c.doRequestContext(ctx, "DELETE", "/albums/"+albumID, nil)
 	if err != nil {
@@ -492,11 +522,23 @@ func (c *Client) SortAlbumByShootTime(ctx context.Context, albumID string, onPro
 		return p, fmt.Errorf("batch add to new album: %w", addErr)
 	}
 
-	// Phase 5: delete the old unsorted album.
-	report(SortProgress{Status: "deleting-old", TotalItems: total, AddedItems: total})
+	// Phase 5: delete the old unsorted album, then rename the new album back to
+	// the original title so the sort looks in-place to the user.
+	report(SortProgress{Status: "deleting-old", TotalItems: total, AddedItems: total, NewAlbumID: newAlbum.ID})
+	deleteOK := true
 	if err := c.DeleteAlbumContext(ctx, albumID); err != nil {
+		deleteOK = false
 		log.Printf("[GooglePhotos] warning: failed to delete old album %s: %v", albumID, err)
 		// Non-fatal — the sorted album is already created.
+	}
+
+	// Only reclaim the original title once the old album is gone, to avoid two
+	// albums sharing a name.
+	if deleteOK {
+		if _, err := c.UpdateAlbumTitleContext(ctx, newAlbum.ID, oldAlbum.Title); err != nil {
+			log.Printf("[GooglePhotos] warning: failed to rename sorted album %s to %q: %v", newAlbum.ID, oldAlbum.Title, err)
+			// Non-fatal — items are sorted, the album just keeps the "(sorted)" title.
+		}
 	}
 
 	p := SortProgress{Status: "completed", TotalItems: total, AddedItems: total, NewAlbumID: newAlbum.ID}
