@@ -68,7 +68,10 @@ func (m *Manager) calculateProgress(stats *accounting.StatsInfo, totalFiles int,
 	}
 
 	// Calculate speed from elapsed time and bytes transferred in this session
-	elapsed := time.Since(m.startTime)
+	m.mu.Lock()
+	startTime := m.startTime
+	m.mu.Unlock()
+	elapsed := time.Since(startTime)
 	var speed float64
 	if elapsed > 0 {
 		speed = float64(sessionTransferred) / elapsed.Seconds()

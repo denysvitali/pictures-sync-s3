@@ -163,21 +163,37 @@ func (s *stateStore) putUploadToken(path string, token cachedUploadToken) {
 func (s *stateStore) markBatchDone(path string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	token, ok := s.data.UploadTokens[path]
-	if ok {
+	token, tokenOK := s.data.UploadTokens[path]
+	if tokenOK {
 		token.BatchDone = true
 		s.data.UploadTokens[path] = token
 	}
-	meta, ok := s.data.FileCache[path]
-	if ok {
+	meta, metaOK := s.data.FileCache[path]
+	if metaOK {
 		meta.Uploaded = true
 		meta.UploadedAt = time.Now()
 		s.data.FileCache[path] = meta
-		if meta.Checksum != "" {
-			s.checksumIndex[meta.Checksum] = path
+	} else if tokenOK {
+		// FileCache entry may have been evicted by trimFileCacheLocked between
+		// upload and batch-completion. Recreate a minimal entry so future syncs
+		// still see this file as uploaded and skip the duplicate. Without this,
+		// trimmed entries silently re-upload on the next run.
+		meta = cachedFileMetadata{
+			Path:       path,
+			Name:       token.FileName,
+			Checksum:   token.Checksum,
+			Uploaded:   true,
+			UploadedAt: time.Now(),
 		}
+		s.data.FileCache[path] = meta
 	}
-	s.maybeFlushLocked()
+	if meta.Checksum != "" {
+		s.checksumIndex[meta.Checksum] = path
+	}
+	// markBatchDone is the durability-critical mutation: it's the only signal
+	// that prevents re-uploading completed work on the next run. Force-flush
+	// instead of debouncing so a crash within the 3s window can't lose it.
+	s.flushLocked()
 }
 
 func (s *stateStore) albumID(cardID string) (string, bool) {

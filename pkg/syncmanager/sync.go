@@ -50,7 +50,9 @@ func (m *Manager) Sync(sourcePath, cardID string, totalFiles int, totalBytes int
 	}
 
 	// Record start time for elapsed time calculation
+	m.mu.Lock()
 	m.startTime = time.Now()
+	m.mu.Unlock()
 
 	// Create context with cancel
 	ctx, cancel := context.WithCancel(context.Background())

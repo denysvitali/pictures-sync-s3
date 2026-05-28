@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/utils"
@@ -25,6 +26,7 @@ const (
 var (
 	validCardIDPattern = regexp.MustCompile(`^card-[A-Za-z0-9_-]{1,128}$`)
 	cardIDPathLocks    sync.Map
+	cardIDFallbackSeq  atomic.Uint64
 )
 
 // GetOrCreateCardID reads or creates a unique ID for the SD card
@@ -127,7 +129,7 @@ func writeCardID(idPath, cardID string) error {
 	// utils.AtomicWrite fsyncs the temp file and the parent directory before
 	// returning, so a power loss between the rename and the next umount can
 	// no longer leave a zero-length card-ID file.
-	return utils.AtomicWrite(idPath, []byte(cardID+"\n"), 0644)
+	return utils.AtomicWrite(idPath, []byte(cardID+"\n"), 0600)
 }
 
 func lockCardIDPath(idPath string) func() {
@@ -174,13 +176,12 @@ func generateCardID() string {
 	// Generate 8 random bytes using crypto/rand
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
-		// Fallback to high-resolution timestamp with process ID if crypto/rand fails
-		// This is extremely unlikely but provides collision resistance even in failure case
-		// Format: card-<nanoseconds>-<pid>
-		// Example: card-1729180000123456789-1234
+		// Counter mixed in so concurrent callers in the same process+nanosecond cannot collide.
+		log.Printf("CardID WARNING: crypto/rand failed (%v), using fallback ID generator", err)
 		now := time.Now().UnixNano()
 		pid := os.Getpid()
-		return fmt.Sprintf("card-%d-%d", now, pid)
+		seq := cardIDFallbackSeq.Add(1)
+		return fmt.Sprintf("card-%d-%d-%d", now, pid, seq)
 	}
 	// Format: card-<16 hex chars>
 	// Example: card-a1b2c3d4e5f6a7b8
