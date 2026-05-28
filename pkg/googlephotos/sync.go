@@ -371,13 +371,17 @@ func (sm *SyncManager) preloadAlbumCache(ctx context.Context, cards []syncmanage
 	}
 }
 
-// sortAllAlbumsByShootTime sorts every card-* album by photo shoot time. Errors
-// on individual albums are logged but do not fail the overall sync.
+// sortAllAlbumsByShootTime sorts every card-* album by photo shoot time. Albums
+// are independent of one another, so they are sorted concurrently with a bounded
+// worker pool instead of one-at-a-time. Errors on individual albums are logged
+// but do not fail the overall sync.
 func (sm *SyncManager) sortAllAlbumsByShootTime(ctx context.Context, cards []syncmanager.FileInfo) {
-	for i, card := range cards {
-		if ctx.Err() != nil {
-			return
-		}
+	type sortTarget struct {
+		albumID    string
+		albumTitle string
+	}
+	var targets []sortTarget
+	for _, card := range cards {
 		cardID := strings.TrimPrefix(card.Name, "card-")
 		if cardID == "" {
 			cardID = card.Name
@@ -386,27 +390,67 @@ func (sm *SyncManager) sortAllAlbumsByShootTime(ctx context.Context, cards []syn
 		if !ok {
 			continue
 		}
+		targets = append(targets, sortTarget{albumID: albumID, albumTitle: "card-" + cardID})
+	}
+	if len(targets) == 0 {
+		return
+	}
 
-		albumTitle := "card-" + cardID
+	workers := runtime.GOMAXPROCS(0)
+	if workers < 2 {
+		workers = 2
+	}
+	if workers > 4 {
+		workers = 4
+	}
+	if workers > len(targets) {
+		workers = len(targets)
+	}
+
+	var done atomic.Int64
+	total := len(targets)
+	reportPhase := func() {
 		sm.mu.Lock()
-		sm.progress.CurrentPhase = fmt.Sprintf("Sorting album %s (%d/%d)", albumTitle, i+1, len(cards))
-		sm.progress.UpdatedAt = timePtr(time.Now())
+		if sm.progress != nil {
+			sm.progress.CurrentPhase = fmt.Sprintf("Sorting albums by shoot time (%d/%d)", done.Load(), total)
+			sm.progress.UpdatedAt = timePtr(time.Now())
+		}
 		sm.mu.Unlock()
+	}
+	reportPhase()
 
-		sortCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
-		_, err := sm.client.SortAlbumByShootTime(sortCtx, albumID, func(p SortProgress) {
-			sm.mu.Lock()
-			if sm.progress != nil {
-				sm.progress.CurrentPhase = fmt.Sprintf("Sorting %s: %s (%d/%d)", albumTitle, p.Status, p.CurrentItem, p.TotalItems)
-				sm.progress.UpdatedAt = timePtr(time.Now())
+	jobs := make(chan sortTarget)
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for range workers {
+		go func() {
+			defer wg.Done()
+			for t := range jobs {
+				if ctx.Err() != nil {
+					return
+				}
+				sortCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+				_, err := sm.client.SortAlbumByShootTime(sortCtx, t.albumID, nil)
+				cancel()
+				if err != nil {
+					log.Printf("[GooglePhotos] Failed to sort album %s by shoot time: %v", t.albumTitle, err)
+				}
+				done.Add(1)
+				reportPhase()
 			}
-			sm.mu.Unlock()
-		})
-		cancel()
-		if err != nil {
-			log.Printf("[GooglePhotos] Failed to sort album %s by shoot time: %v", albumTitle, err)
+		}()
+	}
+	for _, t := range targets {
+		select {
+		case jobs <- t:
+		case <-ctx.Done():
+		}
+		if ctx.Err() != nil {
+			break
 		}
 	}
+	close(jobs)
+	wg.Wait()
 }
 
 // syncCard syncs all photos from a single card to Google Photos
@@ -469,12 +513,86 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 
 	log.Printf("[GooglePhotos] Syncing %d files from card %s to album %s", len(mediaFiles), cardID, albumTitle)
 
-	dynamicBatchSize := int(sm.dynamicBatchSize.Load())
-	if dynamicBatchSize <= 0 {
-		dynamicBatchSize = sm.options.batchSize
+	initialBatchSize := int(sm.dynamicBatchSize.Load())
+	if initialBatchSize <= 0 {
+		initialBatchSize = sm.options.batchSize
 	}
-	batch := make([]*NewMediaItem, 0, dynamicBatchSize)
-	batchFiles := make([]syncmanager.FileInfo, 0, dynamicBatchSize)
+
+	// Per-card counters shared between the upload-draining goroutine (this one)
+	// and the async batch committer below. skipped is seeded with the RAW files
+	// already skipped during listing.
+	var uploadedC, skippedC, failedC atomic.Int64
+	skippedC.Store(int64(skipped))
+	loadCounts := func() (int, int, int) {
+		return int(uploadedC.Load()), int(skippedC.Load()), int(failedC.Load())
+	}
+
+	// Async batch committer: a single goroutine commits assembled batches to the
+	// album in FIFO order (preserving chronological album ordering) while the
+	// upload workers keep streaming new results in. Previously each batchCreate
+	// round-trip ran inline in the drain loop, stalling every upload worker for
+	// its duration once the results channel filled; decoupling them lets uploads
+	// and album commits overlap.
+	type pendingBatch struct {
+		items []*NewMediaItem
+		files []syncmanager.FileInfo
+	}
+	batchCh := make(chan pendingBatch, 2)
+	commitDone := make(chan struct{})
+	go func() {
+		defer close(commitDone)
+		for pb := range batchCh {
+			sm.setPhase("Adding to album")
+			sm.startStage("batch_create")
+			cur := int(sm.dynamicBatchSize.Load())
+			if cur <= 0 {
+				cur = sm.options.batchSize
+			}
+			batchResult, cerr := sm.createBatch(ctx, album.ID, pb.items)
+			if cerr != nil {
+				log.Printf("[GooglePhotos] Failed to create batch in album %s: %v", albumTitle, cerr)
+			}
+			log.Printf("[GooglePhotos] Created media items in album %s: success=%d failed=%d", albumTitle, batchResult.successCount, batchResult.failCount)
+			uploadedC.Add(int64(batchResult.successCount))
+			failedC.Add(int64(batchResult.failCount))
+			for i, file := range pb.files {
+				if i < len(batchResult.successes) && batchResult.successes[i] {
+					sm.store.markBatchDone(file.Path)
+				}
+			}
+			tuned := tuneBatchSize(cur, batchResult.successCount, batchResult.failCount, cerr)
+			sm.dynamicBatchSize.Store(int32(tuned))
+			up, sk, fl := loadCounts()
+			sm.setCounts(up, sk, fl)
+			sm.setBatchPending(0)
+		}
+	}()
+
+	var closeBatch sync.Once
+	defer func() {
+		closeBatch.Do(func() { close(batchCh) })
+		<-commitDone
+		uploaded, skipped, failed = loadCounts()
+	}()
+
+	batch := make([]*NewMediaItem, 0, initialBatchSize)
+	batchFiles := make([]syncmanager.FileInfo, 0, initialBatchSize)
+	// flush hands the assembled batch off to the committer and starts a fresh
+	// backing slice so the committer can read the old one without racing.
+	flush := func() {
+		if len(batch) == 0 {
+			return
+		}
+		batchCh <- pendingBatch{items: batch, files: batchFiles}
+		size := int(sm.dynamicBatchSize.Load())
+		if size <= 0 {
+			size = sm.options.batchSize
+		}
+		batch = make([]*NewMediaItem, 0, size)
+		batchFiles = make([]syncmanager.FileInfo, 0, size)
+		sm.setBatchPending(0)
+	}
+
 	pendingResults := make(map[int]mediaUploadResult)
 	nextResult := 0
 	sm.startStage("upload")
@@ -490,61 +608,37 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 			nextResult++
 
 			if orderedResult.skipped {
-				skipped++
-				sm.finishFileProgress(orderedResult.file, uploaded, skipped, failed)
+				skippedC.Add(1)
+				up, sk, fl := loadCounts()
+				sm.finishFileProgress(orderedResult.file, up, sk, fl)
 				sm.incrementDuplicateSkipped()
-				sm.setCardProgress(cardID, nextResult, len(mediaFiles), uploaded, skipped, failed, "Skipped duplicate", len(mediaFiles)-nextResult)
+				sm.setCardProgress(cardID, nextResult, len(mediaFiles), up, sk, fl, "Skipped duplicate", len(mediaFiles)-nextResult)
 				continue
 			}
 
 			if orderedResult.err != nil {
 				log.Printf("[GooglePhotos] Failed to upload %s: %v", orderedResult.file.Name, orderedResult.err)
-				failed++
-				sm.finishFileProgress(orderedResult.file, uploaded, skipped, failed)
-				sm.setCardProgress(cardID, nextResult, len(mediaFiles), uploaded, skipped, failed, "Upload failed", len(mediaFiles)-nextResult)
+				failedC.Add(1)
+				up, sk, fl := loadCounts()
+				sm.finishFileProgress(orderedResult.file, up, sk, fl)
+				sm.setCardProgress(cardID, nextResult, len(mediaFiles), up, sk, fl, "Upload failed", len(mediaFiles)-nextResult)
 				continue
 			}
 
 			batch = append(batch, orderedResult.item)
 			batchFiles = append(batchFiles, orderedResult.file)
-			sm.finishFileProgress(orderedResult.file, uploaded, skipped, failed)
+			up, sk, fl := loadCounts()
+			sm.finishFileProgress(orderedResult.file, up, sk, fl)
 			sm.setBatchPending(len(batch))
-			sm.setCardProgress(cardID, nextResult, len(mediaFiles), uploaded, skipped, failed, "Queued for album", len(mediaFiles)-nextResult)
+			sm.setCardProgress(cardID, nextResult, len(mediaFiles), up, sk, fl, "Queued for album", len(mediaFiles)-nextResult)
 
 			if ctx.Err() != nil {
 				return uploaded, skipped, failed, ctx.Err()
 			}
 
-			if len(batch) < dynamicBatchSize {
-				continue
+			if len(batch) >= int(sm.dynamicBatchSize.Load()) {
+				flush()
 			}
-
-			sm.setPhase("Adding to album")
-			sm.startStage("batch_create")
-			batchResult, err := sm.createBatch(ctx, album.ID, batch)
-			if err != nil {
-				log.Printf("[GooglePhotos] Failed to create batch in album %s: %v", albumTitle, err)
-			}
-			log.Printf("[GooglePhotos] Created media items in album %s: success=%d failed=%d", albumTitle, batchResult.successCount, batchResult.failCount)
-			uploaded += batchResult.successCount
-			failed += batchResult.failCount
-			if len(batchResult.successes) > 0 {
-				for i, file := range batchFiles {
-					if i >= len(batchResult.successes) || !batchResult.successes[i] {
-						continue
-					}
-					sm.store.markBatchDone(file.Path)
-				}
-			}
-			dynamicBatchSize = tuneBatchSize(dynamicBatchSize, batchResult.successCount, batchResult.failCount, err)
-			sm.dynamicBatchSize.Store(int32(dynamicBatchSize))
-			batch = batch[:0]
-			batchFiles = batchFiles[:0]
-			sm.setCounts(uploaded, skipped, failed)
-			sm.setBatchPending(0)
-			// The 429-aware retry + circuit breaker already handle rate-limit
-			// backoff; the unconditional post-batch sleep here was cargo-cult and
-			// wasted ~10% of the album-add path's wall time.
 		}
 	}
 
@@ -552,33 +646,19 @@ func (sm *SyncManager) syncCard(ctx context.Context, cardID, cardDirName string)
 		return uploaded, skipped, failed, ctx.Err()
 	}
 
-	// Create remaining items in batch
-	if len(batch) > 0 {
-		sm.setPhase("Adding to album")
-		sm.startStage("batch_create")
-		batchResult, err := sm.createBatch(ctx, album.ID, batch)
-		if err != nil {
-			log.Printf("[GooglePhotos] Failed to create final batch in album %s: %v", albumTitle, err)
-		}
-		log.Printf("[GooglePhotos] Created final media items in album %s: success=%d failed=%d", albumTitle, batchResult.successCount, batchResult.failCount)
-		uploaded += batchResult.successCount
-		failed += batchResult.failCount
-		if len(batchResult.successes) > 0 {
-			for i, file := range batchFiles {
-				if i >= len(batchResult.successes) || !batchResult.successes[i] {
-					continue
-				}
-				sm.store.markBatchDone(file.Path)
-			}
-		}
-		sm.setCounts(uploaded, skipped, failed)
-		sm.setBatchPending(0)
-	}
+	// Hand off the final partial batch, then wait for the committer to drain.
+	flush()
+	closeBatch.Do(func() { close(batchCh) })
+	<-commitDone
+
+	up, sk, fl := loadCounts()
+	sm.setCounts(up, sk, fl)
+	sm.setBatchPending(0)
 	sm.completeStage("batch_create")
 	sm.startStage("finalization")
 	sm.completeStage("finalization")
 
-	return uploaded, skipped, failed, nil
+	return up, sk, fl, nil
 }
 
 func (sm *SyncManager) uploadMediaItems(ctx context.Context, cardID string, mediaFiles []syncmanager.FileInfo) <-chan mediaUploadResult {
