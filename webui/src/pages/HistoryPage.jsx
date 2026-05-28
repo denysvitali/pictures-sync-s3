@@ -22,6 +22,9 @@ import { Button } from '../components/Button.jsx'
 import { Icon } from '../components/Icons.jsx'
 import { LoadingSpinner, PageLoader } from '../components/LoadingSpinner.jsx'
 import { useToast } from '../components/Toast.jsx'
+import { EmptyState } from '../components/EmptyState.jsx'
+import { ErrorState } from '../components/ErrorState.jsx'
+import { Modal } from '../components/Modal.jsx'
 
 function formatTimestamp(ts) {
   if (!ts) return '--'
@@ -185,17 +188,32 @@ function HistoryEntry({ entry }) {
   )
 }
 
-function EmptyState() {
+function ClearHistoryModal({ open, onClose, onConfirm, loading }) {
   return (
-    <div className="flex flex-col items-center justify-center py-16 px-4">
-      <div className="w-16 h-16 rounded-2xl bg-surface-800/80 border border-surface-700/50 flex items-center justify-center mb-4">
-        <Icon name="clock" className="w-8 h-8 text-surface-500" />
+    <Modal open={open} onClose={onClose} title="Clear History">
+      <div className="space-y-4">
+        <div className="flex items-start gap-3">
+          <Icon name="exclamation-triangle" className="w-5 h-5 text-warning shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm text-surface-200">
+              Are you sure you want to clear all sync history?
+            </p>
+            <p className="text-xs text-surface-500 mt-1">
+              This action cannot be undone. Your synced files will not be affected.
+            </p>
+          </div>
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" size="sm" onClick={onClose} disabled={loading}>
+            Cancel
+          </Button>
+          <Button variant="danger" size="sm" loading={loading} onClick={onConfirm}>
+            <Icon name="trash" className="w-4 h-4" />
+            Clear History
+          </Button>
+        </div>
       </div>
-      <h3 className="text-base font-semibold text-surface-300 mb-1">No Sync History</h3>
-      <p className="text-sm text-surface-500 text-center max-w-xs">
-        Sync runs will appear here once your first backup completes.
-      </p>
-    </div>
+    </Modal>
   )
 }
 

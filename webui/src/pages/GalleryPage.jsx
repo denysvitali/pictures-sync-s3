@@ -21,6 +21,8 @@ import { Card } from '../components/Card.jsx'
 import { Button } from '../components/Button.jsx'
 import { Icon } from '../components/Icons.jsx'
 import { LoadingSpinner } from '../components/LoadingSpinner.jsx'
+import { EmptyState } from '../components/EmptyState.jsx'
+import { ErrorState } from '../components/ErrorState.jsx'
 
 const DEFAULT_PAGE_SIZE = 40
 const PAGE_SIZE_OPTIONS = [40, 80, 160, 320]
@@ -599,19 +601,22 @@ export default function GalleryPage() {
           <LoadingSpinner size="lg" />
         </div>
       ) : loadError ? (
-        <Card className="text-center py-12">
-          <Icon name="exclamation-triangle" className="w-12 h-12 text-danger mx-auto mb-3" />
-          <p className="text-surface-200 text-sm font-medium">Could not load files</p>
-          <p className="mx-auto mt-2 max-w-md text-xs text-surface-500">{loadError}</p>
-          <Button variant="secondary" size="sm" className="mt-4" onClick={fetchFiles}>
-            <Icon name="arrow-path" className="w-4 h-4" />
-            Retry
-          </Button>
-        </Card>
+        <ErrorState
+          error={loadError}
+          onRetry={fetchFiles}
+          title="Could not load files"
+        />
       ) : files.length === 0 ? (
-        <Card className="text-center py-12">
-          <Icon name="folder" className="w-12 h-12 text-surface-500 mx-auto mb-3" />
-          <p className="text-surface-400 text-sm">This folder is empty</p>
+        <Card className="py-12">
+          <EmptyState
+            icon="folder"
+            title={source === 'sdcard' ? 'No SD Card Detected' : 'This folder is empty'}
+            description={
+              source === 'sdcard'
+                ? 'Insert an SD card to view its contents. Make sure the card is properly seated in the slot.'
+                : 'This folder does not contain any files or subfolders yet.'
+            }
+          />
         </Card>
       ) : (
         <>
