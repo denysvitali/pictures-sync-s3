@@ -60,6 +60,15 @@ func IsRetryableNetworkError(err error) bool {
 		return true
 	}
 
+	// Concurrency / serialization conflicts. Google Photos returns
+	// "(409 ABORTED) The operation was aborted." when concurrent batch
+	// commits race on the same album; the canonical remedy is retry with
+	// backoff.
+	if strings.Contains(errStr, "409 aborted") ||
+		strings.Contains(errStr, "operation was aborted") {
+		return true
+	}
+
 	return false
 }
 

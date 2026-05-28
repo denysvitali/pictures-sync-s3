@@ -42,22 +42,22 @@ func TestGooglePhotosFlatRemoteDisambiguatesDuplicateBasenames(t *testing.T) {
 }
 
 func TestGooglePhotosTransferCount(t *testing.T) {
-	// New defaults: 2 workers, hard cap 4 (was 4 / 16).
+	// Google Photos serializes batch commits per album; concurrent uploads
+	// return "(409 ABORTED) The operation was aborted." Always 1 worker.
 	tests := []struct {
 		name      string
 		transfers int
-		want      int
 	}{
-		{name: "default", transfers: 0, want: 2},
-		{name: "configured", transfers: 3, want: 3},
-		{name: "capped", transfers: 64, want: 4},
+		{name: "default", transfers: 0},
+		{name: "configured override ignored", transfers: 3},
+		{name: "high override ignored", transfers: 64},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &Manager{transfers: tt.transfers}
-			if got := m.googlePhotosTransferCount(); got != tt.want {
-				t.Fatalf("googlePhotosTransferCount() = %d, want %d", got, tt.want)
+			if got := m.googlePhotosTransferCount(); got != 1 {
+				t.Fatalf("googlePhotosTransferCount() = %d, want 1", got)
 			}
 		})
 	}

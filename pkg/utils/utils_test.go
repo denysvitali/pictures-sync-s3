@@ -312,6 +312,7 @@ func TestIsRetryableNetworkError(t *testing.T) {
 		{"503 status", errors.New("HTTP 503 Service Unavailable"), true},
 		{"broken pipe", errors.New("broken pipe"), true},
 		{"EOF", errors.New("unexpected EOF"), true},
+		{"google photos 409 aborted", errors.New("failed to commit batch: batch upload failed: failed to create media item: The operation was aborted. (409 ABORTED)"), true},
 		{"not retryable", errors.New("invalid argument"), false},
 		{"authentication error", errors.New("authentication failed"), false},
 	}

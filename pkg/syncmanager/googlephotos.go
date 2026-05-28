@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"path"
 	"path/filepath"
 	"strings"
@@ -142,7 +141,9 @@ func (m *Manager) SyncCardsToGooglePhotos(ctx context.Context) error {
 	m.mu.Unlock()
 
 	// Track overall progress.
+	m.mu.Lock()
 	m.startTime = time.Now()
+	m.mu.Unlock()
 	totalFiles := 0
 	totalBytes := int64(0)
 
@@ -429,47 +430,17 @@ type googlePhotosCopyJob struct {
 	albumName string
 }
 
-// isRaspberryPi returns true when the binary is running on a Raspberry Pi.
-// It reads /proc/cpuinfo and looks for the "Raspberry Pi" hardware identifier.
-// The result is used to cap upload workers to a Pi-safe default.
-func isRaspberryPi() bool {
-	data, err := os.ReadFile("/proc/cpuinfo")
-	if err != nil {
-		return false
-	}
-	return strings.Contains(string(data), "Raspberry Pi")
-}
-
 // googlePhotosTransferCount returns the number of parallel upload workers to
 // use for Google Photos transfers.
 //
-// Defaults (no override set):
-//   - Raspberry Pi detected: 2 workers (keeps the Pi responsive)
-//   - All other platforms:    2 workers (conservative default)
-//
-// The caller can override via m.transfers (e.g. from settings or an env var).
-// The hard cap is 4 to avoid hitting Google Photos rate limits.
+// Google Photos serializes batch commits per album: concurrent
+// mediaItems:batchCreate calls against the same album race the server-side
+// album transaction and return "(409 ABORTED) The operation was aborted."
+// Running a single worker eliminates the race at the source. rclone's
+// googlephotos backend still batches uploads internally, so throughput stays
+// reasonable for typical photo libraries.
 func (m *Manager) googlePhotosTransferCount() int {
-	m.mu.Lock()
-	transfers := m.transfers
-	m.mu.Unlock()
-
-	const defaultWorkers = 2
-	const maxWorkers = 4
-	const piMaxWorkers = 2
-
-	if transfers < 1 {
-		transfers = defaultWorkers
-	}
-	if transfers > maxWorkers {
-		transfers = maxWorkers
-	}
-	// On a Raspberry Pi, always cap to piMaxWorkers regardless of the override,
-	// to avoid starving the OS under sustained I/O + network load.
-	if isRaspberryPi() && transfers > piMaxWorkers {
-		transfers = piMaxWorkers
-	}
-	return transfers
+	return 1
 }
 
 func listExistingObjectRemotes(ctx context.Context, f fs.Fs) map[string]struct{} {
