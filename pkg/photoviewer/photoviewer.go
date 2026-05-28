@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/denysvitali/pictures-sync-s3/pkg/utils"
 )
 
 // PhotoInfo represents detailed information about a photo file
@@ -174,7 +176,7 @@ func ScanDCIM(mountPath string) (*ScanResult, error) {
 			Path:         relPath,
 			AbsolutePath: path,
 			Size:         fileInfo.Size(),
-			SizeHuman:    formatBytes(fileInfo.Size()),
+			SizeHuman:    utils.FormatBytes(fileInfo.Size()),
 			ModTime:      fileInfo.ModTime(),
 			MimeType:     mimeType,
 			Extension:    ext,
@@ -265,7 +267,7 @@ func ScanDirectory(mountPath, relativePath string) (*ScanResult, error) {
 			Path:         relPath,
 			AbsolutePath: fullFilePath,
 			Size:         fileInfo.Size(),
-			SizeHuman:    formatBytes(fileInfo.Size()),
+			SizeHuman:    utils.FormatBytes(fileInfo.Size()),
 			ModTime:      fileInfo.ModTime(),
 			MimeType:     mimeType,
 			Extension:    ext,
@@ -329,7 +331,7 @@ func GetPhotoByPath(mountPath, relativePath string) (*PhotoInfo, error) {
 		Path:         relativePath,
 		AbsolutePath: cleanFullPath,
 		Size:         fileInfo.Size(),
-		SizeHuman:    formatBytes(fileInfo.Size()),
+		SizeHuman:    utils.FormatBytes(fileInfo.Size()),
 		ModTime:      fileInfo.ModTime(),
 		MimeType:     mimeType,
 		Extension:    ext,
@@ -365,20 +367,6 @@ func ValidatePath(mountPath, relativePath string) (string, error) {
 	}
 
 	return cleanFullPath, nil
-}
-
-// formatBytes formats bytes to human-readable string
-func formatBytes(bytes int64) string {
-	const unit = 1024
-	if bytes < unit {
-		return fmt.Sprintf("%d B", bytes)
-	}
-	div, exp := int64(unit), 0
-	for n := bytes / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
 // FilterPhotos applies filters to a list of photos

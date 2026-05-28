@@ -172,7 +172,7 @@ func (m *Manager) SyncCardsToGooglePhotos(ctx context.Context) error {
 			continue
 		}
 		count, bytes := m.countFiles(syncCtx, srcFs)
-		log.Printf("Google Photos sync: card %s has %d files (%s)", card.Name, count, formatBytes(bytes))
+		log.Printf("Google Photos sync: card %s has %d files (%s)", card.Name, count, utils.FormatBytes(bytes))
 		totalFiles += count
 		totalBytes += bytes
 	}
@@ -183,7 +183,7 @@ func (m *Manager) SyncCardsToGooglePhotos(ctx context.Context) error {
 		return nil
 	}
 
-	log.Printf("Google Photos sync: %d files, %s total", totalFiles, formatBytes(totalBytes))
+	log.Printf("Google Photos sync: %d files, %s total", totalFiles, utils.FormatBytes(totalBytes))
 
 	// Set up stats group for progress tracking.
 	syncCtx = accounting.WithStatsGroup(syncCtx, fmt.Sprintf("gphotos-sync-%d", time.Now().UnixNano()))
@@ -336,7 +336,7 @@ func (m *Manager) syncCardToGooglePhotos(ctx context.Context, srcPath, dstPath s
 	// listObjects already filters to photo/video extensions during the walk.
 	objects, beforeBytes := m.listObjects(ctx, srcFs)
 	beforeCount := len(objects)
-	log.Printf("Google Photos sync: %d files (%s) to upload", beforeCount, formatBytes(beforeBytes))
+	log.Printf("Google Photos sync: %d files (%s) to upload", beforeCount, utils.FormatBytes(beforeBytes))
 
 	// Load persistent upload state to avoid re-uploading files that Google Photos
 	// may not list while processing (especially videos).
@@ -692,19 +692,4 @@ func (m *Manager) CancelGooglePhotos() error {
 	}
 
 	return nil
-}
-
-// formatBytes returns a human-readable byte count.
-func formatBytes(b int64) string {
-	const unit = 1024
-	if b < unit {
-		return fmt.Sprintf("%d B", b)
-	}
-	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	units := []string{"KB", "MB", "GB", "TB", "PB"}
-	return fmt.Sprintf("%.1f %s", float64(b)/float64(div), units[exp])
 }

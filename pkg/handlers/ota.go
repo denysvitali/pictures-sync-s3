@@ -3,7 +3,6 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/httputil"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ota"
+	"github.com/denysvitali/pictures-sync-s3/pkg/utils"
 	"github.com/denysvitali/pictures-sync-s3/pkg/version"
 )
 
@@ -580,16 +580,5 @@ func formatBytes(size int64) string {
 	if size <= 0 {
 		return "unknown"
 	}
-
-	if size < 1024 {
-		return fmt.Sprintf("%d B", size)
-	}
-	if size < 1024*1024 {
-		return fmt.Sprintf("%.1f KB", float64(size)/1024)
-	}
-	if size < 1024*1024*1024 {
-		return fmt.Sprintf("%.1f MB", float64(size)/(1024*1024))
-	}
-
-	return fmt.Sprintf("%.1f GB", float64(size)/(1024*1024*1024))
+	return utils.FormatBytes(size)
 }

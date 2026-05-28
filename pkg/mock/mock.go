@@ -10,6 +10,7 @@ import (
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/httputil"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
+	"github.com/denysvitali/pictures-sync-s3/pkg/utils"
 	"github.com/denysvitali/pictures-sync-s3/pkg/wifimanager"
 	"github.com/denysvitali/pictures-sync-s3/pkg/websocket"
 )
@@ -255,7 +256,7 @@ func (m *MockBackend) StartSyncSimulation() {
 				if m.currentSync.TransferSpeed > 0 {
 					remaining := float64(totalBytes - m.currentSync.BytesSynced)
 					etaSeconds := remaining / m.currentSync.TransferSpeed
-					m.currentSync.ETA = formatDuration(time.Duration(etaSeconds) * time.Second)
+					m.currentSync.ETA = utils.FormatDurationTime(time.Duration(etaSeconds) * time.Second)
 				}
 			}
 
@@ -321,17 +322,6 @@ func (m *MockBackend) CancelSync() {
 		m.currentState.CurrentSync = nil
 		m.currentState.Status = state.StatusIdle
 	}
-}
-
-// formatDuration formats a duration into a human-readable string
-func formatDuration(d time.Duration) string {
-	if d < time.Minute {
-		return fmt.Sprintf("%ds", int(d.Seconds()))
-	}
-	if d < time.Hour {
-		return fmt.Sprintf("%dm %ds", int(d.Minutes()), int(d.Seconds())%60)
-	}
-	return fmt.Sprintf("%dh %dm", int(d.Hours()), int(d.Minutes())%60)
 }
 
 // HTTP Handlers for mock endpoints
