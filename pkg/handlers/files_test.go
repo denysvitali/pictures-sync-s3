@@ -1,9 +1,13 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"image"
+	"image/color"
+	"image/jpeg"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +18,7 @@ import (
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/daemoncontrol"
 	"github.com/denysvitali/pictures-sync-s3/pkg/sdcardbrowser"
+	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 	"github.com/denysvitali/pictures-sync-s3/pkg/syncmanager"
 )
 
@@ -314,14 +319,12 @@ func TestHandleThumbnail_RejectsAbsolutePathTraversal(t *testing.T) {
 }
 
 func TestHandleThumbnail_SuccessReturnsJPEG(t *testing.T) {
-	mountPath := t.TempDir()
-	rel := "DCIM/IMG_1.jpg"
-	filesTestWriteJPEG(t, mountPath, rel)
-	filesTestWithMountPath(t, mountPath)
-
 	ctx, cleanup := setupTestContext(t)
 	defer cleanup()
-	ctx.StateMgr.SetSDCard(true, mountPath)
+	rel := "DCIM/IMG_1.jpg"
+	filesTestWriteJPEG(t, state.MountDir, rel)
+	filesTestWithMountPath(t, state.MountDir)
+	ctx.StateMgr.SetSDCard(true, state.MountDir)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/thumbnail?path="+rel, nil)
 	w := httptest.NewRecorder()
@@ -339,13 +342,11 @@ func TestHandleThumbnail_SuccessReturnsJPEG(t *testing.T) {
 }
 
 func TestHandleSDCardFiles_MountedSuccess(t *testing.T) {
-	mountPath := t.TempDir()
-	filesTestWriteJPEG(t, mountPath, "DCIM/IMG_001.jpg")
-	filesTestWithMountPath(t, mountPath)
-
 	ctx, cleanup := setupTestContext(t)
 	defer cleanup()
-	ctx.StateMgr.SetSDCard(true, mountPath)
+	filesTestWriteJPEG(t, state.MountDir, "DCIM/IMG_001.jpg")
+	filesTestWithMountPath(t, state.MountDir)
+	ctx.StateMgr.SetSDCard(true, state.MountDir)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sdcard/files?path=DCIM", nil)
 	w := httptest.NewRecorder()
@@ -377,14 +378,12 @@ func TestHandleSDCardPreview_MissingPath(t *testing.T) {
 }
 
 func TestHandleSDCardPreview_Success(t *testing.T) {
-	mountPath := t.TempDir()
-	rel := "DCIM/IMG_2.jpg"
-	filesTestWriteJPEG(t, mountPath, rel)
-	filesTestWithMountPath(t, mountPath)
-
 	ctx, cleanup := setupTestContext(t)
 	defer cleanup()
-	ctx.StateMgr.SetSDCard(true, mountPath)
+	rel := "DCIM/IMG_2.jpg"
+	filesTestWriteJPEG(t, state.MountDir, rel)
+	filesTestWithMountPath(t, state.MountDir)
+	ctx.StateMgr.SetSDCard(true, state.MountDir)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sdcard/preview?path="+rel, nil)
 	w := httptest.NewRecorder()
@@ -599,22 +598,23 @@ func filesTestWithMountPath(t *testing.T, mountPath string) {
 	t.Cleanup(func() { sdCardMountPath = original })
 }
 
-// filesTestWriteJPEG writes a minimal but valid baseline JPEG so packages that
-// detect content type from magic bytes will recognise the file as an image.
+// filesTestWriteJPEG writes a tiny but fully-decodable JPEG so handlers that
+// run an actual image decode (ReadThumbnail/ReadPreview) succeed instead of
+// rejecting a hand-rolled SOI/EOI stub for missing scan data.
 func filesTestWriteJPEG(t *testing.T, mountPath, rel string) {
 	t.Helper()
 	full := filepath.Join(mountPath, rel)
 	if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
 		t.Fatalf("mkdir %s: %v", filepath.Dir(full), err)
 	}
-	// Minimal JPEG SOI/JFIF/EOI structure — enough for MIME sniffing and
-	// for ReadPreview/ReadThumbnail to treat as image data without crashing.
-	data := []byte{
-		0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46,
-		0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01,
-		0x00, 0x01, 0x00, 0x00, 0xFF, 0xD9,
+	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	img.Set(0, 0, color.RGBA{255, 0, 0, 255})
+	img.Set(1, 1, color.RGBA{0, 255, 0, 255})
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 80}); err != nil {
+		t.Fatalf("encode jpeg: %v", err)
 	}
-	if err := os.WriteFile(full, data, 0644); err != nil {
+	if err := os.WriteFile(full, buf.Bytes(), 0644); err != nil {
 		t.Fatalf("write %s: %v", full, err)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -598,7 +599,7 @@ func sdcardFileHTTPStatus(err error) int {
 		return http.StatusForbidden
 	case strings.Contains(message, "path is a directory"):
 		return http.StatusBadRequest
-	case os.IsNotExist(err):
+	case errors.Is(err, fs.ErrNotExist):
 		return http.StatusNotFound
 	default:
 		return http.StatusInternalServerError
