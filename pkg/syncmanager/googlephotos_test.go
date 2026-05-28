@@ -59,8 +59,8 @@ func TestGooglePhotosTransferCount(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &Manager{transfers: tt.transfers}
-			if got := m.googlePhotosTransferCount(); got != 8 {
-				t.Fatalf("googlePhotosTransferCount() = %d, want 8", got)
+			if got := m.googlePhotosTransferCount(); got != 24 {
+				t.Fatalf("googlePhotosTransferCount() = %d, want 24", got)
 			}
 		})
 	}

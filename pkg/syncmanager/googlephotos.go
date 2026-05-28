@@ -462,11 +462,13 @@ type googlePhotosCopyJob struct {
 // The 409 ABORTED race is now avoided structurally: dstFsPath sets
 // batch_size=50 and rclone's batcher has a single commit goroutine, so
 // regardless of how many uploads run in parallel only one batchCreate is
-// ever in flight against the album. That frees us to push the upload phase
-// hard; 8 workers saturates a fast B2 → Google Photos pipe without
-// CPU-bottlenecking the Pi.
+// ever in flight against the album. Google Photos throttles each upload
+// connection to ~0.8 MB/s, so total throughput scales near-linearly with
+// worker count until we hit either the Pi's gigabit NIC or rclone's pacer
+// burst (100). 24 workers gives ~20 MB/s on production data while leaving
+// CPU + pacer headroom for retries.
 func (m *Manager) googlePhotosTransferCount() int {
-	return 8
+	return 24
 }
 
 // injectRemoteOption rewrites an rclone remote spec like "gphotos:album/x"
