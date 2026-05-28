@@ -42,25 +42,24 @@ func TestGooglePhotosFlatRemoteDisambiguatesDuplicateBasenames(t *testing.T) {
 }
 
 func TestGooglePhotosTransferCount(t *testing.T) {
-	// The 409 ABORTED race is now avoided structurally via batch_size=50 on
-	// the dst remote plus rclone's single-commit batcher goroutine, so the
-	// worker count is free to scale upload parallelism. We pin it to 8
-	// regardless of the user-configured --transfers because that's tuned for
-	// the gphotos pipe specifically.
+	// Now that the 409 race is avoided structurally (batch_size=50 + single
+	// commit goroutine), the worker count honours the user-configured
+	// --transfers setting and falls back to 8 only when unset.
 	tests := []struct {
 		name      string
 		transfers int
+		want      int
 	}{
-		{name: "default", transfers: 0},
-		{name: "configured override ignored", transfers: 3},
-		{name: "high override ignored", transfers: 64},
+		{name: "unset uses fallback", transfers: 0, want: 8},
+		{name: "user override low", transfers: 3, want: 3},
+		{name: "user override high", transfers: 64, want: 64},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &Manager{transfers: tt.transfers}
-			if got := m.googlePhotosTransferCount(); got != 24 {
-				t.Fatalf("googlePhotosTransferCount() = %d, want 24", got)
+			if got := m.googlePhotosTransferCount(); got != tt.want {
+				t.Fatalf("googlePhotosTransferCount() = %d, want %d", got, tt.want)
 			}
 		})
 	}
