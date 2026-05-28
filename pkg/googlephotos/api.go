@@ -328,7 +328,21 @@ func (c *Client) BatchRemoveMediaItemsWithProgress(ctx context.Context, albumID 
 // Items are appended in the order given. Requests are chunked to respect the
 // 50-item API limit.
 func (c *Client) BatchAddMediaItemsContext(ctx context.Context, albumID string, mediaItemIds []string) error {
+	return c.BatchAddMediaItemsWithProgress(ctx, albumID, mediaItemIds, nil)
+}
+
+// BatchAddMediaItemsWithProgress adds existing media items to an album with
+// per-chunk progress callbacks. onProgress is invoked after each 50-item chunk
+// completes with the cumulative added count and total.
+func (c *Client) BatchAddMediaItemsWithProgress(ctx context.Context, albumID string, mediaItemIds []string, onProgress func(added, total int)) error {
+	added := 0
 	return chunkSlice(mediaItemIds, maxBatchSize, func(chunk []string) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		reqBody := BatchAddMediaItemsRequest{MediaItemIds: chunk}
 		jsonBody, err := json.Marshal(reqBody)
 		if err != nil {
@@ -346,6 +360,11 @@ func (c *Client) BatchAddMediaItemsContext(ctx context.Context, albumID string, 
 		}
 		if resp.StatusCode != http.StatusOK {
 			return newAPIError("batchAddMediaItems", resp.StatusCode, body)
+		}
+
+		added += len(chunk)
+		if onProgress != nil {
+			onProgress(added, len(mediaItemIds))
 		}
 		return nil
 	})
@@ -463,10 +482,14 @@ func (c *Client) SortAlbumByShootTime(ctx context.Context, albumID string, onPro
 		sortedIDs[i] = item.ID
 	}
 	total := len(sortedIDs)
-	if err := c.BatchAddMediaItemsContext(ctx, newAlbum.ID, sortedIDs); err != nil {
-		p := SortProgress{Status: "error", TotalItems: total, Error: err.Error()}
+	report(SortProgress{Status: "adding", TotalItems: total, NewAlbumID: newAlbum.ID})
+	addErr := c.BatchAddMediaItemsWithProgress(ctx, newAlbum.ID, sortedIDs, func(added, t int) {
+		report(SortProgress{Status: "adding", TotalItems: t, AddedItems: added, NewAlbumID: newAlbum.ID})
+	})
+	if addErr != nil {
+		p := SortProgress{Status: "error", TotalItems: total, NewAlbumID: newAlbum.ID, Error: addErr.Error()}
 		report(p)
-		return p, fmt.Errorf("batch add to new album: %w", err)
+		return p, fmt.Errorf("batch add to new album: %w", addErr)
 	}
 
 	// Phase 5: delete the old unsorted album.

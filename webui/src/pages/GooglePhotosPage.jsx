@@ -469,9 +469,27 @@ function AlbumsPanel({ albums, loading, onClear, clearingId, clearProgress, onSo
 
             const sp = sortProgress?.[album.id]
             const isSorting = sortingId === album.id
-            const sortLabel = isSorting && sp?.status !== 'completed' && sp?.status !== 'error'
-              ? `Sorting...`
-              : 'Sort'
+            const sortActive = isSorting && sp?.status !== 'completed' && sp?.status !== 'error'
+            const sortStatusLabel = (() => {
+              switch (sp?.status) {
+                case 'listing':
+                  return 'Listing...'
+                case 'sorting':
+                  return 'Sorting...'
+                case 'creating-album':
+                  return 'Creating album...'
+                case 'adding':
+                  return Number(sp?.total_items) > 0
+                    ? `Adding ${sp?.added_items || 0}/${sp.total_items}...`
+                    : 'Adding...'
+                case 'deleting-old':
+                  return 'Finishing...'
+                default:
+                  return 'Sorting...'
+              }
+            })()
+            const sortLabel = sortActive ? sortStatusLabel : 'Sort'
+            const hasSortProgress = sortActive && Number(sp?.total_items) > 0
             const sortError = sp?.status === 'error' ? (sp?.error || 'Failed to sort album') : ''
 
             return (
@@ -513,6 +531,13 @@ function AlbumsPanel({ albums, loading, onClear, clearingId, clearProgress, onSo
                   <p className="mt-2 text-xs text-surface-400">
                     Removed {progress?.removed_items || 0}
                     {Number(progress?.total_items) > 0 ? `/${progress.total_items}` : ''}
+                  </p>
+                )}
+                {hasSortProgress && (
+                  <p className="mt-2 text-xs text-surface-400">
+                    {sp?.status === 'adding'
+                      ? `Added ${sp?.added_items || 0}/${sp.total_items}`
+                      : sortStatusLabel}
                   </p>
                 )}
                 {sortError && (
@@ -707,6 +732,46 @@ export default function GooglePhotosPage() {
     [deviceUrl, toast, loadAlbums]
   )
 
+  // Poll the backend for an album sort that is running server-side. Safe to
+  // call to (re)attach to a sort started in a previous page visit — the sort
+  // runs in the background on the device regardless of this page being open.
+  const pollSortProgress = useCallback(
+    (albumId, albumTitle) => {
+      if (!deviceUrl) return
+      if (sortProgressIntervalRef.current) {
+        clearInterval(sortProgressIntervalRef.current)
+        sortProgressIntervalRef.current = null
+      }
+
+      const interval = setInterval(async () => {
+        try {
+          const data = await getGooglePhotosAlbumSortProgress(deviceUrl, albumId)
+          setSortProgress((prev) => ({ ...prev, [albumId]: data }))
+
+          if (data?.status === 'completed' || data?.status === 'error' || data?.status === 'idle') {
+            clearInterval(interval)
+            sortProgressIntervalRef.current = null
+            setSortingAlbumId(null)
+            if (data?.status === 'completed') {
+              toast.success(`Sorted "${albumTitle}" — ${data?.total_items || 0} items reordered`)
+              loadAlbums()
+            } else if (data?.status === 'error') {
+              toast.error(`Failed to sort album: ${data?.error || 'Unknown error'}`)
+            }
+          }
+        } catch (err) {
+          clearInterval(interval)
+          sortProgressIntervalRef.current = null
+          setSortingAlbumId(null)
+          toast.error(`Failed to sort album: ${describeError(err)}`)
+        }
+      }, 1000)
+
+      sortProgressIntervalRef.current = interval
+    },
+    [deviceUrl, toast, loadAlbums]
+  )
+
   const handleSortAlbum = useCallback(
     async (albumId, albumTitle) => {
       if (!deviceUrl) return
@@ -714,47 +779,15 @@ export default function GooglePhotosPage() {
       setSortingAlbumId(albumId)
       setSortProgress((prev) => ({ ...prev, [albumId]: { status: 'listing', total_items: 0, added_items: 0 } }))
 
-      let pollInterval = null
-      const stopPolling = () => {
-        if (pollInterval) {
-          clearInterval(pollInterval)
-          pollInterval = null
-        }
-      }
-
       try {
         await sortGooglePhotosAlbum(deviceUrl, albumId)
-
-        pollInterval = setInterval(async () => {
-          try {
-            const data = await getGooglePhotosAlbumSortProgress(deviceUrl, albumId)
-            setSortProgress((prev) => ({ ...prev, [albumId]: data }))
-
-            if (data?.status === 'completed' || data?.status === 'error' || data?.status === 'idle') {
-              stopPolling()
-              setSortingAlbumId(null)
-              if (data?.status === 'completed') {
-                toast.success(`Sorted "${albumTitle}" — ${data?.total_items || 0} items reordered`)
-                loadAlbums()
-              } else if (data?.status === 'error') {
-                toast.error(`Failed to sort album: ${data?.error || 'Unknown error'}`)
-              }
-            }
-          } catch (err) {
-            stopPolling()
-            setSortingAlbumId(null)
-            toast.error(`Failed to sort album: ${describeError(err)}`)
-          }
-        }, 1000)
-
-        sortProgressIntervalRef.current = pollInterval
+        pollSortProgress(albumId, albumTitle)
       } catch (err) {
-        stopPolling()
         setSortingAlbumId(null)
         toast.error(`Failed to start sorting: ${describeError(err)}`)
       }
     },
-    [deviceUrl, toast, loadAlbums]
+    [deviceUrl, toast, pollSortProgress]
   )
 
   useEffect(() => {
@@ -766,6 +799,34 @@ export default function GooglePhotosPage() {
       loadAlbums()
     }
   }, [status?.connected, loadAlbums])
+
+  // Reconcile with sorts still running on the device. A sort runs in the
+  // background server-side, so if the user navigated away and came back we
+  // re-attach to it instead of showing an idle "Sort" button.
+  useEffect(() => {
+    if (!deviceUrl || sortingAlbumId || !albums || albums.length === 0) return
+    let cancelled = false
+    ;(async () => {
+      for (const album of albums) {
+        try {
+          const data = await getGooglePhotosAlbumSortProgress(deviceUrl, album.id)
+          if (cancelled) return
+          const st = data?.status
+          if (st && st !== 'idle' && st !== 'completed' && st !== 'error') {
+            setSortProgress((prev) => ({ ...prev, [album.id]: data }))
+            setSortingAlbumId(album.id)
+            pollSortProgress(album.id, album.title)
+            return
+          }
+        } catch {
+          // Ignore — best-effort reconciliation.
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [deviceUrl, albums, sortingAlbumId, pollSortProgress])
 
   useEffect(() => {
     if (!deviceUrl) return
