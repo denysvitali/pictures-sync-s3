@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="pbsLogo" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#0284c7"/>
+    </linearGradient>
+  </defs>
+  <!-- Outer lens ring -->
+  <circle cx="32" cy="34" r="20" stroke="url(#pbsLogo)" stroke-width="4"/>
+  <!-- Inner aperture -->
+  <circle cx="32" cy="34" r="9" fill="#0ea5e9"/>
+  <circle cx="32" cy="34" r="4" fill="#082f49"/>
+  <!-- Cloud-sync arc sweeping over the top of the lens -->
+  <path d="M14 22 A22 22 0 0 1 50 22" stroke="url(#pbsLogo)" stroke-width="4" stroke-linecap="round"/>
+  <!-- Upload arrowhead at the end of the arc -->
+  <path d="M50 22 L44 18 M50 22 L46 28" stroke="#0ea5e9" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

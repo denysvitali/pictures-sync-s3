@@ -54,8 +54,8 @@ function ResolutionPicker({ value, rangeSeconds, onChange }: ResolutionPickerPro
     : 0
 
   return (
-    <div className="inline-flex flex-col gap-1">
-      <div className="inline-flex items-center gap-1.5 rounded-lg bg-surface-800/60 p-1">
+    <div className="flex max-w-full flex-col gap-1">
+      <div className="flex max-w-full flex-wrap items-center gap-1.5 rounded-lg bg-surface-800/60 p-1">
         <button
           type="button"
           aria-pressed={value === 'auto'}

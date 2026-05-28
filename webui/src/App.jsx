@@ -12,6 +12,10 @@ import { EmptyState } from './components/EmptyState.jsx'
 const RECENT_DEVICES_KEY = 'recentDevices'
 const MAX_RECENT_DEVICES = 5
 
+// Mobile bottom nav shows 3 primary destinations + a "More" button that
+// reveals the remaining routes. Order here defines the bottom-bar order.
+const PRIMARY_NAV_IDS = ['status', 'history', 'gallery']
+
 function NavItem({ route, active, onNavigate, layout = 'mobile' }) {
   const activeClass = active
     ? 'text-brand-300 bg-brand-400/10 border-brand-400/20'
@@ -42,23 +46,149 @@ function NavItem({ route, active, onNavigate, layout = 'mobile' }) {
   )
 }
 
-function BottomNav({ current, onNavigate }) {
+function MoreNavButton({ active, label, icon, onClick, expanded }) {
+  const activeClass = active
+    ? 'text-brand-300 bg-brand-400/10 border-brand-400/20'
+    : 'text-surface-400 border-transparent hover:text-surface-100 hover:bg-surface-800/70'
   return (
-    <nav className="fixed bottom-0 inset-x-0 z-40 border-t border-surface-700/60 bg-surface-900/95 px-2 safe-area-bottom backdrop-blur lg:hidden">
-      <div className="mx-auto flex max-w-lg items-center justify-around gap-1 py-1.5">
-        {routes.map((route) => {
-          const active = current === route.id
-          return (
+    <button
+      onClick={onClick}
+      className={`flex min-w-0 flex-1 flex-col items-center gap-0.5 rounded-lg border px-1.5 py-2 text-[10px] font-medium transition-colors ${activeClass}`}
+      aria-haspopup="menu"
+      aria-expanded={expanded}
+    >
+      <Icon name={icon} className="w-5 h-5" />
+      <span className="max-w-full truncate">{label}</span>
+    </button>
+  )
+}
+
+function MoreSheet({ open, onClose, overflowRoutes, current, onNavigate }) {
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, onClose])
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <>
+          <motion.div
+            key="more-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            className="fixed inset-0 z-40 bg-surface-950/60 backdrop-blur-sm lg:hidden"
+            onClick={onClose}
+            aria-hidden="true"
+          />
+          <motion.div
+            key="more-sheet"
+            role="menu"
+            aria-label="More navigation"
+            initial={{ y: '100%' }}
+            animate={{ y: 0 }}
+            exit={{ y: '100%' }}
+            transition={{ type: 'spring', stiffness: 320, damping: 32 }}
+            style={{ bottom: 'calc(3.5rem + env(safe-area-inset-bottom))' }}
+            className="fixed inset-x-0 z-50 rounded-t-2xl border border-surface-700/60 border-b-0 bg-surface-900/95 backdrop-blur lg:hidden"
+          >
+            <div className="mx-auto max-w-lg px-4 pb-4 pt-3">
+              <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-surface-700/80" aria-hidden="true" />
+              <p className="mb-2 px-1 text-[10px] font-medium uppercase tracking-wider text-surface-500">
+                More destinations
+              </p>
+              <ul className="grid grid-cols-2 gap-2">
+                {overflowRoutes.map((route) => {
+                  const active = current === route.id
+                  const activeClass = active
+                    ? 'text-brand-300 bg-brand-400/10 border-brand-400/30'
+                    : 'text-surface-300 border-surface-700/60 hover:text-surface-100 hover:bg-surface-800/70'
+                  return (
+                    <li key={route.id}>
+                      <button
+                        role="menuitem"
+                        onClick={() => {
+                          onNavigate(route)
+                          onClose()
+                        }}
+                        className={`flex w-full items-center gap-2.5 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors ${activeClass}`}
+                        aria-current={active ? 'page' : undefined}
+                      >
+                        <Icon name={route.icon} className="h-5 w-5 shrink-0" />
+                        <span className="truncate">{route.label}</span>
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+  )
+}
+
+function BottomNav({ current, onNavigate }) {
+  const [menuOpen, setMenuOpen] = useState(false)
+
+  const primaryRoutes = useMemo(
+    () =>
+      PRIMARY_NAV_IDS
+        .map((id) => routes.find((r) => r.id === id))
+        .filter(Boolean),
+    []
+  )
+  const overflowRoutes = useMemo(
+    () => routes.filter((r) => !PRIMARY_NAV_IDS.includes(r.id)),
+    []
+  )
+
+  // Close the sheet when navigating to a primary destination.
+  useEffect(() => {
+    setMenuOpen(false)
+  }, [current])
+
+  const activeOverflow = overflowRoutes.find((r) => r.id === current)
+  const moreActive = Boolean(activeOverflow)
+  const moreLabel = activeOverflow ? activeOverflow.label : 'More'
+  const moreIcon = activeOverflow ? activeOverflow.icon : 'dots-horizontal'
+
+  return (
+    <>
+      <MoreSheet
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        overflowRoutes={overflowRoutes}
+        current={current}
+        onNavigate={onNavigate}
+      />
+      <nav className="fixed bottom-0 inset-x-0 z-40 border-t border-surface-700/60 bg-surface-900/95 px-2 safe-area-bottom backdrop-blur lg:hidden">
+        <div className="mx-auto flex max-w-lg items-center justify-around gap-1 py-1.5">
+          {primaryRoutes.map((route) => (
             <NavItem
               key={route.id}
               route={route}
-              active={active}
+              active={current === route.id}
               onNavigate={onNavigate}
             />
-          )
-        })}
-      </div>
-    </nav>
+          ))}
+          <MoreNavButton
+            active={moreActive}
+            label={moreLabel}
+            icon={moreIcon}
+            expanded={menuOpen}
+            onClick={() => setMenuOpen((v) => !v)}
+          />
+        </div>
+      </nav>
+    </>
   )
 }
 
@@ -67,8 +197,8 @@ function DesktopSidebar({ current, onNavigate }) {
     <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 border-r border-surface-700/60 bg-surface-950/90 px-4 py-5 backdrop-blur lg:block">
       <div className="flex h-full flex-col">
         <div className="flex items-center gap-3 px-1">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-500/15 text-xl">
-            <span aria-hidden="true">📸</span>
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-500/15">
+            <Icon name="logo" className="h-6 w-6 text-brand-400" />
           </div>
           <div className="min-w-0">
             <p className="text-sm font-semibold text-surface-50">Photo Backup</p>
@@ -100,7 +230,7 @@ function Header({ title, subtitle, currentRoute }) {
       <div className="mx-auto flex min-h-16 max-w-6xl items-center gap-4 px-3 py-3 sm:px-5 lg:px-8">
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-500/15 lg:hidden">
-            <span className="text-lg" aria-hidden="true">📸</span>
+            <Icon name="logo" className="h-5 w-5 text-brand-400" />
           </div>
           <div className="hidden h-9 w-9 items-center justify-center rounded-lg bg-brand-500/15 text-brand-300 lg:flex">
             <Icon name={currentRoute.icon} className="h-5 w-5" />

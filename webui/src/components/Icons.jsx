@@ -42,7 +42,31 @@ const iconPaths = {
   'shield-check': 'M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z',
 }
 
+const customIcons = {
+  // Photo Backup Station mark: camera lens + cloud-sync arc with upload arrowhead.
+  // Uses currentColor so it inherits text-brand-* utility classes.
+  logo: ({ className, ...props }) => (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 64 64"
+      fill="none"
+      stroke="currentColor"
+      className={className}
+      {...props}
+    >
+      <circle cx="32" cy="34" r="20" strokeWidth="4" />
+      <circle cx="32" cy="34" r="9" fill="currentColor" stroke="none" />
+      <circle cx="32" cy="34" r="4" fill="none" stroke="currentColor" strokeWidth="2" />
+      <path d="M14 22 A22 22 0 0 1 50 22" strokeWidth="4" strokeLinecap="round" />
+      <path d="M50 22 L44 18 M50 22 L46 28" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+}
+
 export function Icon({ name, className = 'w-5 h-5', ...props }) {
+  const Custom = customIcons[name]
+  if (Custom) return <Custom className={className} {...props} />
+
   const d = iconPaths[name]
   if (!d) return null
 

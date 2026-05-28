@@ -105,7 +105,7 @@ function RangePicker({ value, onChange }: RangePickerProps) {
   }
 
   return (
-    <div className="relative inline-flex items-center gap-1.5 rounded-lg bg-surface-800/60 p-1">
+    <div className="relative flex max-w-full flex-wrap items-center gap-1.5 rounded-lg bg-surface-800/60 p-1">
       {PRESETS.map((p) => {
         const active = value?.preset === p.key
         return (
