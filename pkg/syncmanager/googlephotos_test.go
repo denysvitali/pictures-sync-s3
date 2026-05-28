@@ -42,8 +42,11 @@ func TestGooglePhotosFlatRemoteDisambiguatesDuplicateBasenames(t *testing.T) {
 }
 
 func TestGooglePhotosTransferCount(t *testing.T) {
-	// Google Photos serializes batch commits per album; concurrent uploads
-	// return "(409 ABORTED) The operation was aborted." Always 1 worker.
+	// The 409 ABORTED race is now avoided structurally via batch_size=50 on
+	// the dst remote plus rclone's single-commit batcher goroutine, so the
+	// worker count is free to scale upload parallelism. We pin it to 8
+	// regardless of the user-configured --transfers because that's tuned for
+	// the gphotos pipe specifically.
 	tests := []struct {
 		name      string
 		transfers int
@@ -56,8 +59,26 @@ func TestGooglePhotosTransferCount(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &Manager{transfers: tt.transfers}
-			if got := m.googlePhotosTransferCount(); got != 1 {
-				t.Fatalf("googlePhotosTransferCount() = %d, want 1", got)
+			if got := m.googlePhotosTransferCount(); got != 8 {
+				t.Fatalf("googlePhotosTransferCount() = %d, want 8", got)
+			}
+		})
+	}
+}
+
+func TestInjectRemoteOption(t *testing.T) {
+	tests := []struct {
+		in, key, val, want string
+	}{
+		{"gphotos:album/foo", "batch_size", "50", "gphotos,batch_size=50:album/foo"},
+		{"gphotos:", "batch_size", "50", "gphotos,batch_size=50:"},
+		{"no-colon", "x", "y", "no-colon"},
+		{":leading", "x", "y", ":leading"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			if got := injectRemoteOption(tt.in, tt.key, tt.val); got != tt.want {
+				t.Fatalf("injectRemoteOption(%q, %q, %q) = %q, want %q", tt.in, tt.key, tt.val, got, tt.want)
 			}
 		})
 	}

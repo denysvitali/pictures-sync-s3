@@ -262,6 +262,20 @@ func (m *Manager) SyncCardsToGooglePhotos(ctx context.Context) error {
 // syncCardToGooglePhotos syncs a single card's DCIM folder to Google Photos.
 // Returns the number of files transferred and bytes transferred for this card.
 func (m *Manager) syncCardToGooglePhotos(ctx context.Context, srcPath, dstPath string) (int, int64, error) {
+	workers := m.googlePhotosTransferCount()
+
+	// Align rclone config BEFORE creating dstFs: the googlephotos backend
+	// reads --transfers at fs construction time to size its internal batcher
+	// queue and pick the sync-mode batch size default. Setting it afterwards
+	// (as we did previously) left batch_size derived from the default
+	// --transfers of 4 — but our explicit batch_size override below makes
+	// that moot. The Transfers/Checkers tweak stays for upload parallelism.
+	ci := fs.GetConfig(ctx)
+	ci.Transfers = workers
+	if ci.Checkers < workers {
+		ci.Checkers = workers
+	}
+
 	// Create source filesystem with retry.
 	var srcFs fs.Fs
 	err := retry(ctx, func(attempt int) error {
@@ -277,10 +291,20 @@ func (m *Manager) syncCardToGooglePhotos(ctx context.Context, srcPath, dstPath s
 	}
 	log.Printf("Google Photos sync: source fs ready (%s)", srcPath)
 
+	// Force the gphotos batcher to a fixed batch_size of 50 (the API max).
+	// Without this, rclone's sync-mode batcher defaults batch_size to
+	// --transfers, so workers=1 → batch length 1 → one batchCreate API call
+	// per file. That serialised the whole sync at ~1 MB/s even on a 10 Gbps
+	// link. With batch_size=50, the batcher's single commit goroutine
+	// commits 50 items per round-trip while the upload phase stays
+	// parallel, so there's still no concurrent batchCreate to race the
+	// per-album server transaction and trigger 409 ABORTED.
+	dstFsPath := injectRemoteOption(dstPath, "batch_size", "50")
+
 	// Create destination filesystem with retry.
 	var dstFs fs.Fs
 	err = retry(ctx, func(attempt int) error {
-		f, err := fs.NewFs(ctx, dstPath)
+		f, err := fs.NewFs(ctx, dstFsPath)
 		if err != nil {
 			return fmt.Errorf("failed to create destination filesystem: %w", err)
 		}
@@ -292,14 +316,16 @@ func (m *Manager) syncCardToGooglePhotos(ctx context.Context, srcPath, dstPath s
 	}
 	log.Printf("Google Photos sync: destination fs ready (%s)", dstPath)
 
-	workers := m.googlePhotosTransferCount()
-
-	// Keep rclone's config aligned with the explicit worker pool below.
-	ci := fs.GetConfig(ctx)
-	ci.Transfers = workers
-	if ci.Checkers < workers {
-		ci.Checkers = workers
-	}
+	// Flush any partial trailing batch before we return. atexit also handles
+	// this, but we may have many cards in one run and shouldn't wait until
+	// process exit to commit each card's final <50 files.
+	defer func() {
+		if sh, ok := dstFs.(fs.Shutdowner); ok {
+			if err := sh.Shutdown(ctx); err != nil {
+				log.Printf("Google Photos sync: shutdown returned %v", err)
+			}
+		}
+	}()
 
 	// Copy files into the album root. Rclone's googlephotos backend treats
 	// subdirectories under album/<name> as part of the album title, so preserving
@@ -433,14 +459,26 @@ type googlePhotosCopyJob struct {
 // googlePhotosTransferCount returns the number of parallel upload workers to
 // use for Google Photos transfers.
 //
-// Google Photos serializes batch commits per album: concurrent
-// mediaItems:batchCreate calls against the same album race the server-side
-// album transaction and return "(409 ABORTED) The operation was aborted."
-// Running a single worker eliminates the race at the source. rclone's
-// googlephotos backend still batches uploads internally, so throughput stays
-// reasonable for typical photo libraries.
+// The 409 ABORTED race is now avoided structurally: dstFsPath sets
+// batch_size=50 and rclone's batcher has a single commit goroutine, so
+// regardless of how many uploads run in parallel only one batchCreate is
+// ever in flight against the album. That frees us to push the upload phase
+// hard; 8 workers saturates a fast B2 → Google Photos pipe without
+// CPU-bottlenecking the Pi.
 func (m *Manager) googlePhotosTransferCount() int {
-	return 1
+	return 8
+}
+
+// injectRemoteOption rewrites an rclone remote spec like "gphotos:album/x"
+// into "gphotos,key=value:album/x" so backend options can be set without
+// editing rclone.conf. If the path doesn't have the expected "remote:path"
+// shape it is returned unchanged.
+func injectRemoteOption(remotePath, key, value string) string {
+	colon := strings.Index(remotePath, ":")
+	if colon <= 0 {
+		return remotePath
+	}
+	return fmt.Sprintf("%s,%s=%s%s", remotePath[:colon], key, value, remotePath[colon:])
 }
 
 func listExistingObjectRemotes(ctx context.Context, f fs.Fs) map[string]struct{} {
