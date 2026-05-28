@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -410,6 +411,12 @@ func (ctx *Context) HandleGooglePhotosSync(w http.ResponseWriter, r *http.Reques
 	go func() {
 		if err := ctx.SyncMgr.SyncCardsToGooglePhotos(context.Background()); err != nil {
 			log.Printf("[GooglePhotos] Sync error: %v", err)
+			return
+		}
+
+		// Post-sync: sort albums by shoot time if enabled.
+		if ctx.AppSettings != nil && ctx.AppSettings.GetGooglePhotosSortByShootTime() {
+			ctx.sortGooglePhotosAlbumsByShootTime()
 		}
 	}()
 
@@ -731,4 +738,62 @@ func truncateErr(s string, max int) string {
 		return s
 	}
 	return s[:max] + "…(truncated)"
+}
+
+// sortGooglePhotosAlbumsByShootTime iterates over all card-* albums and
+// reorders each one by photo shoot time (EXIF creation time). It runs after
+// the main sync completes so newly uploaded photos are also sorted.
+func (ctx *Context) sortGooglePhotosAlbumsByShootTime() {
+	clientID := ctx.AppSettings.GetGooglePhotosClientID()
+	clientSecret := ctx.AppSettings.GetGooglePhotosClientSecret()
+	if clientID == "" || clientSecret == "" {
+		log.Println("[GooglePhotos] Sort by shoot time: missing OAuth credentials, skipping")
+		return
+	}
+
+	tokenStore := googlephotos.NewTokenStore("")
+	client := googlephotos.NewClient(clientID, clientSecret, tokenStore)
+	if !client.IsAuthenticated() {
+		log.Println("[GooglePhotos] Sort by shoot time: not authenticated, skipping")
+		return
+	}
+
+	albums, err := client.ListAlbumsContext(context.Background())
+	if err != nil {
+		log.Printf("[GooglePhotos] Sort by shoot time: failed to list albums: %v", err)
+		return
+	}
+
+	for _, album := range albums {
+		if !strings.HasPrefix(album.Title, "card-") {
+			continue
+		}
+
+		log.Printf("[GooglePhotos] Sorting album %s by shoot time", album.Title)
+
+		cardName := album.Title
+		dl := &syncManagerFileDownloader{
+			syncMgr:  ctx.SyncMgr,
+			cardName: cardName,
+		}
+
+		sortCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		_, err := client.SortAlbumByShootTime(sortCtx, album.ID, dl, nil)
+		cancel()
+		if err != nil {
+			log.Printf("[GooglePhotos] Sort: failed to sort album %s: %v", album.Title, err)
+		}
+	}
+}
+
+// syncManagerFileDownloader implements googlephotos.FileDownloader by
+// resolving filenames to full B2 paths via the sync manager's GetFile.
+type syncManagerFileDownloader struct {
+	syncMgr  SyncManager
+	cardName string
+}
+
+func (d *syncManagerFileDownloader) GetFile(filename string, w io.Writer) error {
+	fullPath := d.cardName + "/DCIM/" + filename
+	return d.syncMgr.GetFile(fullPath, w)
 }

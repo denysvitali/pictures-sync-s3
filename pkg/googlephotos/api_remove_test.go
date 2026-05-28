@@ -20,9 +20,12 @@ func setupRemoveTestServer(t *testing.T, handler http.Handler) (*httptest.Server
 	t.Helper()
 	server := httptest.NewServer(handler)
 	origBase := apiBaseURL
+	origUpload := uploadBaseURL
 	apiBaseURL = server.URL + "/v1"
+	uploadBaseURL = server.URL + "/v1/uploads"
 	cleanup := func() {
 		apiBaseURL = origBase
+		uploadBaseURL = origUpload
 		server.Close()
 	}
 	return server, cleanup

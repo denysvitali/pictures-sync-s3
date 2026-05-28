@@ -14,12 +14,16 @@ import (
 )
 
 var apiBaseURL = "https://photoslibrary.googleapis.com/v1"
+var uploadBaseURL = "https://photoslibrary.googleapis.com/v1/uploads"
 
 // GetAPIBaseURL returns the current API base URL (exported for testing).
 func GetAPIBaseURL() string { return apiBaseURL }
 
 // SetAPIBaseURL overrides the API base URL (exported for testing).
 func SetAPIBaseURL(u string) { apiBaseURL = u }
+
+// SetUploadBaseURL overrides the upload base URL (exported for testing).
+func SetUploadBaseURL(u string) { uploadBaseURL = u }
 
 // Client is an authenticated HTTP client for the Google Photos API
 type Client struct {
@@ -272,7 +276,7 @@ func (c *Client) doUploadRequestContext(ctx context.Context, r io.Reader, size i
 		return nil, err
 	}
 
-	url := "https://photoslibrary.googleapis.com/v1/uploads"
+	url := uploadBaseURL
 	req, err := http.NewRequestWithContext(ctx, "POST", url, r)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create upload request: %w", err)

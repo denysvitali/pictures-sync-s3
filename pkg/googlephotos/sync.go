@@ -49,10 +49,11 @@ type SyncManager struct {
 }
 
 type syncOptions struct {
-	skipDuplicates    bool
-	parallelMetadata  bool
-	uploadWorkerFloor int
-	batchSize         int
+	skipDuplicates      bool
+	parallelMetadata    bool
+	uploadWorkerFloor   int
+	batchSize           int
+	sortAlbumsByShootTime bool
 }
 
 // SyncManagerMinimal is the minimal interface needed from syncmanager for Google Photos sync
@@ -121,6 +122,14 @@ func (sm *SyncManager) SetSkipDuplicates(enabled bool) {
 	if sm.progress != nil {
 		sm.progress.SkipDuplicates = enabled
 	}
+	sm.mu.Unlock()
+}
+
+// SetSortAlbumsByShootTime enables or disables post-sync album reordering by
+// photo shoot time.
+func (sm *SyncManager) SetSortAlbumsByShootTime(enabled bool) {
+	sm.mu.Lock()
+	sm.options.sortAlbumsByShootTime = enabled
 	sm.mu.Unlock()
 }
 
@@ -266,6 +275,15 @@ func (sm *SyncManager) Sync(ctx context.Context) error {
 		}
 	}
 
+	// Post-sync: sort albums by shoot time if enabled.
+	if sm.options.sortAlbumsByShootTime && sm.client != nil {
+		sm.mu.Lock()
+		sm.progress.CurrentPhase = "Sorting albums by shoot time"
+		sm.progress.UpdatedAt = timePtr(time.Now())
+		sm.mu.Unlock()
+		sm.sortAllAlbumsByShootTime(ctx, cards)
+	}
+
 	completedAt := time.Now()
 	duration := completedAt.Sub(startedAt).Round(time.Second).String()
 	sm.mu.Lock()
@@ -350,6 +368,44 @@ func (sm *SyncManager) preloadAlbumCache(ctx context.Context, cards []syncmanage
 			continue
 		}
 		sm.store.putAlbum(cardID, album.Title, album.ID)
+	}
+}
+
+// sortAllAlbumsByShootTime sorts every card-* album by photo shoot time. Errors
+// on individual albums are logged but do not fail the overall sync.
+func (sm *SyncManager) sortAllAlbumsByShootTime(ctx context.Context, cards []syncmanager.FileInfo) {
+	for i, card := range cards {
+		if ctx.Err() != nil {
+			return
+		}
+		cardID := strings.TrimPrefix(card.Name, "card-")
+		if cardID == "" {
+			cardID = card.Name
+		}
+		albumID, ok := sm.store.albumID(cardID)
+		if !ok {
+			continue
+		}
+
+		albumTitle := "card-" + cardID
+		sm.mu.Lock()
+		sm.progress.CurrentPhase = fmt.Sprintf("Sorting album %s (%d/%d)", albumTitle, i+1, len(cards))
+		sm.progress.UpdatedAt = timePtr(time.Now())
+		sm.mu.Unlock()
+
+		sortCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+		_, err := sm.client.SortAlbumByShootTime(sortCtx, albumID, sm.syncMgr, func(p SortProgress) {
+			sm.mu.Lock()
+			if sm.progress != nil {
+				sm.progress.CurrentPhase = fmt.Sprintf("Sorting %s: %s (%d/%d)", albumTitle, p.Status, p.CurrentItem, p.TotalItems)
+				sm.progress.UpdatedAt = timePtr(time.Now())
+			}
+			sm.mu.Unlock()
+		})
+		cancel()
+		if err != nil {
+			log.Printf("[GooglePhotos] Failed to sort album %s by shoot time: %v", albumTitle, err)
+		}
 	}
 }
 

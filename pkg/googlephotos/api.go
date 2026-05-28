@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"sort"
 )
 
 const maxBatchSize = 50
@@ -320,4 +322,171 @@ func (c *Client) BatchRemoveMediaItemsWithProgress(ctx context.Context, albumID 
 		}
 		return nil
 	})
+}
+
+// FileDownloader retrieves file content from the remote storage backend.
+type FileDownloader interface {
+	GetFile(path string, w io.Writer) error
+}
+
+// SortProgress tracks the progress of an album sort-by-shoot-time operation.
+type SortProgress struct {
+	Status       string `json:"status"` // "listing", "sorting", "removing", "re-adding", "completed", "error"
+	TotalItems   int    `json:"total_items"`
+	CurrentItem  int    `json:"current_item"`
+	RemovedItems int    `json:"removed_items"`
+	AddedItems   int    `json:"added_items"`
+	Error        string `json:"error,omitempty"`
+}
+
+// SortAlbumByShootTime reorders all media items in an album by photo shoot time
+// (MediaMetadata.CreationTime). It lists all items, sorts them by creation time
+// ascending, and if the order differs from the current order, removes all items
+// and re-adds them in chronological order.
+//
+// Re-adding requires re-uploading each file via the downloader because Google
+// Photos upload tokens are single-use and there is no "move" API. This is
+// expensive but ensures correct album ordering.
+//
+// onProgress is called periodically with progress updates (may be nil).
+func (c *Client) SortAlbumByShootTime(ctx context.Context, albumID string, downloader FileDownloader, onProgress func(SortProgress)) (SortProgress, error) {
+	report := func(p SortProgress) {
+		if onProgress != nil {
+			onProgress(p)
+		}
+	}
+
+	// Phase 1: list all items.
+	report(SortProgress{Status: "listing"})
+	items, err := c.ListAlbumMediaItems(ctx, albumID)
+	if err != nil {
+		p := SortProgress{Status: "error", Error: err.Error()}
+		report(p)
+		return p, fmt.Errorf("list album items: %w", err)
+	}
+
+	if len(items) <= 1 {
+		p := SortProgress{Status: "completed", TotalItems: len(items)}
+		report(p)
+		return p, nil
+	}
+
+	// Phase 2: sort by shoot time.
+	report(SortProgress{Status: "sorting", TotalItems: len(items)})
+	sorted := make([]*MediaItem, len(items))
+	copy(sorted, items)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		ti := sorted[i].MediaMetadata.CreationTime
+		tj := sorted[j].MediaMetadata.CreationTime
+		if ti.IsZero() && tj.IsZero() {
+			return sorted[i].ID < sorted[j].ID
+		}
+		if ti.IsZero() {
+			return false
+		}
+		if tj.IsZero() {
+			return true
+		}
+		return ti.Before(tj)
+	})
+
+	// Check if already sorted.
+	alreadySorted := true
+	for i := range items {
+		if items[i].ID != sorted[i].ID {
+			alreadySorted = false
+			break
+		}
+	}
+	if alreadySorted {
+		p := SortProgress{Status: "completed", TotalItems: len(items)}
+		report(p)
+		log.Printf("[GooglePhotos] Album %s already sorted by shoot time", albumID)
+		return p, nil
+	}
+
+	// Phase 3: remove all items from the album.
+	report(SortProgress{Status: "removing", TotalItems: len(items)})
+	ids := make([]string, len(items))
+	for i, item := range items {
+		ids[i] = item.ID
+	}
+	if err := c.BatchRemoveMediaItemsWithProgress(ctx, albumID, ids, func(removed, total int) {
+		report(SortProgress{Status: "removing", TotalItems: len(items), RemovedItems: removed})
+	}); err != nil {
+		p := SortProgress{Status: "error", TotalItems: len(items), Error: err.Error()}
+		report(p)
+		return p, fmt.Errorf("remove items: %w", err)
+	}
+
+	// Phase 4: re-add items in sorted order.
+	// Each item must be re-uploaded because Google Photos upload tokens are
+	// single-use and there is no API to add existing library items to an album.
+	total := len(sorted)
+	batch := make([]*NewMediaItem, 0, maxBatchSize)
+	added := 0
+	for i, item := range sorted {
+		if ctx.Err() != nil {
+			p := SortProgress{Status: "error", TotalItems: total, AddedItems: added, Error: ctx.Err().Error()}
+			report(p)
+			return p, ctx.Err()
+		}
+
+		report(SortProgress{Status: "re-adding", TotalItems: total, RemovedItems: len(items), AddedItems: added, CurrentItem: i + 1})
+
+		fileName := originalFilename(item)
+		var buf bytes.Buffer
+		if err := downloader.GetFile(fileName, &buf); err != nil {
+			log.Printf("[GooglePhotos] Sort: failed to download %s: %v", fileName, err)
+			continue
+		}
+
+		uploadToken, err := c.UploadMediaReaderContext(ctx, &buf, int64(buf.Len()), fileName)
+		if err != nil {
+			log.Printf("[GooglePhotos] Sort: failed to upload %s: %v", fileName, err)
+			continue
+		}
+
+		batch = append(batch, &NewMediaItem{
+			Description:     item.Description,
+			SimpleMediaItem: &SimpleMediaItem{UploadToken: uploadToken, FileName: fileName},
+		})
+
+		if len(batch) >= maxBatchSize {
+			_, err := c.BatchCreateMediaItemsContext(ctx, albumID, batch)
+			if err != nil {
+				p := SortProgress{Status: "error", TotalItems: total, AddedItems: added, Error: err.Error()}
+				report(p)
+				return p, fmt.Errorf("batch create: %w", err)
+			}
+			added += len(batch)
+			batch = batch[:0]
+		}
+	}
+
+	// Flush remaining batch.
+	if len(batch) > 0 {
+		_, err := c.BatchCreateMediaItemsContext(ctx, albumID, batch)
+		if err != nil {
+			p := SortProgress{Status: "error", TotalItems: total, AddedItems: added, Error: err.Error()}
+			report(p)
+			return p, fmt.Errorf("batch create final: %w", err)
+		}
+		added += len(batch)
+	}
+
+	p := SortProgress{Status: "completed", TotalItems: total, RemovedItems: len(items), AddedItems: added}
+	report(p)
+	log.Printf("[GooglePhotos] Album %s sorted by shoot time: %d items reordered", albumID, added)
+	return p, nil
+}
+
+// originalFilename returns the best guess at the original file path for
+// re-downloading from B2. Falls back to "{mediaItemId}.jpg" when the
+// Google Photos metadata lacks a filename.
+func originalFilename(item *MediaItem) string {
+	if item.Filename != "" {
+		return item.Filename
+	}
+	return item.ID + ".jpg"
 }

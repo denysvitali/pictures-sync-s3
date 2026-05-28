@@ -39,6 +39,9 @@ type Settings struct {
 	GooglePhotosClientID     string `json:"google_photos_client_id"`     // Google Photos OAuth client ID
 	GooglePhotosClientSecret string `json:"google_photos_client_secret"` // Google Photos OAuth client secret
 
+	// Google Photos album ordering
+	GooglePhotosSortByShootTime bool `json:"google_photos_sort_by_shoot_time"` // Sort album photos by EXIF shoot time after sync
+
 	// WiFi scan behavior
 	Prefer5GHzWiFi bool `json:"prefer_5ghz_wifi"` // Prefer 5 GHz APs when duplicate SSIDs are found
 
@@ -78,6 +81,7 @@ func (s *Settings) UnmarshalJSON(data []byte) error {
 	s.GooglePhotosOAuthEnabled = decoded.GooglePhotosOAuthEnabled
 	s.GooglePhotosClientID = decoded.GooglePhotosClientID
 	s.GooglePhotosClientSecret = decoded.GooglePhotosClientSecret
+	s.GooglePhotosSortByShootTime = decoded.GooglePhotosSortByShootTime
 	s.Prefer5GHzWiFi = decoded.Prefer5GHzWiFi
 	if _, ok := raw["prefer_5ghz_wifi"]; !ok {
 		s.Prefer5GHzWiFi = true
@@ -396,6 +400,13 @@ func (s *Settings) GetGooglePhotosClientSecret() string {
 	return s.GooglePhotosClientSecret
 }
 
+// GetGooglePhotosSortByShootTime returns whether albums should be sorted by shoot time after sync
+func (s *Settings) GetGooglePhotosSortByShootTime() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.GooglePhotosSortByShootTime
+}
+
 // GetPrefer5GHzWiFi returns whether 5 GHz APs are preferred for duplicate SSIDs.
 func (s *Settings) GetPrefer5GHzWiFi() bool {
 	s.mu.RLock()
@@ -493,6 +504,14 @@ func (s *Settings) SetGooglePhotosOAuth(enabled bool, clientID, clientSecret str
 	return s.Save()
 }
 
+// SetGooglePhotosSortByShootTime updates the album sort-by-shoot-time setting.
+func (s *Settings) SetGooglePhotosSortByShootTime(sort bool) error {
+	s.mu.Lock()
+	s.GooglePhotosSortByShootTime = sort
+	s.mu.Unlock()
+	return s.Save()
+}
+
 // SetPrefer5GHzWiFi updates WiFi scan preference behavior.
 func (s *Settings) SetPrefer5GHzWiFi(prefer bool) error {
 	s.mu.Lock()
@@ -519,9 +538,10 @@ func (s *Settings) ToJSON() map[string]any {
 		"google_photos_enabled":       s.GooglePhotosEnabled,
 		"google_photos_remote_name":   s.GooglePhotosRemoteName,
 		"google_photos_oauth_enabled": s.GooglePhotosOAuthEnabled,
-		"google_photos_client_id":     s.GooglePhotosClientID,
-		"google_photos_client_secret": s.GooglePhotosClientSecret,
-		"prefer_5ghz_wifi":            s.Prefer5GHzWiFi,
+		"google_photos_client_id":          s.GooglePhotosClientID,
+		"google_photos_client_secret":      s.GooglePhotosClientSecret,
+		"google_photos_sort_by_shoot_time": s.GooglePhotosSortByShootTime,
+		"prefer_5ghz_wifi":                 s.Prefer5GHzWiFi,
 	}
 }
 
@@ -556,8 +576,9 @@ func (s *Settings) Clone() *Settings {
 		GooglePhotosEnabled:      s.GooglePhotosEnabled,
 		GooglePhotosRemoteName:   s.GooglePhotosRemoteName,
 		GooglePhotosOAuthEnabled: s.GooglePhotosOAuthEnabled,
-		GooglePhotosClientID:     s.GooglePhotosClientID,
-		GooglePhotosClientSecret: s.GooglePhotosClientSecret,
-		Prefer5GHzWiFi:           s.Prefer5GHzWiFi,
+		GooglePhotosClientID:          s.GooglePhotosClientID,
+		GooglePhotosClientSecret:      s.GooglePhotosClientSecret,
+		GooglePhotosSortByShootTime:   s.GooglePhotosSortByShootTime,
+		Prefer5GHzWiFi:                s.Prefer5GHzWiFi,
 	}
 }
