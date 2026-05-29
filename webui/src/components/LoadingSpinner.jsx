@@ -25,10 +25,10 @@ export function LoadingSpinner({ size = 'md', variant = 'circular', className = 
       className={`flex items-center justify-center ${className}`}
     >
       {variant === 'circular' && (
-        <div
-          className={`${sizeClasses[size]} border-2 border-surface-600 border-t-brand-400 rounded-full animate-spin`}
-          aria-hidden="true"
-        />
+        <div className={`relative ${sizeClasses[size]}`} aria-hidden="true">
+          <div className="absolute inset-0 rounded-full border-2 border-surface-700/70" />
+          <div className="absolute inset-0 animate-spin rounded-full border-2 border-transparent border-t-brand-400 border-r-brand-400/40" />
+        </div>
       )}
       {variant === 'dots' && (
         <div className="flex items-center gap-1" aria-hidden="true">
@@ -55,8 +55,12 @@ export function LoadingSpinner({ size = 'md', variant = 'circular', className = 
 
 export function PageLoader({ label = 'Loading…' }) {
   return (
-    <div className="flex items-center justify-center min-h-[50vh]">
-      <LoadingSpinner size="lg" label={label} />
+    <div className="flex min-h-[50vh] flex-col items-center justify-center gap-4">
+      <div className="relative flex items-center justify-center">
+        <span className="absolute h-16 w-16 rounded-full bg-brand-500/10 blur-xl pulse-ring" aria-hidden="true" />
+        <LoadingSpinner size="lg" label={label} />
+      </div>
+      <p className="text-sm text-surface-500">{label}</p>
     </div>
   )
 }

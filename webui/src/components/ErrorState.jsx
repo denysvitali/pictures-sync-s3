@@ -54,9 +54,9 @@ export function ErrorState({
 
   if (compact) {
     return (
-      <div className="flex items-start gap-3 rounded-lg border border-danger/20 bg-danger/5 px-4 py-3" role="alert" aria-live="assertive">
-        <div className="mt-0.5 shrink-0">
-          <Icon name="exclamation-triangle" className="w-5 h-5 text-danger" />
+      <div className="flex items-start gap-3 rounded-xl border border-danger/25 bg-danger/5 px-4 py-3 ring-1 ring-inset ring-danger/5" role="alert" aria-live="assertive">
+        <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-danger/15">
+          <Icon name="exclamation-triangle" className="h-4 w-4 text-danger" />
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-surface-200">{title}</p>
@@ -76,10 +76,10 @@ export function ErrorState({
   }
 
   return (
-    <div className="flex flex-col items-center justify-center px-4 text-center" role="alert" aria-live="assertive">
+    <div className="flex flex-col items-center justify-center px-4 py-8 text-center" role="alert" aria-live="assertive">
       <div className="relative mb-5">
-        <div className="absolute inset-0 -m-4 rounded-full bg-gradient-to-br from-danger/15 via-danger/5 to-transparent blur-sm" />
-        <div className="relative flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-danger/15 to-danger/5 border border-danger/10">
+        <div className="absolute inset-0 -m-5 rounded-full bg-gradient-to-br from-danger/20 via-danger/5 to-transparent blur-xl" aria-hidden="true" />
+        <div className="relative flex h-20 w-20 items-center justify-center rounded-2xl border border-danger/20 bg-gradient-to-br from-surface-800/80 to-surface-900/80 shadow-card ring-1 ring-inset ring-danger/10">
           <Icon
             name="exclamation-triangle"
             className="h-10 w-10 text-danger shake-animation"
@@ -87,7 +87,7 @@ export function ErrorState({
           />
         </div>
       </div>
-      <h3 className="text-base font-semibold text-surface-200 mb-1.5">{title}</h3>
+      <h3 className="mb-1.5 text-lg font-semibold tracking-tight text-surface-100">{title}</h3>
       {error && (
         <p className="max-w-sm text-sm text-surface-400 mb-4 break-words">{String(error)}</p>
       )}

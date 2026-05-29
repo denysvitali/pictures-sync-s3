@@ -6,6 +6,14 @@ const variants = {
   neutral: 'bg-surface-700/50 text-surface-300 border-surface-600/50',
 }
 
+const dotColors = {
+  success: 'bg-success',
+  warning: 'bg-warning',
+  danger: 'bg-danger',
+  info: 'bg-info',
+  neutral: 'bg-surface-300',
+}
+
 const sizeClasses = {
   sm: 'px-2 py-0.5 text-[10px] gap-1',
   md: 'px-2.5 py-0.5 text-xs gap-1.5',
@@ -19,22 +27,37 @@ const dotSizes = {
 }
 
 export function StatusBadge({ variant = 'neutral', children, pulse = false, size = 'md', dot = false }) {
+  const dotColor = dotColors[variant] || dotColors.neutral
+
   if (dot) {
     return (
       <span
-        className={`inline-block shrink-0 rounded-full ${dotSizes[size]} ${pulse ? 'animate-pulse' : ''} ${variants[variant]?.split(' ')[1]?.replace('text-', 'bg-') || 'bg-surface-300'}`}
+        className={`relative inline-flex shrink-0`}
         aria-label={typeof children === 'string' ? children : undefined}
         title={typeof children === 'string' ? children : undefined}
-      />
+      >
+        {pulse && (
+          <span
+            className={`absolute inline-flex h-full w-full animate-ping rounded-full opacity-60 ${dotColor}`}
+            aria-hidden="true"
+          />
+        )}
+        <span className={`relative inline-block rounded-full ${dotSizes[size]} ${dotColor}`} />
+      </span>
     )
   }
 
   return (
     <span
-      className={`inline-flex shrink-0 items-center rounded-full border whitespace-nowrap font-medium ${sizeClasses[size]} ${variants[variant] || variants.neutral}`}
+      className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-full border font-medium tracking-wide ${sizeClasses[size]} ${
+        variants[variant] || variants.neutral
+      }`}
     >
       {pulse && (
-        <span className={`rounded-full bg-current animate-pulse ${dotSizes[size]}`} />
+        <span className="relative inline-flex shrink-0">
+          <span className={`absolute inline-flex h-full w-full animate-ping rounded-full bg-current opacity-60`} aria-hidden="true" />
+          <span className={`relative inline-block rounded-full bg-current ${dotSizes[size]}`} />
+        </span>
       )}
       {children}
     </span>

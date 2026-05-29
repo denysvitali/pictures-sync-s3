@@ -16,10 +16,17 @@ const variantIcons = {
 }
 
 const variantStyles = {
-  success: 'border-success/30 bg-success/10 text-success',
-  danger: 'border-danger/30 bg-danger/10 text-danger',
-  warning: 'border-warning/30 bg-warning/10 text-warning',
-  info: 'border-info/30 bg-info/10 text-info',
+  success: 'border-success/30 text-success',
+  danger: 'border-danger/30 text-danger',
+  warning: 'border-warning/30 text-warning',
+  info: 'border-info/30 text-info',
+}
+
+const variantAccent = {
+  success: 'bg-success/15',
+  danger: 'bg-danger/15',
+  warning: 'bg-warning/15',
+  info: 'bg-info/15',
 }
 
 const progressColors = {
@@ -119,16 +126,18 @@ function ToastItem({ toast, assertive, onDismiss }) {
       role={assertive ? 'alert' : 'status'}
       aria-live={assertive ? 'assertive' : 'polite'}
       aria-atomic="true"
-      initial={{ opacity: 0, x: 60, scale: 0.95 }}
-      animate={{ opacity: 1, x: 0, scale: 1 }}
-      exit={{ opacity: 0, x: 60, scale: 0.95 }}
-      transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+      initial={{ opacity: 0, x: 40, y: 8, scale: 0.96 }}
+      animate={{ opacity: 1, x: 0, y: 0, scale: 1 }}
+      exit={{ opacity: 0, x: 40, scale: 0.95 }}
+      transition={{ type: 'spring', stiffness: 380, damping: 28 }}
       layout
-      className={`relative flex flex-col gap-2 rounded-lg border text-sm font-medium overflow-hidden ${variantStyles[toast.variant] || variantStyles.info}`}
+      className={`glass relative flex flex-col gap-2 overflow-hidden rounded-xl border text-sm font-medium text-surface-100 shadow-elevated ${variantStyles[toast.variant] || variantStyles.info}`}
     >
-      <div className="flex items-center gap-2 px-4 pt-3 pb-1">
-        <Icon name={variantIcons[toast.variant] || 'info-circle'} className="w-5 h-5 shrink-0" aria-hidden="true" />
-        <span className="flex-1 break-words">{toast.message}</span>
+      <div className="flex items-center gap-2.5 px-4 pt-3 pb-1.5">
+        <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${variantAccent[toast.variant] || variantAccent.info}`}>
+          <Icon name={variantIcons[toast.variant] || 'info-circle'} className="h-4 w-4 shrink-0" aria-hidden="true" />
+        </span>
+        <span className="flex-1 break-words text-surface-100">{toast.message}</span>
         {toast.undo && (
           <button
             onClick={() => {
@@ -151,7 +160,7 @@ function ToastItem({ toast, assertive, onDismiss }) {
         </button>
       </div>
       {toast.duration > 0 && (
-        <div className="h-0.5 w-full bg-current/10">
+        <div className="h-0.5 w-full bg-white/5">
           <div
             className={`h-full ${progressColors[toast.variant] || progressColors.info} transition-none`}
             style={{ width: `${progress}%` }}

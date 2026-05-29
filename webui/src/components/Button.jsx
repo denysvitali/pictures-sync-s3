@@ -1,12 +1,17 @@
 import { motion } from 'framer-motion'
 
 const variantBase = {
-  primary: 'bg-brand-600 hover:bg-brand-500 text-white shadow-lg shadow-brand-600/20',
-  secondary: 'bg-surface-700 hover:bg-surface-600 text-surface-200 border border-surface-600',
-  danger: 'bg-danger/15 hover:bg-danger/25 text-danger border border-danger/30',
-  ghost: 'hover:bg-surface-700/50 text-surface-300',
-  outline: 'bg-transparent border-2 border-current text-brand-400 hover:bg-brand-500/10',
-  gradient: 'bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-500 hover:to-brand-400 text-white shadow-lg shadow-brand-600/20',
+  primary:
+    'bg-gradient-to-b from-brand-500 to-brand-600 hover:from-brand-400 hover:to-brand-500 text-white shadow-lg shadow-brand-900/40 ring-1 ring-inset ring-white/10',
+  secondary:
+    'bg-surface-700/70 hover:bg-surface-600/80 text-surface-100 border border-surface-600/70 shadow-sm shadow-black/20',
+  danger:
+    'bg-danger/15 hover:bg-danger/25 text-danger border border-danger/30 hover:border-danger/40',
+  ghost: 'text-surface-300 hover:text-surface-100 hover:bg-surface-700/50',
+  outline:
+    'bg-transparent border-2 border-brand-400/60 text-brand-300 hover:bg-brand-500/10 hover:border-brand-400',
+  gradient:
+    'bg-gradient-to-r from-brand-600 via-brand-500 to-brand-400 hover:brightness-110 text-white shadow-lg shadow-brand-900/40 ring-1 ring-inset ring-white/10',
 }
 
 const focusRing = {
@@ -37,36 +42,46 @@ export function Button({
   ...props
 }) {
   const isIconOnly = icon && !children
+  const isDisabled = disabled || loading
 
   return (
     <motion.button
       type={type}
-      whileTap={{ scale: disabled || loading ? 1 : 0.96 }}
+      whileTap={{ scale: isDisabled ? 1 : 0.96 }}
       transition={{ type: 'spring', stiffness: 500, damping: 30 }}
       className={`
-        relative inline-flex items-center justify-center gap-2 font-medium rounded-lg shrink-0
-        overflow-hidden
-        transition-all duration-150 active:scale-[0.97]
+        group relative inline-flex shrink-0 items-center justify-center gap-2 overflow-hidden rounded-lg font-medium
+        transition-[background,border-color,box-shadow,filter,transform] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]
         focus-visible:outline-none focus-visible:ring-2 ${focusRing[variant]} focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950
-        disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100
-        ${isIconOnly ? 'w-10 h-10 p-0' : sizes[size]}
+        disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none
+        ${isIconOnly ? 'h-10 w-10 p-0' : sizes[size]}
         ${variantBase[variant]}
-        ${shine ? 'shine' : ''}
         ${className}
       `}
-      disabled={disabled || loading}
+      disabled={isDisabled}
       aria-busy={loading || undefined}
       {...props}
     >
+      {/* Animated shine sweep on hover (decorative). */}
+      {shine && !isDisabled && (
+        <span
+          className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/25 to-transparent transition-transform duration-700 ease-out group-hover:translate-x-full motion-reduce:hidden"
+          aria-hidden="true"
+        />
+      )}
       {loading && (
         <span className="absolute inset-0 flex items-center justify-center">
           <span
-            className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"
+            className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
             aria-hidden="true"
           />
         </span>
       )}
-      <span className={`flex items-center justify-center gap-2 ${loading ? 'opacity-0' : 'opacity-100'} transition-opacity duration-150`}>
+      <span
+        className={`flex items-center justify-center gap-2 transition-opacity duration-150 ${
+          loading ? 'opacity-0' : 'opacity-100'
+        }`}
+      >
         {children}
       </span>
     </motion.button>

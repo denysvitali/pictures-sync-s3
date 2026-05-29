@@ -43,7 +43,7 @@ export function KeyboardShortcutsModal({ open, onClose }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-surface-950/70 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-surface-950/80 backdrop-blur-md p-4 animate-fade-rise"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}
@@ -51,15 +51,24 @@ export function KeyboardShortcutsModal({ open, onClose }) {
       aria-modal="true"
       aria-label="Keyboard shortcuts"
     >
-      <div className="w-full max-w-lg bg-surface-900 border border-surface-700 rounded-2xl shadow-2xl p-6 animate-in fade-in">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-lg font-semibold text-surface-100">Keyboard Shortcuts</h2>
+      <div className="glass relative w-full max-w-lg overflow-hidden rounded-2xl border border-surface-700/70 p-6 shadow-elevated ring-1 ring-white/5">
+        <div
+          className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/15 to-transparent"
+          aria-hidden="true"
+        />
+        <div className="mb-6 flex items-center justify-between">
+          <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-surface-50">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-500/15 text-brand-300">
+              <Icon name="zap" className="h-4 w-4" />
+            </span>
+            Keyboard Shortcuts
+          </h2>
           <button
             onClick={onClose}
-            className="p-1 text-surface-400 hover:text-surface-200 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/70"
+            className="-mr-1 rounded-lg p-1.5 text-surface-400 transition-colors hover:bg-surface-700/60 hover:text-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/70"
             aria-label="Close"
           >
-            <Icon name="x" className="w-5 h-5" />
+            <Icon name="x" className="h-5 w-5" />
           </button>
         </div>
 
@@ -77,7 +86,7 @@ export function KeyboardShortcutsModal({ open, onClose }) {
                       {item.keys.map((key, ki) => (
                         <kbd
                           key={ki}
-                          className="inline-flex items-center justify-center min-w-[28px] h-6 px-1.5 rounded-md bg-surface-800 border border-surface-600 text-xs font-mono font-medium text-surface-200"
+                          className="inline-flex h-6 min-w-[28px] items-center justify-center rounded-md border border-surface-600/80 border-b-2 bg-surface-800 px-1.5 font-mono text-xs font-medium text-surface-200 shadow-sm shadow-black/20"
                         >
                           {key}
                         </kbd>
@@ -91,7 +100,7 @@ export function KeyboardShortcutsModal({ open, onClose }) {
         </div>
 
         <p className="mt-6 text-xs text-surface-500 text-center">
-          Press <kbd className="inline-flex items-center justify-center min-w-[28px] h-6 px-1.5 rounded-md bg-surface-800 border border-surface-600 text-xs font-mono font-medium text-surface-200">?</kbd> anytime to show this help
+          Press <kbd className="inline-flex h-6 min-w-[28px] items-center justify-center rounded-md border border-surface-600/80 border-b-2 bg-surface-800 px-1.5 font-mono text-xs font-medium text-surface-200 shadow-sm shadow-black/20">?</kbd> anytime to show this help
         </p>
       </div>
     </div>

@@ -17,47 +17,71 @@ const MAX_RECENT_DEVICES = 5
 const PRIMARY_NAV_IDS = ['status', 'history', 'gallery']
 
 function NavItem({ route, active, onNavigate, layout = 'mobile' }) {
-  const activeClass = active
-    ? 'text-brand-300 bg-brand-400/10 border-brand-400/20'
-    : 'text-surface-400 border-transparent hover:text-surface-100 hover:bg-surface-800/70'
-
   if (layout === 'desktop') {
+    const activeClass = active
+      ? 'text-brand-200'
+      : 'text-surface-400 hover:text-surface-100 hover:bg-surface-800/60'
     return (
       <button
         onClick={() => onNavigate(route)}
-        className={`flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors ${activeClass}`}
+        className={`group relative flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/60 ${activeClass}`}
         aria-current={active ? 'page' : undefined}
       >
-        <Icon name={route.icon} className="w-5 h-5 shrink-0" />
-        <span>{route.label}</span>
+        {active && (
+          <motion.span
+            layoutId="desktop-nav-active"
+            className="absolute inset-0 rounded-lg border border-brand-400/20 bg-brand-400/10"
+            transition={{ type: 'spring', stiffness: 500, damping: 38 }}
+            aria-hidden="true"
+          />
+        )}
+        {active && (
+          <span className="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-full bg-brand-400" aria-hidden="true" />
+        )}
+        <Icon name={route.icon} className="relative z-10 h-5 w-5 shrink-0" />
+        <span className="relative z-10">{route.label}</span>
       </button>
     )
   }
 
+  const activeClass = active ? 'text-brand-300' : 'text-surface-500 hover:text-surface-200'
   return (
     <button
       onClick={() => onNavigate(route)}
-      className={`flex min-w-0 flex-1 flex-col items-center gap-0.5 rounded-lg border px-1.5 py-2 text-[10px] font-medium transition-colors ${activeClass}`}
+      className={`group relative flex min-w-0 flex-1 flex-col items-center gap-0.5 rounded-lg px-1.5 py-1.5 text-[10px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/60 ${activeClass}`}
       aria-current={active ? 'page' : undefined}
     >
-      <Icon name={route.icon} className="w-5 h-5" />
+      <span className="relative flex h-7 w-12 items-center justify-center">
+        {active && (
+          <motion.span
+            layoutId="mobile-nav-active"
+            className="absolute inset-0 rounded-full bg-brand-400/15"
+            transition={{ type: 'spring', stiffness: 500, damping: 38 }}
+            aria-hidden="true"
+          />
+        )}
+        <Icon name={route.icon} className="relative z-10 h-5 w-5" />
+      </span>
       <span className="max-w-full truncate">{route.label}</span>
     </button>
   )
 }
 
 function MoreNavButton({ active, label, icon, onClick, expanded }) {
-  const activeClass = active
-    ? 'text-brand-300 bg-brand-400/10 border-brand-400/20'
-    : 'text-surface-400 border-transparent hover:text-surface-100 hover:bg-surface-800/70'
+  const activeClass = active || expanded ? 'text-brand-300' : 'text-surface-500 hover:text-surface-200'
   return (
     <button
       onClick={onClick}
-      className={`flex min-w-0 flex-1 flex-col items-center gap-0.5 rounded-lg border px-1.5 py-2 text-[10px] font-medium transition-colors ${activeClass}`}
+      className={`group relative flex min-w-0 flex-1 flex-col items-center gap-0.5 rounded-lg px-1.5 py-1.5 text-[10px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/60 ${activeClass}`}
       aria-haspopup="menu"
       aria-expanded={expanded}
     >
-      <Icon name={icon} className="w-5 h-5" />
+      <span className="relative flex h-7 w-12 items-center justify-center">
+        {(active || expanded) && (
+          <span className="absolute inset-0 rounded-full bg-brand-400/15" aria-hidden="true" />
+        )}
+        <Icon name={icon} className="relative z-10 h-5 w-5" />
+      </span>
       <span className="max-w-full truncate">{label}</span>
     </button>
   )
@@ -96,10 +120,10 @@ function MoreSheet({ open, onClose, overflowRoutes, current, onNavigate }) {
             exit={{ y: '100%' }}
             transition={{ type: 'spring', stiffness: 320, damping: 32 }}
             style={{ bottom: 'calc(3.5rem + env(safe-area-inset-bottom))' }}
-            className="fixed inset-x-0 z-50 rounded-t-2xl border border-surface-700/60 border-b-0 bg-surface-900/95 backdrop-blur lg:hidden"
+            className="glass fixed inset-x-0 z-50 rounded-t-2xl border border-b-0 border-surface-700/60 shadow-elevated lg:hidden"
           >
             <div className="mx-auto max-w-lg px-4 pb-4 pt-3">
-              <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-surface-700/80" aria-hidden="true" />
+              <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-surface-600/80" aria-hidden="true" />
               <p className="mb-2 px-1 text-[10px] font-medium uppercase tracking-wider text-surface-500">
                 More destinations
               </p>
@@ -108,7 +132,7 @@ function MoreSheet({ open, onClose, overflowRoutes, current, onNavigate }) {
                   const active = current === route.id
                   const activeClass = active
                     ? 'text-brand-300 bg-brand-400/10 border-brand-400/30'
-                    : 'text-surface-300 border-surface-700/60 hover:text-surface-100 hover:bg-surface-800/70'
+                    : 'text-surface-300 border-surface-700/50 hover:border-surface-600 hover:text-surface-100 hover:bg-surface-800/70'
                   return (
                     <li key={route.id}>
                       <button
@@ -169,7 +193,7 @@ function BottomNav({ current, onNavigate }) {
         current={current}
         onNavigate={onNavigate}
       />
-      <nav className="fixed bottom-0 inset-x-0 z-40 border-t border-surface-700/60 bg-surface-900/95 px-2 safe-area-bottom backdrop-blur lg:hidden">
+      <nav className="glass fixed inset-x-0 bottom-0 z-40 border-t border-surface-700/60 px-2 safe-area-bottom lg:hidden">
         <div className="mx-auto flex max-w-lg items-center justify-around gap-1 py-1.5">
           {primaryRoutes.map((route) => (
             <NavItem
@@ -194,19 +218,21 @@ function BottomNav({ current, onNavigate }) {
 
 function DesktopSidebar({ current, onNavigate }) {
   return (
-    <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 border-r border-surface-700/60 bg-surface-950/90 px-4 py-5 backdrop-blur lg:block">
-      <div className="flex h-full flex-col">
+    <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 border-r border-surface-700/60 bg-surface-950/80 px-4 py-5 backdrop-blur-xl lg:block">
+      {/* Faint brand glow at top of sidebar */}
+      <div className="pointer-events-none absolute -left-16 -top-16 h-48 w-48 rounded-full bg-brand-500/10 blur-3xl" aria-hidden="true" />
+      <div className="relative flex h-full flex-col">
         <div className="flex items-center gap-3 px-1">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-500/15">
-            <Icon name="logo" className="h-6 w-6 text-brand-400" />
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500/25 to-brand-700/10 ring-1 ring-inset ring-brand-400/20 shadow-card">
+            <Icon name="logo" className="h-6 w-6 text-brand-300" />
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-surface-50">Photo Backup</p>
+            <p className="text-sm font-semibold tracking-tight text-surface-50">Photo Backup</p>
             <p className="text-xs text-surface-500">Station console</p>
           </div>
         </div>
 
-        <nav className="mt-8 space-y-1.5" aria-label="Main navigation">
+        <nav className="mt-8 space-y-1" aria-label="Main navigation">
           {routes.map((route) => (
             <NavItem
               key={route.id}
@@ -218,7 +244,17 @@ function DesktopSidebar({ current, onNavigate }) {
           ))}
         </nav>
 
-        <div className="mt-auto" />
+        <div className="mt-auto pt-4">
+          <div className="flex items-center justify-between gap-2 rounded-lg border border-surface-700/50 bg-surface-900/40 px-3 py-2.5">
+            <span className="flex items-center gap-2 text-xs text-surface-500">
+              <Icon name="zap" className="h-3.5 w-3.5 text-surface-500" />
+              Shortcuts
+            </span>
+            <kbd className="inline-flex h-5 min-w-[20px] items-center justify-center rounded border border-surface-600/80 border-b-2 bg-surface-800 px-1 font-mono text-[10px] font-medium text-surface-300">
+              ?
+            </kbd>
+          </div>
+        </div>
       </div>
     </aside>
   )
@@ -229,16 +265,16 @@ function Header({ title, subtitle, currentRoute }) {
     <header className="sticky top-0 z-30 border-b border-surface-700/60 glass safe-area-top">
       <div className="mx-auto flex min-h-16 max-w-6xl items-center gap-4 px-3 py-3 sm:px-5 lg:px-8">
         <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-500/15 lg:hidden">
-            <Icon name="logo" className="h-5 w-5 text-brand-400" />
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500/25 to-brand-700/10 ring-1 ring-inset ring-brand-400/20 lg:hidden">
+            <Icon name="logo" className="h-5 w-5 text-brand-300" />
           </div>
-          <div className="hidden h-9 w-9 items-center justify-center rounded-lg bg-brand-500/15 text-brand-300 lg:flex">
+          <div className="hidden h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500/25 to-brand-700/10 text-brand-300 ring-1 ring-inset ring-brand-400/20 lg:flex">
             <Icon name={currentRoute.icon} className="h-5 w-5" />
           </div>
           <div className="min-w-0">
-            <h1 className="truncate text-base font-bold text-surface-50 sm:text-lg">{title}</h1>
+            <h1 className="truncate text-base font-bold tracking-tight text-surface-50 sm:text-lg">{title}</h1>
             {subtitle && (
-              <p className="text-xs text-surface-400 truncate">{subtitle}</p>
+              <p className="truncate text-xs text-surface-400">{subtitle}</p>
             )}
           </div>
         </div>
@@ -291,9 +327,10 @@ function NoDeviceConnected({ onDemoMode }) {
       <div className="relative z-10">
         {/* Main illustration */}
         <div className="relative mb-6 flex items-center justify-center">
-          <div className="absolute inset-0 -m-8 rounded-full bg-gradient-to-br from-brand-500/20 via-brand-600/10 to-transparent blur-md" />
-          <div className="relative flex h-24 w-24 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-500/20 to-brand-700/10 border border-brand-400/15">
-            <Icon name="cloud" className="h-12 w-12 text-brand-400 float-animation" />
+          <div className="absolute inset-0 -m-10 rounded-full bg-gradient-to-br from-brand-500/25 via-brand-600/10 to-transparent blur-2xl" aria-hidden="true" />
+          <div className="absolute h-32 w-32 rounded-full border border-brand-400/10 pulse-ring" aria-hidden="true" />
+          <div className="relative flex h-24 w-24 items-center justify-center rounded-2xl border border-brand-400/20 bg-gradient-to-br from-surface-800/90 to-surface-900/90 shadow-elevated ring-1 ring-inset ring-white/5">
+            <Icon name="cloud" className="h-12 w-12 text-brand-300 float-animation" />
           </div>
           {/* Connection dots */}
           <div className="absolute -right-8 top-1/2 -translate-y-1/2 flex items-center gap-1">
@@ -308,35 +345,35 @@ function NoDeviceConnected({ onDemoMode }) {
           </div>
         </div>
 
-        <h2 className="mb-2 text-xl font-semibold text-surface-200">No Device Connected</h2>
-        <p className="mx-auto max-w-sm text-sm text-surface-400 leading-relaxed">
+        <h2 className="mb-2 text-2xl font-semibold tracking-tight text-surface-100">No Device Connected</h2>
+        <p className="mx-auto max-w-sm text-sm leading-relaxed text-surface-400">
           Enter your Photo Backup Station&apos;s address above to get started. Make sure the device is powered on and connected to your network.
         </p>
 
         {/* Connection status indicator */}
-        <div className="mt-5 inline-flex items-center gap-2 rounded-full bg-surface-800/60 border border-surface-700/50 px-4 py-2">
+        <div className="mt-5 inline-flex items-center gap-2 rounded-full border border-surface-700/50 bg-surface-800/60 px-4 py-2 shadow-card">
           <span className="relative flex h-2.5 w-2.5">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-surface-500 opacity-40" />
-            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-surface-500" />
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-warning opacity-50" />
+            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-warning/80" />
           </span>
-          <span className="text-xs text-surface-400">Waiting for connection</span>
+          <span className="text-xs font-medium text-surface-300">Waiting for connection</span>
         </div>
 
         {/* Troubleshooting steps */}
-        <div className="mt-6 mx-auto max-w-sm text-left">
-          <p className="text-xs font-medium text-surface-500 uppercase tracking-wider mb-2">Troubleshooting</p>
-          <ul className="space-y-1.5">
+        <div className="mx-auto mt-7 max-w-sm rounded-xl border border-surface-700/50 bg-surface-900/40 p-4 text-left shadow-card">
+          <p className="mb-3 text-xs font-medium uppercase tracking-wider text-surface-500">Troubleshooting</p>
+          <ul className="space-y-2.5">
             {[
               'Check that the Raspberry Pi is powered on',
               'Verify the device is on the same WiFi network',
               'Try the device IP address with port 8080',
               'Ensure the web server service is running',
             ].map((step, i) => (
-              <li key={i} className="flex items-start gap-2 text-xs text-surface-400">
-                <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-surface-800 text-[10px] font-medium text-surface-500">
+              <li key={i} className="flex items-start gap-2.5 text-xs text-surface-400">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-500/10 text-[10px] font-semibold text-brand-300 ring-1 ring-inset ring-brand-400/20">
                   {i + 1}
                 </span>
-                {step}
+                <span className="pt-0.5">{step}</span>
               </li>
             ))}
           </ul>
@@ -359,9 +396,9 @@ function NoDeviceConnected({ onDemoMode }) {
                 <button
                   key={url}
                   onClick={() => handleConnectRecent(url)}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-surface-800/80 border border-surface-700/50 px-3 py-1.5 text-xs text-surface-300 hover:text-surface-100 hover:border-brand-400/30 hover:bg-surface-700/60 transition-all"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-surface-700/50 bg-surface-800/80 px-3 py-1.5 text-xs text-surface-300 shadow-card transition-all hover:border-brand-400/40 hover:bg-surface-700/60 hover:text-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/60"
                 >
-                  <Icon name="cloud" className="w-3 h-3 text-brand-400" />
+                  <Icon name="cloud" className="h-3 w-3 text-brand-400" />
                   <span className="max-w-[180px] truncate">{url.replace(/^https?:\/\//, '')}</span>
                 </button>
               ))}
@@ -373,9 +410,9 @@ function NoDeviceConnected({ onDemoMode }) {
         <div className="mt-6">
           <button
             onClick={handleDemoMode}
-            className="inline-flex items-center gap-1.5 text-xs text-surface-500 hover:text-brand-400 transition-colors"
+            className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-surface-500 transition-colors hover:text-brand-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/60"
           >
-            <Icon name="play" className="w-3 h-3" />
+            <Icon name="play" className="h-3 w-3" />
             Try demo mode for UI testing
           </button>
         </div>

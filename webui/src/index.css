@@ -33,6 +33,14 @@
   --color-warning: #eab308;
   --color-danger: #ef4444;
   --color-info: #3b82f6;
+
+  /* Additive depth + motion tokens (used by refined utilities). */
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 1px rgba(0, 0, 0, 0.2);
+  --shadow-elevated: 0 10px 30px -12px rgba(0, 0, 0, 0.6), 0 4px 10px -6px rgba(0, 0, 0, 0.45);
+  --shadow-glow: 0 0 0 1px rgba(34, 211, 238, 0.12), 0 12px 40px -12px rgba(6, 182, 212, 0.3);
+
+  --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out-soft: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @layer base {
@@ -40,17 +48,40 @@
     -webkit-tap-highlight-color: transparent;
   }
 
+  html {
+    scrollbar-gutter: stable;
+  }
+
   body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    font-feature-settings: 'cv01', 'cv02', 'ss01';
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
     background: #09090b;
     color: #f4f4f5;
     overflow-x: hidden;
+    letter-spacing: -0.011em;
+  }
+
+  /* Headings get tighter tracking for a more refined hierarchy. */
+  h1, h2, h3 {
+    letter-spacing: -0.02em;
+  }
+
+  /* Consistent, accessible focus ring across native + custom controls. */
+  :focus-visible {
+    outline: none;
+  }
+
+  ::selection {
+    background: rgba(34, 211, 238, 0.28);
+    color: #ecfeff;
   }
 
   ::-webkit-scrollbar {
-    width: 6px;
+    width: 8px;
+    height: 8px;
   }
 
   ::-webkit-scrollbar-track {
@@ -58,16 +89,41 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: #334155;
-    border-radius: 3px;
+    background: rgba(82, 82, 91, 0.6);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(113, 113, 122, 0.8);
+    background-clip: padding-box;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(82, 82, 91, 0.6) transparent;
   }
 }
 
 @layer utilities {
   .app-background {
+    position: relative;
     background:
-      radial-gradient(circle at top left, rgba(6, 182, 212, 0.12), transparent 28rem),
-      linear-gradient(135deg, rgba(9, 9, 11, 1), rgba(24, 24, 27, 0.96) 45%, rgba(9, 9, 11, 1));
+      radial-gradient(ellipse 60rem 40rem at 12% -8%, rgba(6, 182, 212, 0.16), transparent 60%),
+      radial-gradient(ellipse 50rem 36rem at 100% 0%, rgba(8, 145, 178, 0.1), transparent 55%),
+      linear-gradient(160deg, #0a0a0c 0%, #121215 45%, #09090b 100%);
+    background-attachment: fixed;
+  }
+
+  /* Subtle top sheen to add depth to the page surface. */
+  .app-background::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(ellipse 80rem 28rem at 50% -10%, rgba(255, 255, 255, 0.035), transparent 70%);
+    z-index: 0;
   }
 
   .content-bottom-safe {
@@ -91,15 +147,44 @@
   }
 
   .glass {
-    background: rgba(24, 24, 27, 0.82);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    background: rgba(20, 20, 23, 0.72);
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
   }
 
   .glass-light {
-    background: rgba(255, 255, 255, 0.05);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    background: rgba(255, 255, 255, 0.045);
+    backdrop-filter: blur(14px) saturate(150%);
+    -webkit-backdrop-filter: blur(14px) saturate(150%);
+  }
+
+  /* Depth helpers backed by theme shadow tokens. */
+  .shadow-card {
+    box-shadow: var(--shadow-card);
+  }
+
+  .shadow-elevated {
+    box-shadow: var(--shadow-elevated);
+  }
+
+  .shadow-glow {
+    box-shadow: var(--shadow-glow);
+  }
+
+  /* Hairline top highlight for glassy/elevated surfaces. */
+  .surface-sheen {
+    position: relative;
+  }
+
+  .surface-sheen::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent 40%);
+    mask-image: linear-gradient(180deg, #000, transparent 50%);
+    -webkit-mask-image: linear-gradient(180deg, #000, transparent 50%);
   }
 
   .float-animation {
@@ -166,8 +251,49 @@
   }
 
   .animate-shimmer {
-    background: linear-gradient(90deg, rgba(255, 255, 255, 0.03) 25%, rgba(255, 255, 255, 0.08) 50%, rgba(255, 255, 255, 0.03) 75%);
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.035) 25%, rgba(255, 255, 255, 0.09) 50%, rgba(255, 255, 255, 0.035) 75%);
     background-size: 200% 100%;
-    animation: shimmer 1.5s ease-in-out infinite;
+    animation: shimmer 1.6s ease-in-out infinite;
+  }
+
+  /* Reveal helper for content sections (gated by reduced-motion below). */
+  @keyframes fade-rise {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .animate-fade-rise {
+    animation: fade-rise 0.4s var(--ease-out-soft) both;
+  }
+}
+
+/* Respect users who prefer reduced motion: keep essential feedback (spinners)
+   but disable decorative/looping animation and large transforms. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .float-animation,
+  .pulse-ring,
+  .animate-shimmer,
+  .shake-animation,
+  .animate-fade-rise {
+    animation: none !important;
+  }
+
+  .app-background {
+    background-attachment: scroll;
   }
 }

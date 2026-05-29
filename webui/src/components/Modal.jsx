@@ -140,7 +140,7 @@ export function Modal({
 function ModalContent({ dialogRef, titleId, describedBy, title, children, footer, size, blur, onClose, handleKeyDown }) {
   return createPortal(
     <motion.div
-      className={`fixed inset-0 z-50 flex items-end sm:items-center justify-center p-3 sm:p-4 bg-surface-950/70 ${backdropBlur[blur]}`}
+      className={`fixed inset-0 z-50 flex items-end sm:items-center justify-center p-3 sm:p-4 bg-surface-950/80 ${backdropBlur[blur]}`}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -157,33 +157,34 @@ function ModalContent({ dialogRef, titleId, describedBy, title, children, footer
         aria-describedby={describedBy}
         tabIndex={-1}
         onKeyDown={handleKeyDown}
-        className={`w-full ${sizeClasses[size]} bg-surface-900 border border-surface-700 rounded-2xl shadow-2xl shadow-brand-500/5 p-5 outline-none`}
-        initial={{ opacity: 0, scale: 0.92, y: 20 }}
+        className={`relative w-full overflow-hidden ${sizeClasses[size]} glass rounded-2xl border border-surface-700/70 p-5 shadow-elevated outline-none ring-1 ring-white/5`}
+        initial={{ opacity: 0, scale: 0.94, y: 24 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.96, y: 10 }}
-        transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+        exit={{ opacity: 0, scale: 0.96, y: 12 }}
+        transition={{ type: 'spring', stiffness: 380, damping: 28 }}
       >
-        <div className="flex items-start justify-between gap-3 mb-3">
-          <h2
-            id={titleId}
-            className="text-base font-semibold text-surface-50"
-          >
+        <div
+          className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/15 to-transparent"
+          aria-hidden="true"
+        />
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <h2 id={titleId} className="text-lg font-semibold tracking-tight text-surface-50">
             {title}
           </h2>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close dialog"
-            className="p-1 text-surface-400 hover:text-surface-200 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/70"
+            className="-mr-1 -mt-1 rounded-lg p-1.5 text-surface-400 transition-colors hover:bg-surface-700/60 hover:text-surface-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/70"
           >
-            <Icon name="x" className="w-5 h-5" />
+            <Icon name="x" className="h-5 w-5" />
           </button>
         </div>
-        <div className="mb-4">
+        <div className="mb-4 text-sm text-surface-300">
           {children}
         </div>
         {footer && (
-          <div className="flex items-center justify-end gap-2 pt-3 border-t border-surface-700/50">
+          <div className="flex items-center justify-end gap-2 border-t border-surface-700/50 pt-3">
             {footer}
           </div>
         )}

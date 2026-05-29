@@ -9,8 +9,8 @@ export function Skeleton({ className = '', ...props }) {
 
 export function SkeletonCard({ className = '' }) {
   return (
-    <div className={`rounded-lg p-px bg-gradient-to-br from-brand-500/5 to-transparent ${className}`}>
-      <div className="bg-surface-800/55 border border-surface-700/60 rounded-lg p-4 shadow-sm shadow-black/10 h-full space-y-3">
+    <div className={`rounded-xl p-px bg-gradient-to-b from-surface-600/40 via-surface-700/20 to-transparent ${className}`}>
+      <div className="bg-surface-800/55 border border-surface-700/50 rounded-[11px] p-4 shadow-card h-full space-y-3">
         <div className="flex items-center gap-3">
           <Skeleton className="h-8 w-8 rounded-full" />
           <div className="flex-1 space-y-2">
