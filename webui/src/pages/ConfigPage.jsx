@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, useId } from 'react'
 import { useDevice } from '../DeviceContext.jsx'
 import { useToast } from '../components/Toast.jsx'
 import { Card, CardHeader, CardTitle } from '../components/Card.jsx'
@@ -126,16 +126,23 @@ function OtaProgress({ status }) {
   const barColor = status.state === 'failed' ? 'bg-danger' : 'bg-brand-500'
 
   return (
-    <div className="bg-surface-900 rounded-lg p-3">
+    <div className="rounded-lg border border-brand-500/20 bg-surface-900/60 p-3">
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-xs text-surface-400 mb-1">Update progress</p>
+        <div className="min-w-0">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-surface-500 mb-1">Update progress</p>
           <p className="text-sm font-medium text-surface-100">{progress.label}</p>
           {status.message ? <p className="text-xs text-surface-500 mt-1">{status.message}</p> : null}
         </div>
-        <span className="text-sm font-semibold text-surface-100 tabular-nums">{width}</span>
+        <span className="text-sm font-semibold text-surface-100 tabular-nums shrink-0">{width}</span>
       </div>
-      <div className="mt-3 h-2 rounded-full bg-surface-700 overflow-hidden">
+      <div
+        className="mt-3 h-2 rounded-full bg-surface-700 overflow-hidden"
+        role="progressbar"
+        aria-valuenow={Math.round(progress.percent)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={progress.label}
+      >
         <div className={`h-full rounded-full transition-all duration-500 ${barColor}`} style={{ width }} />
       </div>
       {detail ? <p className="text-xs text-surface-500 mt-2">{detail}</p> : null}
@@ -176,26 +183,50 @@ function getDeviceHost(deviceUrl) {
 // Accordion wrapper
 // ---------------------------------------------------------------------------
 
-function AccordionSection({ title, icon, defaultOpen = false, badge, children }) {
+function AccordionSection({ title, description, icon, tone = 'brand', defaultOpen = false, badge, children }) {
   const [open, setOpen] = useState(defaultOpen)
+  const panelId = useId()
+  const headerId = useId()
+
+  const iconTone =
+    tone === 'danger'
+      ? 'bg-danger/10 ring-danger/25 text-danger'
+      : 'bg-brand-500/10 ring-brand-500/20 text-brand-400'
 
   return (
     <Card className="mb-4 overflow-hidden">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between p-4 text-left select-none -m-4 mb-0 hover:bg-surface-700/30 transition-colors"
-      >
-        <div className="flex items-center gap-3">
-          {icon && <Icon name={icon} className="w-5 h-5 text-brand-400 shrink-0" />}
-          <span className="text-sm font-semibold text-surface-100">{title}</span>
-          {badge}
-        </div>
-        <Icon
-          name="chevron-right"
-          className={`w-4 h-4 text-surface-400 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}
-        />
-      </button>
+      <h2 id={headerId} className="contents">
+        <button
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          aria-controls={panelId}
+          className="w-full flex items-center justify-between gap-3 p-4 text-left select-none -m-4 mb-0 hover:bg-surface-700/30 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400/60"
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            {icon && (
+              <span className={`flex items-center justify-center w-9 h-9 rounded-lg ring-1 shrink-0 ${iconTone}`}>
+                <Icon name={icon} className="w-5 h-5" aria-hidden="true" />
+              </span>
+            )}
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm font-semibold text-surface-100">{title}</span>
+                {badge}
+              </div>
+              {description && <p className="text-xs text-surface-400 mt-0.5 truncate">{description}</p>}
+            </div>
+          </div>
+          <Icon
+            name="chevron-right"
+            className={`w-4 h-4 text-surface-400 transition-transform duration-200 shrink-0 ${open ? 'rotate-90' : ''}`}
+            aria-hidden="true"
+          />
+        </button>
+      </h2>
       <div
+        id={panelId}
+        role="region"
+        aria-labelledby={headerId}
         className={`grid transition-all duration-200 ease-in-out ${
           open ? 'grid-rows-[1fr] opacity-100 mt-4' : 'grid-rows-[0fr] opacity-0 mt-0'
         }`}
@@ -210,89 +241,176 @@ function AccordionSection({ title, icon, defaultOpen = false, badge, children })
 // Reusable form input
 // ---------------------------------------------------------------------------
 
+// Field wires a label to its control and surfaces a hint via aria-describedby.
+// The child control receives `id` and `describedBy` props automatically.
 function Field({ label, children, hint }) {
+  const fieldId = useId()
+  const hintId = useId()
+  const control =
+    typeof children === 'function'
+      ? children({ id: fieldId, describedBy: hint ? hintId : undefined })
+      : children
+
   return (
-    <div className="mb-3">
-      <label className="block text-xs font-medium text-surface-300 mb-1.5">{label}</label>
+    <div className="mb-3.5">
+      <label htmlFor={fieldId} className="block text-xs font-medium text-surface-300 mb-1.5">
+        {label}
+      </label>
+      {control}
+      {hint && (
+        <p id={hintId} className="mt-1.5 text-xs text-surface-500 leading-relaxed">
+          {hint}
+        </p>
+      )}
+    </div>
+  )
+}
+
+// A labelled cluster of related controls within a section.
+function FormGroup({ title, children }) {
+  return (
+    <fieldset className="min-w-0">
+      {title && (
+        <legend className="text-[11px] font-semibold uppercase tracking-wider text-surface-500 mb-2">
+          {title}
+        </legend>
+      )}
       {children}
-      {hint && <p className="mt-1 text-xs text-surface-500">{hint}</p>}
+    </fieldset>
+  )
+}
+
+// A compact read-only label/value panel used to display device state.
+function InfoTile({ label, children, className = '' }) {
+  return (
+    <div className={`rounded-lg border border-surface-700/40 bg-surface-900/50 p-3 ${className}`}>
+      <p className="text-[11px] font-medium uppercase tracking-wide text-surface-500 mb-1">{label}</p>
+      {children}
+    </div>
+  )
+}
+
+// Consistent inline error / warning banner.
+function FormAlert({ message }) {
+  return (
+    <div
+      role="alert"
+      className="flex items-start gap-2 rounded-lg border border-danger/25 bg-danger/10 p-3 text-xs text-danger"
+    >
+      <Icon name="alert-triangle" className="w-4 h-4 shrink-0 mt-px" aria-hidden="true" />
+      <span className="leading-relaxed">{message}</span>
     </div>
   )
 }
 
 const inputClass =
-  'w-full bg-surface-900 border border-surface-600 rounded-lg px-3 py-2 text-sm text-surface-50 placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-colors'
+  'w-full min-h-11 bg-surface-900 border border-surface-600/80 rounded-lg px-3 py-2.5 text-sm text-surface-50 placeholder-surface-500 transition-colors hover:border-surface-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60 focus:border-brand-500/60 disabled:opacity-60 disabled:cursor-not-allowed'
 
-function TextInput({ value, onChange, placeholder, type = 'text', disabled }) {
+function TextInput({ value, onChange, placeholder, type = 'text', disabled, id, describedBy, inputMode }) {
   return (
     <input
+      id={id}
       type={type}
+      inputMode={inputMode}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       disabled={disabled}
+      aria-describedby={describedBy}
+      autoComplete="off"
       className={inputClass}
     />
   )
 }
 
-function PasswordInput({ value, onChange, placeholder, disabled }) {
+function PasswordInput({ value, onChange, placeholder, disabled, id, describedBy }) {
   const [visible, setVisible] = useState(false)
   return (
     <div className="relative">
       <input
+        id={id}
         type={visible ? 'text' : 'password'}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         disabled={disabled}
-        className={`${inputClass} pr-10`}
+        aria-describedby={describedBy}
+        autoComplete="off"
+        className={`${inputClass} pr-11`}
       />
       <button
         type="button"
         onClick={() => setVisible((v) => !v)}
-        className="absolute right-2 top-1/2 -translate-y-1/2 text-surface-400 hover:text-surface-200 p-1"
-        tabIndex={-1}
+        disabled={disabled}
+        className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center justify-center w-8 h-8 text-surface-400 hover:text-surface-100 transition-colors rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/70 disabled:opacity-50"
+        aria-label={visible ? 'Hide value' : 'Show value'}
+        aria-pressed={visible}
       >
-        <Icon name={visible ? 'x' : 'lock'} className="w-4 h-4" />
+        <Icon name={visible ? 'x' : 'lock'} className="w-4 h-4" aria-hidden="true" />
       </button>
     </div>
   )
 }
 
-function SelectInput({ value, onChange, options, placeholder, disabled }) {
+function SelectInput({ value, onChange, options, placeholder, disabled, id, describedBy }) {
   return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      disabled={disabled}
-      className={inputClass}
-    >
-      {placeholder && (
-        <option value="" disabled>
-          {placeholder}
-        </option>
-      )}
-      {options.map((opt) => (
-        <option key={typeof opt === 'string' ? opt : opt.value} value={typeof opt === 'string' ? opt : opt.value}>
-          {typeof opt === 'string' ? opt : opt.label}
-        </option>
-      ))}
-    </select>
+    <div className="relative">
+      <select
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        aria-describedby={describedBy}
+        className={`${inputClass} appearance-none pr-10 cursor-pointer`}
+      >
+        {placeholder && (
+          <option value="" disabled>
+            {placeholder}
+          </option>
+        )}
+        {options.map((opt) => (
+          <option key={typeof opt === 'string' ? opt : opt.value} value={typeof opt === 'string' ? opt : opt.value}>
+            {typeof opt === 'string' ? opt : opt.label}
+          </option>
+        ))}
+      </select>
+      <Icon
+        name="chevron-right"
+        className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400 rotate-90"
+        aria-hidden="true"
+      />
+    </div>
   )
 }
 
-function Toggle({ checked, onChange, label, disabled }) {
+function Toggle({ checked, onChange, label, hint, disabled }) {
+  const labelId = useId()
+  const hintId = useId()
   return (
-    <label className={`flex items-center justify-between gap-3 cursor-pointer ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}>
-      <span className="text-sm text-surface-300">{label}</span>
+    <div
+      className={`flex items-start justify-between gap-3 rounded-lg border border-surface-700/40 bg-surface-900/30 px-3 py-2.5 transition-colors ${
+        disabled ? 'opacity-50' : 'hover:border-surface-600/60'
+      }`}
+    >
+      <div className="min-w-0">
+        <span id={labelId} className="block text-sm text-surface-200 leading-snug">
+          {label}
+        </span>
+        {hint && (
+          <span id={hintId} className="block text-xs text-surface-500 mt-0.5 leading-relaxed">
+            {hint}
+          </span>
+        )}
+      </div>
       <button
         type="button"
         role="switch"
         aria-checked={checked}
+        aria-labelledby={labelId}
+        aria-describedby={hint ? hintId : undefined}
         disabled={disabled}
         onClick={() => !disabled && onChange(!checked)}
-        className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ${
+        className={`relative inline-flex h-6 w-11 shrink-0 mt-0.5 rounded-full border-2 border-transparent transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-800 disabled:cursor-not-allowed ${
           checked ? 'bg-brand-600' : 'bg-surface-600'
         }`}
       >
@@ -302,7 +420,7 @@ function Toggle({ checked, onChange, label, disabled }) {
           }`}
         />
       </button>
-    </label>
+    </div>
   )
 }
 
@@ -379,35 +497,45 @@ function RemoteStorageSection() {
   }, [deviceUrl, draftConfig, config?.configured, toast])
 
   return (
-    <AccordionSection title="Remote Storage" icon="cloud" defaultOpen badge={
-      loading ? null : (
-        <StatusBadge variant={config?.configured ? 'success' : 'warning'}>
-          {config?.configured ? 'Configured' : 'Not configured'}
-        </StatusBadge>
-      )
-    }>
+    <AccordionSection
+      title="Remote Storage"
+      description="rclone backend for cloud uploads"
+      icon="cloud"
+      defaultOpen
+      badge={
+        loading ? null : (
+          <StatusBadge variant={config?.configured ? 'success' : 'warning'}>
+            {config?.configured ? 'Configured' : 'Not configured'}
+          </StatusBadge>
+        )
+      }
+    >
       {loading ? (
         <div className="flex items-center justify-center py-6">
           <LoadingSpinner size="sm" />
         </div>
       ) : (
         <div className="space-y-3">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0 space-y-1.5">
               <p className="text-sm text-surface-200">
                 {config?.configured ? 'Remote backend is configured' : 'No remote backend configured'}
               </p>
               {config?.configured && (config?.remote_name || config?.remotes?.length > 0) && (
-                <p className="text-xs text-surface-400 mt-1">
-                  Remote: {config.remote_name || config.remotes[0]}
-                  {config?.provider ? ` (${config.provider})` : ''}
-                </p>
+                <div className="flex items-center gap-1.5 text-xs text-surface-400">
+                  <span className="text-surface-500">Remote</span>
+                  <span className="font-mono text-surface-300">{config.remote_name || config.remotes[0]}</span>
+                  {config?.provider ? <StatusBadge variant="neutral" size="sm">{config.provider}</StatusBadge> : null}
+                </div>
               )}
               {config?.configured && config?.remote_path && (
-                <p className="text-xs text-surface-400 mt-1">Path: {config.remote_path}</p>
+                <div className="flex items-center gap-1.5 text-xs text-surface-400">
+                  <span className="text-surface-500">Path</span>
+                  <span className="font-mono text-surface-300 break-all">{config.remote_path}</span>
+                </div>
               )}
             </div>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:shrink-0">
               <Button
                 variant="secondary"
                 size="sm"
@@ -430,21 +558,31 @@ function RemoteStorageSection() {
             </div>
           </div>
           {config?.config_redacted && (
-            <pre className="max-h-56 overflow-auto rounded-lg border border-surface-700 bg-surface-900 p-3 text-xs text-surface-200 whitespace-pre-wrap break-words">
-              {config.config_redacted}
-            </pre>
+            <div className="rounded-lg border border-surface-700/60 bg-surface-950/60 overflow-hidden">
+              <div className="flex items-center gap-2 px-3 py-2 border-b border-surface-700/50 bg-surface-900/40">
+                <Icon name="terminal" className="w-3.5 h-3.5 text-surface-500" aria-hidden="true" />
+                <span className="text-xs font-medium text-surface-400">Current configuration (redacted)</span>
+              </div>
+              <pre className="max-h-56 overflow-auto p-3 text-xs text-surface-200 whitespace-pre-wrap break-words leading-relaxed">
+                {config.config_redacted}
+              </pre>
+            </div>
           )}
           {editing && (
-            <div className="rounded-lg border border-surface-700 bg-surface-900/60 p-3">
+            <div className="rounded-lg border border-brand-500/30 bg-surface-900/60 p-3">
               <Field label="rclone.conf" hint="Paste the complete config. Redacted secrets cannot be saved.">
-                <textarea
-                  value={draftConfig}
-                  onChange={(e) => setDraftConfig(e.target.value)}
-                  placeholder={'[b2]\ntype = b2\naccount = <application_key_id>\nkey = <application_key>'}
-                  disabled={saving}
-                  rows={8}
-                  className={`${inputClass} resize-y font-mono text-xs`}
-                />
+                {({ id, describedBy }) => (
+                  <textarea
+                    id={id}
+                    aria-describedby={describedBy}
+                    value={draftConfig}
+                    onChange={(e) => setDraftConfig(e.target.value)}
+                    placeholder={'[b2]\ntype = b2\naccount = <application_key_id>\nkey = <application_key>'}
+                    disabled={saving}
+                    rows={8}
+                    className={`${inputClass} min-h-0 resize-y font-mono text-xs leading-relaxed`}
+                  />
+                )}
               </Field>
               <div className="flex justify-end pt-1">
                 <Button variant="primary" size="sm" loading={saving} onClick={handleSaveConfig}>
@@ -505,34 +643,47 @@ function B2SetupSection() {
   }, [deviceUrl, bucket, keyId, appKey, toast])
 
   return (
-    <AccordionSection title="Backblaze B2 Quick Setup" icon="cloud">
-      <div className="space-y-1">
+    <AccordionSection title="Backblaze B2 Quick Setup" description="Guided setup for a B2 bucket" icon="cloud">
+      <div>
         <Field label="Bucket Name" hint="Name of your Backblaze B2 bucket">
-          <TextInput
-            value={bucket}
-            onChange={setBucket}
-            placeholder="my-photo-backup"
-            disabled={saving}
-          />
+          {({ id, describedBy }) => (
+            <TextInput
+              id={id}
+              describedBy={describedBy}
+              value={bucket}
+              onChange={setBucket}
+              placeholder="my-photo-backup"
+              disabled={saving}
+            />
+          )}
         </Field>
         <Field label="Key ID" hint="Application Key ID from Backblaze console">
-          <TextInput
-            value={keyId}
-            onChange={setKeyId}
-            placeholder="001a1b2c3d4e5f6a7b8c9d0e1f"
-            disabled={saving}
-          />
+          {({ id, describedBy }) => (
+            <TextInput
+              id={id}
+              describedBy={describedBy}
+              value={keyId}
+              onChange={setKeyId}
+              placeholder="001a1b2c3d4e5f6a7b8c9d0e1f"
+              disabled={saving}
+            />
+          )}
         </Field>
-        <Field label="Application Key" hint="Keep this secret -- will not be shown after saving">
-          <PasswordInput
-            value={appKey}
-            onChange={setAppKey}
-            placeholder="K001..."
-            disabled={saving}
-          />
+        <Field label="Application Key" hint="Keep this secret — it will not be shown after saving">
+          {({ id, describedBy }) => (
+            <PasswordInput
+              id={id}
+              describedBy={describedBy}
+              value={appKey}
+              onChange={setAppKey}
+              placeholder="K001..."
+              disabled={saving}
+            />
+          )}
         </Field>
         <div className="flex justify-end pt-2">
           <Button variant="primary" size="sm" loading={saving} onClick={handleSave}>
+            <Icon name="check" className="w-4 h-4" aria-hidden="true" />
             Save B2 Config
           </Button>
         </div>
@@ -613,81 +764,106 @@ function SyncSettingsSection() {
   }, [deviceUrl, transfers, bandwidth, googlePhotos, googlePhotosOAuth, googlePhotosClientID, googlePhotosClientSecret, prefer5GHzWiFi, loadError, toast])
 
   return (
-    <AccordionSection title="Sync Settings" icon="settings">
+    <AccordionSection title="Sync Settings" description="Transfer performance and integrations" icon="settings">
       {loading ? (
         <div className="flex items-center justify-center py-6">
           <LoadingSpinner size="sm" />
         </div>
       ) : (
-        <div className="space-y-1">
-          {loadError ? (
-            <div className="mb-3 rounded-lg border border-danger/20 bg-danger/10 p-3 text-xs text-danger">
-              {loadError}
+        <div className="space-y-5">
+          {loadError ? <FormAlert message={loadError} /> : null}
+
+          <FormGroup title="Transfers">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
+              <Field label="Parallel Transfers" hint="Simultaneous file transfers (1–64)">
+                {({ id, describedBy }) => (
+                  <TextInput
+                    id={id}
+                    describedBy={describedBy}
+                    value={transfers}
+                    onChange={setTransfers}
+                    placeholder="4"
+                    type="number"
+                    inputMode="numeric"
+                    disabled={saving || !!loadError}
+                  />
+                )}
+              </Field>
+              <Field label="Bandwidth Limit" hint="e.g. 10M, 1G — empty for unlimited">
+                {({ id, describedBy }) => (
+                  <TextInput
+                    id={id}
+                    describedBy={describedBy}
+                    value={bandwidth}
+                    onChange={setBandwidth}
+                    placeholder="unlimited"
+                    disabled={saving || !!loadError}
+                  />
+                )}
+              </Field>
             </div>
-          ) : null}
-          <Field label="Parallel Transfers" hint="Number of simultaneous file transfers (1-64)">
-            <TextInput
-              value={transfers}
-              onChange={setTransfers}
-              placeholder="4"
-              type="number"
-              disabled={saving || !!loadError}
-            />
-          </Field>
-          <Field label="Bandwidth Limit" hint="e.g. 10M, 1G, or leave empty for unlimited">
-            <TextInput
-              value={bandwidth}
-              onChange={setBandwidth}
-              placeholder="unlimited"
-              disabled={saving || !!loadError}
-            />
-          </Field>
-          <div className="py-2">
-            <Toggle
-              checked={googlePhotos}
-              onChange={setGooglePhotos}
-              label="Enable Google Photos integration (rclone mode)"
-              disabled={saving || !!loadError}
-            />
-          </div>
-          <div className="py-2">
-            <Toggle
-              checked={googlePhotosOAuth}
-              onChange={setGooglePhotosOAuth}
-              label="Enable Google Photos native OAuth"
-              disabled={saving || !!loadError}
-            />
-          </div>
-          {googlePhotosOAuth && (
-            <>
-              <Field label="Client ID" hint="Google Cloud OAuth 2.0 client ID">
-                <TextInput
-                  value={googlePhotosClientID}
-                  onChange={setGooglePhotosClientID}
-                  placeholder="your-client-id.apps.googleusercontent.com"
-                  disabled={saving || !!loadError}
-                />
-              </Field>
-              <Field label="Client Secret" hint="Google Cloud OAuth 2.0 client secret">
-                <PasswordInput
-                  value={googlePhotosClientSecret}
-                  onChange={setGooglePhotosClientSecret}
-                  placeholder="your-client-secret"
-                  disabled={saving || !!loadError}
-                />
-              </Field>
-            </>
-          )}
-          <div className="py-2">
+          </FormGroup>
+
+          <FormGroup title="Google Photos">
+            <div className="space-y-2">
+              <Toggle
+                checked={googlePhotos}
+                onChange={setGooglePhotos}
+                label="Google Photos integration"
+                hint="Sync via rclone's Google Photos backend"
+                disabled={saving || !!loadError}
+              />
+              <Toggle
+                checked={googlePhotosOAuth}
+                onChange={setGooglePhotosOAuth}
+                label="Native OAuth"
+                hint="Use a self-managed Google Cloud OAuth client"
+                disabled={saving || !!loadError}
+              />
+            </div>
+            {googlePhotosOAuth && (
+              <div className="mt-3 rounded-lg border border-surface-700/40 bg-surface-900/30 p-3">
+                <Field label="Client ID" hint="Google Cloud OAuth 2.0 client ID">
+                  {({ id, describedBy }) => (
+                    <TextInput
+                      id={id}
+                      describedBy={describedBy}
+                      value={googlePhotosClientID}
+                      onChange={setGooglePhotosClientID}
+                      placeholder="your-client-id.apps.googleusercontent.com"
+                      disabled={saving || !!loadError}
+                    />
+                  )}
+                </Field>
+                <Field label="Client Secret" hint="Google Cloud OAuth 2.0 client secret">
+                  {({ id, describedBy }) => (
+                    <PasswordInput
+                      id={id}
+                      describedBy={describedBy}
+                      value={googlePhotosClientSecret}
+                      onChange={setGooglePhotosClientSecret}
+                      placeholder="your-client-secret"
+                      disabled={saving || !!loadError}
+                    />
+                  )}
+                </Field>
+              </div>
+            )}
+          </FormGroup>
+
+          <FormGroup title="Network">
             <Toggle
               checked={prefer5GHzWiFi}
               onChange={setPrefer5GHzWiFi}
-              label="Prefer 5 GHz Wi-Fi for matching network names"
+              label="Prefer 5 GHz Wi-Fi"
+              hint="Choose the 5 GHz band for networks with matching names"
               disabled={saving || !!loadError}
             />
-          </div>
-          <div className="flex justify-end pt-2">
+          </FormGroup>
+
+          <div className="flex justify-end pt-1">
             <Button variant="primary" size="sm" loading={saving} disabled={!!loadError} onClick={handleSave}>
+              <Icon name="check" className="w-4 h-4" aria-hidden="true" />
               Save Settings
             </Button>
           </div>
@@ -767,7 +943,7 @@ function TailscaleSection() {
   }, [deviceUrl, authKey, loadError, toast])
 
   return (
-    <AccordionSection title="Tailscale" icon="wifi" badge={
+    <AccordionSection title="Tailscale" description="Private mesh VPN access" icon="wifi" badge={
       loading ? null : (
         <StatusBadge variant={configured ? 'success' : 'warning'}>
           {configured ? 'Configured' : 'Not configured'}
@@ -780,29 +956,28 @@ function TailscaleSection() {
         </div>
       ) : (
         <div className="space-y-3">
-          {loadError ? (
-            <div className="mb-3 rounded-lg border border-danger/20 bg-danger/10 p-3 text-xs text-danger">
-              {loadError}
-            </div>
-          ) : null}
-          <div className="bg-surface-900 rounded-lg p-3">
-            <p className="text-xs text-surface-400 mb-1">Auth Key</p>
+          {loadError ? <FormAlert message={loadError} /> : null}
+          <InfoTile label="Auth Key">
             <p className="text-sm font-medium text-surface-100">
               {configured ? 'Stored' : 'No key stored'}
             </p>
-            <p className="text-xs text-surface-500 mt-1 break-all">{authKeyPath}</p>
-          </div>
+            <p className="text-xs text-surface-500 mt-1 break-all font-mono">{authKeyPath}</p>
+          </InfoTile>
           <Field label="New Auth Key" hint="Paste a Tailscale auth key. It is stored locally and not shown after saving.">
-            <PasswordInput
-              value={authKey}
-              onChange={setAuthKey}
-              placeholder="tskey-auth-..."
-              disabled={saving || !!loadError}
-            />
+            {({ id, describedBy }) => (
+              <PasswordInput
+                id={id}
+                describedBy={describedBy}
+                value={authKey}
+                onChange={setAuthKey}
+                placeholder="tskey-auth-..."
+                disabled={saving || !!loadError}
+              />
+            )}
           </Field>
-          <div className="flex justify-end pt-2">
+          <div className="flex justify-end pt-1">
             <Button variant="primary" size="sm" loading={saving} disabled={!!loadError} onClick={handleSave}>
-              <Icon name="lock" className="w-4 h-4" />
+              <Icon name="lock" className="w-4 h-4" aria-hidden="true" />
               Save & Connect
             </Button>
           </div>
@@ -1019,7 +1194,7 @@ function OtaSection() {
   ])
 
   return (
-    <AccordionSection title="OTA Updates" icon="arrow-up-tray" badge={
+    <AccordionSection title="OTA Updates" description="Firmware version and A/B updates" icon="arrow-up-tray" badge={
       !loading && status?.update_available ? (
         <StatusBadge variant="info" pulse>Update available</StatusBadge>
       ) : null
@@ -1031,8 +1206,7 @@ function OtaSection() {
       ) : (
         <div className="space-y-3">
           {installedVersions.length ? (
-            <div className="bg-surface-900 rounded-lg p-3">
-              <p className="text-xs text-surface-400 mb-1">Known installed versions</p>
+            <InfoTile label="Known installed versions">
               <div className="flex flex-wrap gap-2">
                 {installedVersions.map((versionEntry) => (
                   <StatusBadge
@@ -1044,13 +1218,12 @@ function OtaSection() {
                   </StatusBadge>
                 ))}
               </div>
-            </div>
+            </InfoTile>
           ) : null}
           <OtaProgress status={status} />
           {status?.ab_partitions ? (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div className="bg-surface-900 rounded-lg p-3">
-                <p className="text-xs text-surface-400 mb-1">A/B Partitions</p>
+              <InfoTile label="A/B Partitions">
                 <p className="text-xs text-surface-500">
                   Active {activePartitionLabel}
                   {activeInfo?.path ? ` (${activeInfo.path})` : ''}
@@ -1071,9 +1244,8 @@ function OtaSection() {
                 <p className="text-xs text-surface-500 mt-1">
                   Source: {status?.ab_partitions?.source || 'unknown'}
                 </p>
-              </div>
-              <div className="bg-surface-900 rounded-lg p-3">
-                <p className="text-xs text-surface-400 mb-1">Update target</p>
+              </InfoTile>
+              <InfoTile label="Update target">
                 <p className="text-xs text-surface-500">
                   {installPartitionLabel}
                 </p>
@@ -1085,64 +1257,65 @@ function OtaSection() {
                 <p className="text-xs text-surface-500 mt-1">
                   Update destination is always the inactive partition.
                 </p>
-              </div>
+              </InfoTile>
             </div>
           ) : null}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="bg-surface-900 rounded-lg p-3">
-              <p className="text-xs text-surface-400 mb-1">Current Version</p>
+            <InfoTile label="Current Version">
               <p className="text-sm font-medium text-surface-100">
                 {status?.current_version || 'unknown'}
               </p>
               {status?.current_commit ? (
-                <p className="text-xs text-surface-500 mt-1 break-all">
+                <p className="text-xs text-surface-500 mt-1 break-all font-mono">
                   {status.current_commit}
                 </p>
               ) : null}
               <p className="text-xs text-surface-500 mt-1">
                 {status?.current_build_date ? formatReleaseDate(status.current_build_date) : 'Build date unknown'}
               </p>
-            </div>
-            <div className="bg-surface-900 rounded-lg p-3">
-              <p className="text-xs text-surface-400 mb-1">Latest Release</p>
+            </InfoTile>
+            <InfoTile label="Latest Release">
               <p className="text-sm font-medium text-surface-100">
                 {status?.latest_version || 'unknown'}
               </p>
               <p className="text-xs text-surface-500 mt-1">
                 {releases[0] ? formatReleaseDate(releases[0].published_at) : 'No release date'}
               </p>
-            </div>
+            </InfoTile>
           </div>
-          <Field label="Select release to install">
-            {releaseOptions.length > 0 ? (
-              <SelectInput
-                value={selectedRelease}
-                onChange={setSelectedRelease}
-                options={releaseOptions}
-                disabled={installing}
-              />
-            ) : (
-              <p className="text-xs text-surface-500">No installable releases found</p>
-            )}
+          <Field
+            label="Select release to install"
+            hint={
+              selectedReleaseInfo
+                ? `${selectedReleaseInfo.name || selectedReleaseInfo.tag_name}${
+                    selectedReleaseInfo.published_at ? ` · published ${formatReleaseDate(selectedReleaseInfo.published_at)}` : ''
+                  }`
+                : undefined
+            }
+          >
+            {({ id, describedBy }) =>
+              releaseOptions.length > 0 ? (
+                <SelectInput
+                  id={id}
+                  describedBy={describedBy}
+                  value={selectedRelease}
+                  onChange={setSelectedRelease}
+                  options={releaseOptions}
+                  disabled={installing}
+                />
+              ) : (
+                <p id={describedBy} className="text-xs text-surface-500 py-2">No installable releases found</p>
+              )
+            }
           </Field>
-          {selectedReleaseInfo ? (
-            <p className="text-xs text-surface-500 mt-1">
-              {selectedReleaseInfo.name || selectedReleaseInfo.tag_name}
-            </p>
-          ) : null}
-          {selectedReleaseInfo?.published_at ? (
-            <p className="text-xs text-surface-500 mt-1">
-              Published {formatReleaseDate(selectedReleaseInfo.published_at)}
-            </p>
-          ) : null}
-          <div className="flex justify-between items-center pt-1">
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between sm:items-center pt-1">
             <Button
               variant="ghost"
               size="sm"
               onClick={fetchStatus}
               disabled={installing}
             >
-              <Icon name="arrow-path" className="w-4 h-4" />
+              <Icon name="arrow-path" className="w-4 h-4" aria-hidden="true" />
               Check for updates
             </Button>
             <Button
@@ -1152,32 +1325,39 @@ function OtaSection() {
               disabled={!canInstall || releaseOptions.length === 0}
               title={installationRunning ? 'An OTA update is already running' : ''}
               onClick={handleInstall}
+              className="sm:w-auto"
             >
-              <Icon name="arrow-up-tray" className="w-4 h-4" />
+              <Icon name="arrow-up-tray" className="w-4 h-4" aria-hidden="true" />
               Install Selected Version
             </Button>
           </div>
           {installHistory.length ? (
-            <div className="bg-surface-900 rounded-lg p-3">
-              <p className="text-xs text-surface-400 mb-2">Recent install history</p>
-              <div className="space-y-2">
+            <InfoTile label="Recent install history">
+              <div className="space-y-2 mt-1">
                 {installHistory.slice(0, 5).map((entry, idx) => (
                   <div
                     key={`${entry.release || 'unknown'}-${entry.started_at || entry.finished_at || idx}`}
-                    className="rounded-md border border-surface-700 bg-surface-950 p-2"
+                    className="rounded-md border border-surface-700/60 bg-surface-950 p-2"
                   >
-                    <p className="text-xs text-surface-200">{entry.release || 'unknown release'}</p>
-                    <p className="text-xs text-surface-500 mt-1">
-                      {entry.state || 'unknown state'}
-                      {entry.finished_at || entry.started_at
-                        ? ` · ${entry.state === 'installed' ? 'finished' : 'started'} ${formatDate(entry.finished_at || entry.started_at)}`
-                        : ''}
-                    </p>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-medium text-surface-200 truncate">{entry.release || 'unknown release'}</p>
+                      <StatusBadge
+                        size="sm"
+                        variant={entry.state === 'installed' ? 'success' : entry.state === 'failed' ? 'danger' : 'neutral'}
+                      >
+                        {entry.state || 'unknown'}
+                      </StatusBadge>
+                    </div>
+                    {entry.finished_at || entry.started_at ? (
+                      <p className="text-xs text-surface-500 mt-1">
+                        {entry.state === 'installed' ? 'Finished' : 'Started'} {formatDate(entry.finished_at || entry.started_at)}
+                      </p>
+                    ) : null}
                     {entry.error ? <p className="text-xs text-danger mt-1">{entry.error}</p> : null}
                   </div>
                 ))}
               </div>
-            </div>
+            </InfoTile>
           ) : null}
           {status?.releases?.length ? (
             <p className="text-xs text-surface-500">
@@ -1275,7 +1455,7 @@ function SystemMaintenanceSection() {
   }, [deviceUrl, restartTarget, toast])
 
   return (
-    <AccordionSection title="System Clock & TLS" icon="clock" badge={
+    <AccordionSection title="System Clock & TLS" description="Time, certificates, and service control" icon="clock" badge={
       loading ? null : (
         <StatusBadge variant={timeReady && certReady ? 'success' : 'warning'}>
           {timeReady && certReady ? 'Ready' : 'Needs attention'}
@@ -1287,25 +1467,28 @@ function SystemMaintenanceSection() {
           <LoadingSpinner size="sm" />
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="bg-surface-900 rounded-lg p-3">
-              <p className="text-xs text-surface-400 mb-1">Device Time</p>
-              <p className="text-sm font-medium text-surface-100">
-                {formatDate(status?.current_time)}
-              </p>
-              <div className="mt-2">
-                <StatusBadge variant={timeReady ? 'success' : 'warning'}>
+            <InfoTile label="Device Time">
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-sm font-medium text-surface-100">
+                  {formatDate(status?.current_time)}
+                </p>
+                <StatusBadge variant={timeReady ? 'success' : 'warning'} size="sm">
                   {timeReady ? 'Valid' : 'Invalid'}
                 </StatusBadge>
               </div>
-            </div>
-            <div className="bg-surface-900 rounded-lg p-3">
-              <p className="text-xs text-surface-400 mb-1">Persistent TLS</p>
-              <p className="text-sm font-medium text-surface-100">
-                {cert.exists ? (cert.valid_now ? 'Certificate valid' : 'Certificate invalid') : 'No certificate'}
-              </p>
-              <p className="text-xs text-surface-500 mt-1 break-all">
+            </InfoTile>
+            <InfoTile label="Persistent TLS">
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-sm font-medium text-surface-100">
+                  {cert.exists ? (cert.valid_now ? 'Certificate valid' : 'Certificate invalid') : 'No certificate'}
+                </p>
+                <StatusBadge variant={certReady ? 'success' : 'warning'} size="sm">
+                  {certReady ? 'Ready' : 'Action needed'}
+                </StatusBadge>
+              </div>
+              <p className="text-xs text-surface-500 mt-1 break-all font-mono">
                 {cert.cert_file || '/perm/ssl/gokrazy-web.pem'}
               </p>
               {cert.not_after ? (
@@ -1313,47 +1496,51 @@ function SystemMaintenanceSection() {
                   Expires {formatDate(cert.not_after)}
                 </p>
               ) : null}
-            </div>
+            </InfoTile>
           </div>
-          {cert.error ? (
-            <p className="text-xs text-danger bg-danger/10 border border-danger/20 rounded-lg p-2">
-              {cert.error}
-            </p>
-          ) : null}
-          <div className="bg-surface-900 rounded-lg p-3">
-            <Field label="Restart services">
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <SelectInput
-                  value={restartTarget}
-                  onChange={setRestartTarget}
-                  disabled={restartingServices}
-                  options={[
-                    { value: 'app', label: 'App services' },
-                    { value: 'pictures-sync', label: 'Sync daemon' },
-                    { value: 'webui', label: 'Web UI' },
-                  ]}
-                />
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  loading={restartingServices}
-                  disabled={syncingTime || generatingCert || restartingServices}
-                  onClick={handleRestartServices}
-                >
-                  <Icon name="arrow-path" className="w-4 h-4" />
-                  Restart
-                </Button>
-              </div>
+          {cert.error ? <FormAlert message={cert.error} /> : null}
+
+          <FormGroup title="Services">
+            <Field label="Restart services" hint="App services restart both the sync daemon and the web UI.">
+              {({ id, describedBy }) => (
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <SelectInput
+                    id={id}
+                    describedBy={describedBy}
+                    value={restartTarget}
+                    onChange={setRestartTarget}
+                    disabled={restartingServices}
+                    options={[
+                      { value: 'app', label: 'App services' },
+                      { value: 'pictures-sync', label: 'Sync daemon' },
+                      { value: 'webui', label: 'Web UI' },
+                    ]}
+                  />
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    loading={restartingServices}
+                    disabled={syncingTime || generatingCert || restartingServices}
+                    onClick={handleRestartServices}
+                    className="sm:shrink-0"
+                  >
+                    <Icon name="arrow-path" className="w-4 h-4" aria-hidden="true" />
+                    Restart
+                  </Button>
+                </div>
+              )}
             </Field>
-          </div>
-          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 pt-1">
+          </FormGroup>
+
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 pt-1 border-t border-surface-700/40">
             <Button
               variant="ghost"
               size="sm"
               onClick={fetchStatus}
               disabled={syncingTime || generatingCert}
+              className="mt-3 sm:mt-0"
             >
-              <Icon name="arrow-path" className="w-4 h-4" />
+              <Icon name="arrow-path" className="w-4 h-4" aria-hidden="true" />
               Refresh
             </Button>
             <div className="flex flex-col sm:flex-row sm:items-center gap-2">
@@ -1364,7 +1551,7 @@ function SystemMaintenanceSection() {
                 disabled={generatingCert}
                 onClick={handleSyncTime}
               >
-                <Icon name="clock" className="w-4 h-4" />
+                <Icon name="clock" className="w-4 h-4" aria-hidden="true" />
                 Sync Time
               </Button>
               <Button
@@ -1372,9 +1559,10 @@ function SystemMaintenanceSection() {
                 size="sm"
                 loading={generatingCert}
                 disabled={syncingTime || !timeReady}
+                title={!timeReady ? 'Sync the device time before generating a certificate' : ''}
                 onClick={handleGenerateCert}
               >
-                <Icon name="lock" className="w-4 h-4" />
+                <Icon name="lock" className="w-4 h-4" aria-hidden="true" />
                 Generate Cert
               </Button>
             </div>
@@ -1418,38 +1606,62 @@ function DangerZonePassword() {
     }
   }, [deviceUrl, currentPassword, newPassword, confirmPassword, toast])
 
+  const mismatch = confirmPassword.length > 0 && newPassword !== confirmPassword
+  const tooShort = newPassword.length > 0 && newPassword.length < 8
+
   return (
-    <div className="space-y-1">
+    <div>
       <h4 className="text-xs font-semibold text-surface-300 uppercase tracking-wider mb-3">
         Change Gokrazy Password
       </h4>
       <Field label="Current Password">
-        <PasswordInput
-          value={currentPassword}
-          onChange={setCurrentPassword}
-          placeholder="Current password"
-          disabled={saving}
-        />
+        {({ id, describedBy }) => (
+          <PasswordInput
+            id={id}
+            describedBy={describedBy}
+            value={currentPassword}
+            onChange={setCurrentPassword}
+            placeholder="Current password"
+            disabled={saving}
+          />
+        )}
       </Field>
-      <Field label="New Password" hint="Minimum 8 characters">
-        <PasswordInput
-          value={newPassword}
-          onChange={setNewPassword}
-          placeholder="New password"
-          disabled={saving}
-        />
+      <Field label="New Password" hint={tooShort ? undefined : 'Minimum 8 characters'}>
+        {({ id, describedBy }) => (
+          <>
+            <PasswordInput
+              id={id}
+              describedBy={describedBy}
+              value={newPassword}
+              onChange={setNewPassword}
+              placeholder="New password"
+              disabled={saving}
+            />
+            {tooShort && (
+              <p className="mt-1.5 text-xs text-danger">Must be at least 8 characters.</p>
+            )}
+          </>
+        )}
       </Field>
       <Field label="Confirm New Password">
-        <PasswordInput
-          value={confirmPassword}
-          onChange={setConfirmPassword}
-          placeholder="Confirm new password"
-          disabled={saving}
-        />
+        {({ id }) => (
+          <>
+            <PasswordInput
+              id={id}
+              value={confirmPassword}
+              onChange={setConfirmPassword}
+              placeholder="Confirm new password"
+              disabled={saving}
+            />
+            {mismatch && (
+              <p className="mt-1.5 text-xs text-danger">Passwords do not match.</p>
+            )}
+          </>
+        )}
       </Field>
       <div className="flex justify-end pt-2">
         <Button variant="danger" size="sm" loading={saving} onClick={handleSave}>
-          <Icon name="lock" className="w-4 h-4" />
+          <Icon name="lock" className="w-4 h-4" aria-hidden="true" />
           Change Password
         </Button>
       </div>
@@ -1506,7 +1718,7 @@ function DangerZoneBreakglass() {
   }, [deviceUrl, keys, loadError, toast])
 
   return (
-    <div className="space-y-1">
+    <div>
       <h4 className="text-xs font-semibold text-surface-300 uppercase tracking-wider mb-3">
         Breakglass SSH Keys
       </h4>
@@ -1516,27 +1728,27 @@ function DangerZoneBreakglass() {
         </div>
       ) : (
         <>
-          {loadError ? (
-            <div className="mb-3 rounded-lg border border-danger/20 bg-danger/10 p-3 text-xs text-danger">
-              {loadError}
-            </div>
-          ) : null}
+          {loadError ? <FormAlert message={loadError} /> : null}
           <Field
             label="Authorized Keys"
             hint="One SSH public key per line. These keys allow breakglass SSH access."
           >
-            <textarea
-              value={keys}
-              onChange={(e) => setKeys(e.target.value)}
-              placeholder="ssh-ed25519 AAAA..."
-              disabled={saving || !!loadError}
-              rows={4}
-              className={`${inputClass} resize-y font-mono text-xs`}
-            />
+            {({ id, describedBy }) => (
+              <textarea
+                id={id}
+                aria-describedby={describedBy}
+                value={keys}
+                onChange={(e) => setKeys(e.target.value)}
+                placeholder="ssh-ed25519 AAAA..."
+                disabled={saving || !!loadError}
+                rows={4}
+                className={`${inputClass} min-h-0 resize-y font-mono text-xs leading-relaxed`}
+              />
+            )}
           </Field>
           <div className="flex justify-end pt-2">
             <Button variant="danger" size="sm" loading={saving} disabled={!!loadError} onClick={handleSave}>
-              <Icon name="lock" className="w-4 h-4" />
+              <Icon name="lock" className="w-4 h-4" aria-hidden="true" />
               Save SSH Keys
             </Button>
           </div>
@@ -1548,8 +1760,13 @@ function DangerZoneBreakglass() {
 
 function DangerZoneSection() {
   return (
-    <AccordionSection title="Danger Zone" icon="exclamation-triangle">
-      <div className="space-y-6">
+    <AccordionSection
+      title="Danger Zone"
+      description="Credentials and emergency SSH access"
+      icon="exclamation-triangle"
+      tone="danger"
+    >
+      <div className="rounded-lg border border-danger/20 bg-danger/[0.04] p-4 space-y-6">
         <DangerZonePassword />
         <div className="border-t border-surface-700/50" />
         <DangerZoneBreakglass />
@@ -1565,11 +1782,16 @@ function DangerZoneSection() {
 export default function ConfigPage() {
   return (
     <div className="mx-auto max-w-4xl space-y-0">
-      <div className="mb-6">
-        <h1 className="text-lg font-bold text-surface-50">Configuration</h1>
-        <p className="text-sm text-surface-400 mt-1">
-          Manage storage, sync, security, and update settings
-        </p>
+      <div className="mb-6 flex items-center gap-3">
+        <span className="flex items-center justify-center w-10 h-10 rounded-xl bg-brand-500/10 ring-1 ring-brand-500/20 text-brand-400 shrink-0">
+          <Icon name="settings" className="w-5 h-5" aria-hidden="true" />
+        </span>
+        <div>
+          <h1 className="text-lg font-bold text-surface-50">Configuration</h1>
+          <p className="text-sm text-surface-400 mt-0.5">
+            Manage storage, sync, security, and update settings
+          </p>
+        </div>
       </div>
 
       <RemoteStorageSection />
