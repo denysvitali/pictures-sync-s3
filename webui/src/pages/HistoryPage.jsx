@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
 
 function describeError(err) {
   if (!err) return 'Unknown error'
@@ -14,17 +15,23 @@ function describeError(err) {
   }
   return msg
 }
+
+function formatBytes(bytes) {
+  const n = Number(bytes)
+  if (!Number.isFinite(n) || n <= 0) return null
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(n) / Math.log(1024))
+  return `${(n / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0)} ${units[i]}`
+}
 import { useDevice } from '../DeviceContext.jsx'
 import { getHistory, getStatus } from '../api.js'
-import { Card, CardHeader, CardTitle } from '../components/Card.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
 import { Button } from '../components/Button.jsx'
 import { Icon } from '../components/Icons.jsx'
-import { LoadingSpinner, PageLoader } from '../components/LoadingSpinner.jsx'
+import { Skeleton } from '../components/Skeleton.jsx'
 import { useToast } from '../components/Toast.jsx'
 import { EmptyState } from '../components/EmptyState.jsx'
 import { ErrorState } from '../components/ErrorState.jsx'
-import { Modal } from '../components/Modal.jsx'
 
 function formatTimestamp(ts) {
   if (!ts) return '--'
@@ -90,50 +97,71 @@ const FILTER_TABS = [
   { id: 'failed', label: 'Failed' },
 ]
 
-function HistoryEntry({ entry }) {
+const ICON_TONE = {
+  success: 'bg-success/15 text-success ring-success/20',
+  danger: 'bg-danger/15 text-danger ring-danger/20',
+  info: 'bg-info/15 text-info ring-info/20',
+  neutral: 'bg-surface-700/50 text-surface-400 ring-surface-600/30',
+}
+
+const ACCENT_BORDER = {
+  success: 'before:bg-success/60',
+  danger: 'before:bg-danger/60',
+  info: 'before:bg-info/60',
+  neutral: 'before:bg-surface-600/50',
+}
+
+function MetaStat({ label, value }) {
+  return (
+    <div className="text-right">
+      <div className="text-sm font-medium text-surface-200 tabular-nums">{value}</div>
+      <div className="text-[10px] uppercase tracking-wider text-surface-500">{label}</div>
+    </div>
+  )
+}
+
+function HistoryEntry({ entry, index = 0 }) {
+  const reduceMotion = useReducedMotion()
   const cfg = statusConfig(entry.status)
   const hasError = entry.status === 'failed' || entry.status === 'error'
+  const tone = ICON_TONE[cfg.variant] || ICON_TONE.neutral
+  const accent = ACCENT_BORDER[cfg.variant] || ACCENT_BORDER.neutral
+  const files = entryFileCount(entry)
+  const bytes = formatBytes(entry.bytes_synced)
 
   return (
-    <Card className="min-w-0 overflow-hidden transition-all duration-200 hover:bg-surface-800/80">
+    <motion.div
+      layout={!reduceMotion}
+      initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={reduceMotion ? undefined : { opacity: 0, scale: 0.98 }}
+      transition={{ duration: 0.28, delay: Math.min(index * 0.03, 0.25), ease: 'easeOut' }}
+      className={`group relative min-w-0 overflow-hidden rounded-lg border border-surface-700/60 bg-surface-800/55 p-4 shadow-sm shadow-black/10
+        transition-colors duration-200 hover:border-surface-600/70 hover:bg-surface-800/80
+        before:absolute before:inset-y-0 before:left-0 before:w-1 before:rounded-r ${accent}`}
+    >
       {/* Desktop layout */}
-      <div className="hidden sm:flex items-center gap-4">
-        <div className="flex items-center gap-3 min-w-0 flex-1">
-          <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0
-            ${cfg.variant === 'success' ? 'bg-success/15 text-success' :
-              cfg.variant === 'danger' ? 'bg-danger/15 text-danger' :
-              cfg.variant === 'info' ? 'bg-info/15 text-info' :
-              'bg-surface-700/50 text-surface-400'}`}
-          >
-            <Icon name={cfg.icon} className="w-5 h-5" />
+      <div className="hidden items-center gap-4 sm:flex">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ring-1 ${tone}`}>
+            <Icon name={cfg.icon} className={`w-5 h-5 ${cfg.pulse ? 'motion-safe:animate-spin' : ''}`} aria-hidden="true" />
           </div>
           <div className="min-w-0">
-            <div className="text-sm font-medium text-surface-100 truncate">
+            <div className="truncate text-sm font-medium text-surface-100">
               {formatTimestamp(entryStart(entry))}
             </div>
             {entry.card_id && (
-              <div className="text-xs text-surface-500 truncate">
-                Card: {entry.card_id}
+              <div className="truncate font-mono text-xs text-surface-500">
+                Card {entry.card_id}
               </div>
             )}
           </div>
         </div>
 
-        <div className="flex items-center gap-6 shrink-0">
-          <div className="text-right min-w-[60px]">
-            <div className="text-sm font-medium text-surface-200">
-              {entryFileCount(entry) != null ? entryFileCount(entry).toLocaleString() : '--'}
-            </div>
-            <div className="text-[10px] text-surface-500 uppercase tracking-wider">files</div>
-          </div>
-
-          <div className="text-right min-w-[50px]">
-            <div className="text-sm text-surface-300">
-              {formatDuration(entryDuration(entry))}
-            </div>
-            <div className="text-[10px] text-surface-500 uppercase tracking-wider">time</div>
-          </div>
-
+        <div className="flex shrink-0 items-center gap-6">
+          <MetaStat label="files" value={files != null ? files.toLocaleString() : '--'} />
+          {bytes && <MetaStat label="size" value={bytes} />}
+          <MetaStat label="time" value={formatDuration(entryDuration(entry))} />
           <div className="min-w-[100px]">
             <StatusBadge variant={cfg.variant} pulse={cfg.pulse}>
               {cfg.label}
@@ -145,13 +173,8 @@ function HistoryEntry({ entry }) {
       {/* Mobile layout */}
       <div className="sm:hidden">
         <div className="flex items-start gap-3">
-          <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 mt-0.5
-            ${cfg.variant === 'success' ? 'bg-success/15 text-success' :
-              cfg.variant === 'danger' ? 'bg-danger/15 text-danger' :
-              cfg.variant === 'info' ? 'bg-info/15 text-info' :
-              'bg-surface-700/50 text-surface-400'}`}
-          >
-            <Icon name={cfg.icon} className="w-5 h-5" />
+          <div className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ring-1 ${tone}`}>
+            <Icon name={cfg.icon} className={`w-5 h-5 ${cfg.pulse ? 'motion-safe:animate-spin' : ''}`} aria-hidden="true" />
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center justify-between gap-2">
@@ -163,15 +186,21 @@ function HistoryEntry({ entry }) {
               </StatusBadge>
             </div>
             <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-surface-400">
-              <span className="shrink-0">
-                {entryFileCount(entry) != null ? `${entryFileCount(entry).toLocaleString()} files` : '-- files'}
+              <span className="shrink-0 tabular-nums">
+                {files != null ? `${files.toLocaleString()} files` : '-- files'}
               </span>
-              <span className="text-surface-600">|</span>
-              <span className="shrink-0">{formatDuration(entryDuration(entry))}</span>
+              <span className="text-surface-600" aria-hidden="true">•</span>
+              <span className="shrink-0 tabular-nums">{formatDuration(entryDuration(entry))}</span>
+              {bytes && (
+                <>
+                  <span className="text-surface-600" aria-hidden="true">•</span>
+                  <span className="shrink-0 tabular-nums">{bytes}</span>
+                </>
+              )}
               {entry.card_id && (
                 <>
-                  <span className="text-surface-600">|</span>
-                  <span className="min-w-0 max-w-full truncate">Card {entry.card_id}</span>
+                  <span className="text-surface-600" aria-hidden="true">•</span>
+                  <span className="min-w-0 max-w-full truncate font-mono">Card {entry.card_id}</span>
                 </>
               )}
             </div>
@@ -180,40 +209,43 @@ function HistoryEntry({ entry }) {
       </div>
 
       {hasError && entry.error && (
-        <div className="mt-3 px-3 py-2 rounded-lg bg-danger/10 border border-danger/20">
+        <div className="mt-3 rounded-lg border border-danger/20 bg-danger/10 px-3 py-2">
           <p className="break-words text-xs leading-relaxed text-danger">{entry.error}</p>
         </div>
       )}
-    </Card>
+    </motion.div>
   )
 }
 
-function ClearHistoryModal({ open, onClose, onConfirm, loading }) {
+function SummaryStat({ icon, label, value }) {
   return (
-    <Modal open={open} onClose={onClose} title="Clear History">
-      <div className="space-y-4">
-        <div className="flex items-start gap-3">
-          <Icon name="exclamation-triangle" className="w-5 h-5 text-warning shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm text-surface-200">
-              Are you sure you want to clear all sync history?
-            </p>
-            <p className="text-xs text-surface-500 mt-1">
-              This action cannot be undone. Your synced files will not be affected.
-            </p>
+    <div className="rounded-xl border border-surface-700/50 bg-surface-800/50 px-3 py-2.5">
+      <div className="mb-1 flex items-center gap-1.5">
+        <Icon name={icon} className="h-3.5 w-3.5 text-brand-400" aria-hidden="true" />
+        <span className="truncate text-[10px] uppercase tracking-wider text-surface-500">{label}</span>
+      </div>
+      <p className="truncate text-base font-bold text-surface-100 tabular-nums sm:text-lg">{value}</p>
+    </div>
+  )
+}
+
+function HistorySkeleton() {
+  return (
+    <div className="space-y-2" aria-busy="true" aria-live="polite">
+      <span className="sr-only">Loading sync history…</span>
+      {Array.from({ length: 5 }).map((_, i) => (
+        <div key={i} className="rounded-lg border border-surface-700/60 bg-surface-800/55 p-4">
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-9 w-9 rounded-lg" />
+            <div className="flex-1 space-y-2">
+              <Skeleton className="h-3.5 w-40" />
+              <Skeleton className="h-2.5 w-24" />
+            </div>
+            <Skeleton className="hidden h-6 w-20 rounded-full sm:block" />
           </div>
         </div>
-        <div className="flex justify-end gap-2">
-          <Button variant="secondary" size="sm" onClick={onClose} disabled={loading}>
-            Cancel
-          </Button>
-          <Button variant="danger" size="sm" loading={loading} onClick={onConfirm}>
-            <Icon name="trash" className="w-4 h-4" />
-            Clear History
-          </Button>
-        </div>
-      </div>
-    </Modal>
+      ))}
+    </div>
   )
 }
 
@@ -311,8 +343,34 @@ export default function HistoryPage() {
     failed: history.filter((e) => e.status === 'failed' || e.status === 'error').length,
   }), [history])
 
+  const summary = useMemo(() => {
+    const succeeded = history.filter((e) => e.status === 'success')
+    const totalFiles = succeeded.reduce((sum, e) => sum + (entryFileCount(e) || 0), 0)
+    const totalBytes = history.reduce((sum, e) => sum + (Number(e.bytes_synced) || 0), 0)
+    const successRate = history.length
+      ? Math.round((counts.success / history.length) * 100)
+      : 0
+    return { totalFiles, totalBytes, successRate }
+  }, [history, counts.success])
+
   return (
     <div className="min-w-0 space-y-4">
+      {/* Header */}
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h2 className="text-xl font-bold tracking-tight text-surface-100 sm:text-2xl">Runs</h2>
+          <p className="mt-0.5 text-xs text-surface-500">Every sync the device has performed</p>
+        </div>
+      </div>
+
+      {/* Aggregate summary */}
+      {history.length > 0 && (
+        <div className="grid grid-cols-3 gap-2 sm:gap-3">
+          <SummaryStat icon="image" label="Files synced" value={summary.totalFiles.toLocaleString()} />
+          <SummaryStat icon="arrow-up-tray" label="Data" value={formatBytes(summary.totalBytes) || '0 B'} />
+          <SummaryStat icon="check-circle" label="Success rate" value={`${summary.successRate}%`} />
+        </div>
+      )}
       {/* Toolbar */}
       <div className="sticky sticky-under-header z-20 -mx-3 min-w-0 overflow-x-clip px-3 pb-3 bg-surface-950/95 backdrop-blur-sm border-b border-surface-700/30 sm:-mx-5 sm:px-5 lg:-mx-8 lg:px-8">
         {/* Search + Refresh */}
@@ -320,23 +378,27 @@ export default function HistoryPage() {
           <div className="relative min-w-0 flex-1">
             <Icon
               name="magnifying"
-              className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-500 pointer-events-none"
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-surface-500"
+              aria-hidden="true"
             />
             <input
               type="text"
-              placeholder="Search history..."
+              placeholder="Search runs…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 text-sm bg-surface-800/50 border border-surface-700/50 rounded-lg
-                text-surface-200 placeholder-surface-500 outline-none focus:border-brand-500/50
-                focus:ring-1 focus:ring-brand-500/20 transition-colors"
+              aria-label="Search sync runs"
+              className="w-full rounded-lg border border-surface-700/50 bg-surface-800/50 py-2 pl-9 pr-9 text-sm
+                text-surface-200 outline-none transition-colors placeholder-surface-500
+                focus:border-brand-500/50 focus:ring-2 focus:ring-brand-500/25"
             />
             {search && (
               <button
+                type="button"
                 onClick={() => setSearch('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-surface-500 hover:text-surface-300 transition-colors"
+                aria-label="Clear search"
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded text-surface-500 transition-colors hover:text-surface-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/60"
               >
-                <Icon name="x" className="w-4 h-4" />
+                <Icon name="x" className="w-4 h-4" aria-hidden="true" />
               </button>
             )}
           </div>
@@ -346,69 +408,92 @@ export default function HistoryPage() {
             onClick={() => fetchHistory(true)}
             loading={refreshing}
             className="shrink-0"
+            aria-label="Refresh history"
           >
-            <Icon name="arrow-path" className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+            <Icon name="arrow-path" className="w-4 h-4" aria-hidden="true" />
             <span className="hidden sm:inline">Refresh</span>
           </Button>
         </div>
 
         {/* Filter tabs */}
-        <div className="flex min-w-0 gap-1 rounded-lg bg-surface-800/50 p-1">
-          {FILTER_TABS.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setFilter(tab.id)}
-              className={`flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium sm:px-3
-                transition-all duration-150
-                ${filter === tab.id
-                  ? 'bg-brand-600/20 text-brand-400 shadow-sm'
-                  : 'text-surface-400 hover:text-surface-200 hover:bg-surface-700/50'
-                }`}
-            >
-              <span className="min-w-0 truncate">{tab.label}</span>
-              <span className={`text-[10px] px-1 py-0 rounded-full min-w-[18px]
-                ${filter === tab.id ? 'bg-brand-600/20' : 'bg-surface-700/50'}`}
+        <div className="flex min-w-0 gap-1 rounded-lg bg-surface-800/50 p-1" role="tablist" aria-label="Filter runs">
+          {FILTER_TABS.map((tab) => {
+            const active = filter === tab.id
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setFilter(tab.id)}
+                className={`flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-all duration-150 sm:px-3
+                  focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/60 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950
+                  ${active
+                    ? 'bg-brand-600/20 text-brand-300 shadow-sm'
+                    : 'text-surface-400 hover:bg-surface-700/50 hover:text-surface-200'
+                  }`}
               >
-                {counts[tab.id]}
-              </span>
-            </button>
-          ))}
+                <span className="min-w-0 truncate">{tab.label}</span>
+                <span className={`min-w-[18px] rounded-full px-1 text-[10px] tabular-nums
+                  ${active ? 'bg-brand-500/25 text-brand-200' : 'bg-surface-700/50 text-surface-400'}`}
+                >
+                  {counts[tab.id]}
+                </span>
+              </button>
+            )
+          })}
         </div>
       </div>
 
       {/* Content */}
       {loading ? (
-        <PageLoader />
+        <HistorySkeleton />
       ) : error && history.length === 0 ? (
-        <Card className="text-center py-12">
-          <Icon name="exclamation-triangle" className="w-12 h-12 text-danger mx-auto mb-3" />
-          <p className="text-surface-200 text-sm font-medium">Could not load history</p>
-          <p className="mx-auto mt-2 max-w-md text-xs text-surface-500">{error}</p>
-          <Button variant="secondary" size="sm" className="mt-4" onClick={() => fetchHistory()}>
-            <Icon name="arrow-path" className="w-4 h-4" />
-            Retry
-          </Button>
-        </Card>
+        <div className="py-10">
+          <ErrorState
+            error={error}
+            title="Could not load history"
+            onRetry={() => fetchHistory()}
+          />
+        </div>
       ) : filtered.length === 0 ? (
         history.length === 0 ? (
-          <EmptyState />
+          <div className="py-10">
+            <EmptyState
+              icon="clock"
+              title="No sync history yet"
+              description="Once the device finishes a sync, every run will be listed here with its files, size, and duration."
+              action={{ label: 'Refresh', icon: 'arrow-path', onClick: () => fetchHistory(true) }}
+            />
+          </div>
         ) : (
-          <div className="flex flex-col items-center justify-center py-16 px-4">
-            <div className="w-12 h-12 rounded-xl bg-surface-800/80 border border-surface-700/50 flex items-center justify-center mb-3">
-              <Icon name="magnifying" className="w-6 h-6 text-surface-500" />
+          <div className="flex flex-col items-center justify-center px-4 py-16 text-center">
+            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl border border-surface-700/50 bg-surface-800/80">
+              <Icon name="magnifying" className="h-6 w-6 text-surface-500" aria-hidden="true" />
             </div>
-            <h3 className="text-sm font-semibold text-surface-300 mb-1">No Matching Results</h3>
-            <p className="text-xs text-surface-500 text-center">
-              Try adjusting your filter or search term.
-            </p>
+            <h3 className="mb-1 text-sm font-semibold text-surface-300">No matching results</h3>
+            <p className="text-xs text-surface-500">Try adjusting your filter or search term.</p>
+            {(search || filter !== 'all') && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="mt-3"
+                onClick={() => { setSearch(''); setFilter('all') }}
+              >
+                <Icon name="x" className="w-4 h-4" aria-hidden="true" />
+                Clear filters
+              </Button>
+            )}
           </div>
         )
       ) : (
-        <div className="min-w-0 space-y-2 transition-all duration-200">
-          {filtered.map((entry) => (
-            <HistoryEntry key={entry.id || entry.timestamp} entry={entry} />
-          ))}
-        </div>
+        <motion.div layout className="min-w-0 space-y-2">
+          <AnimatePresence initial={false} mode="popLayout">
+            {filtered.map((entry, i) => (
+              <HistoryEntry key={entry.id || entry.timestamp || entryStart(entry) || i} entry={entry} index={i} />
+            ))}
+          </AnimatePresence>
+        </motion.div>
       )}
     </div>
   )

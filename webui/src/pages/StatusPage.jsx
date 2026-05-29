@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { motion, useReducedMotion } from 'framer-motion'
 import { useDevice } from '../DeviceContext.jsx'
 import { useWebSocket } from '../WebSocketContext.jsx'
 import { useToast } from '../components/Toast.jsx'
@@ -14,13 +15,12 @@ import {
   getSystemPanic,
   clearSystemPanic,
 } from '../api.js'
-import { Card, CardHeader, CardTitle } from '../components/Card.jsx'
+import { CardHeader, CardTitle } from '../components/Card.jsx'
 import { StatusBadge } from '../components/StatusBadge.jsx'
 import { Button } from '../components/Button.jsx'
 import { Icon } from '../components/Icons.jsx'
-import { PageLoader } from '../components/LoadingSpinner.jsx'
+import { Skeleton } from '../components/Skeleton.jsx'
 import { Modal } from '../components/Modal.jsx'
-import { EmptyState } from '../components/EmptyState.jsx'
 import { ErrorState } from '../components/ErrorState.jsx'
 
 const SYNC_STATUS_CONFIG = {
@@ -149,13 +149,18 @@ function getOverviewCardID(status) {
   return null
 }
 
-/* ─── Animated counter hook ─── */
+/* ─── Animated counter hook (respects prefers-reduced-motion) ─── */
 function useAnimatedNumber(target, duration = 600) {
+  const reduceMotion = useReducedMotion()
   const [display, setDisplay] = useState(target)
   const startRef = useRef(null)
   const fromRef = useRef(target)
 
   useEffect(() => {
+    if (reduceMotion) {
+      setDisplay(target)
+      return undefined
+    }
     fromRef.current = display
     startRef.current = null
     let raf
@@ -170,7 +175,7 @@ function useAnimatedNumber(target, duration = 600) {
     }
     raf = requestAnimationFrame(animate)
     return () => cancelAnimationFrame(raf)
-  }, [target, duration])
+  }, [target, duration, reduceMotion])
 
   return display
 }
@@ -179,17 +184,24 @@ function useAnimatedNumber(target, duration = 600) {
 function CircularProgress({ percent, size = 160, stroke = 10, children }) {
   const r = (size - stroke) / 2
   const c = 2 * Math.PI * r
-  const offset = c - (percent / 100) * c
+  const offset = c - (Math.min(100, Math.max(0, percent)) / 100) * c
+  const gradId = `ring-grad-${size}`
 
   return (
     <div className="relative inline-flex items-center justify-center" style={{ width: size, height: size }}>
-      <svg width={size} height={size} className="-rotate-90">
+      <svg width={size} height={size} className="-rotate-90" aria-hidden="true">
+        <defs>
+          <linearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="var(--color-brand-400)" />
+            <stop offset="100%" stopColor="var(--color-brand-600)" />
+          </linearGradient>
+        </defs>
         <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="currentColor" strokeWidth={stroke}
-          className="text-surface-700/60" />
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="currentColor" strokeWidth={stroke}
+          className="text-surface-700/50" />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={`url(#${gradId})`} strokeWidth={stroke}
           strokeLinecap="round"
-          className="text-brand-500 transition-all duration-500"
-          style={{ strokeDasharray: c, strokeDashoffset: offset }} />
+          className="transition-[stroke-dashoffset] duration-500 ease-out"
+          style={{ strokeDasharray: c, strokeDashoffset: offset, filter: 'drop-shadow(0 0 4px rgba(34,211,238,0.35))' }} />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
         {children}
@@ -198,8 +210,22 @@ function CircularProgress({ percent, size = 160, stroke = 10, children }) {
   )
 }
 
+/* ─── Hero stat tile ─── */
+function HeroStat({ icon, label, children }) {
+  return (
+    <div className="rounded-xl bg-surface-950/50 border border-surface-700/40 p-3.5 text-center sm:p-4">
+      <div className="flex items-center justify-center gap-1.5 mb-1">
+        <Icon name={icon} className="w-3.5 h-3.5 text-brand-400" aria-hidden="true" />
+        <span className="text-[10px] text-surface-500 uppercase tracking-wider">{label}</span>
+      </div>
+      <p className="text-lg font-bold text-surface-100 tabular-nums sm:text-xl">{children}</p>
+    </div>
+  )
+}
+
 /* ─── Hero sync progress section ─── */
 function SyncHero({ sync }) {
+  const reduceMotion = useReducedMotion()
   const percent = getProgressPercent(sync)
   const animatedPercent = useAnimatedNumber(percent, 400)
   const animatedFiles = useAnimatedNumber(sync?.files_synced || 0, 400)
@@ -209,84 +235,82 @@ function SyncHero({ sync }) {
   const currentFile = sync?.current_file
 
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-brand-500/20 bg-gradient-to-br from-surface-800/80 to-surface-900/90 p-6 md:p-8">
-      {/* Animated pulse ring */}
-      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <div className="w-40 h-40 rounded-full border border-brand-500/10 animate-ping" style={{ animationDuration: '3s' }} />
-      </div>
-      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <div className="w-56 h-56 rounded-full border border-brand-500/5 animate-ping" style={{ animationDuration: '4s', animationDelay: '1s' }} />
-      </div>
+    <motion.div
+      initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, ease: 'easeOut' }}
+      className="relative overflow-hidden rounded-2xl border border-brand-500/25 bg-gradient-to-br from-surface-800/80 to-surface-900/90 p-5 shadow-lg shadow-brand-500/5 sm:p-6 md:p-8"
+      role="status"
+      aria-live="polite"
+      aria-label={`Sync ${percent}% complete`}
+    >
+      {/* Ambient glow */}
+      <div className="pointer-events-none absolute -top-16 -right-16 h-48 w-48 rounded-full bg-brand-500/10 blur-3xl" aria-hidden="true" />
 
-      <div className="relative flex flex-col md:flex-row items-center gap-6 md:gap-10">
+      {/* Animated pulse rings (suppressed when reduced motion is preferred) */}
+      {!reduceMotion && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none" aria-hidden="true">
+          <div className="w-40 h-40 rounded-full border border-brand-500/10 animate-ping" style={{ animationDuration: '3s' }} />
+          <div className="absolute w-56 h-56 rounded-full border border-brand-500/5 animate-ping" style={{ animationDuration: '4s', animationDelay: '1s' }} />
+        </div>
+      )}
+
+      <div className="relative flex flex-col items-center gap-6 md:flex-row md:gap-10">
         {/* Circular progress */}
         <div className="shrink-0">
           <CircularProgress percent={percent} size={160} stroke={10}>
-            <span className="text-3xl font-bold text-surface-100">{animatedPercent}%</span>
-            <span className="text-xs text-surface-500 mt-0.5">{getProgressLabel(sync)}</span>
+            <span className="text-3xl font-bold text-surface-100 tabular-nums">{animatedPercent}%</span>
+            <span className="mt-1 text-[11px] text-surface-500">{getProgressLabel(sync)}</span>
           </CircularProgress>
         </div>
 
         {/* Stats grid */}
-        <div className="flex-1 w-full">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="rounded-xl bg-surface-900/60 border border-surface-700/40 p-4 text-center">
-              <div className="flex items-center justify-center gap-1.5 mb-1">
-                <Icon name="arrow-up-tray" className="w-4 h-4 text-brand-400" />
-                <span className="text-xs text-surface-500 uppercase tracking-wider">Files</span>
-              </div>
-              <p className="text-xl font-bold text-surface-100">
-                {animatedFiles.toLocaleString()}<span className="text-sm text-surface-500 font-normal"> / {totalFiles.toLocaleString()}</span>
-              </p>
-            </div>
+        <div className="w-full flex-1">
+          <div className="mb-4 flex items-center gap-2">
+            <span className="relative flex h-2.5 w-2.5" aria-hidden="true">
+              {!reduceMotion && (
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-400 opacity-60" style={{ animationDuration: '1.6s' }} />
+              )}
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-brand-400" />
+            </span>
+            <span className="text-xs font-semibold uppercase tracking-wider text-brand-300">Sync in progress</span>
+          </div>
 
-            <div className="rounded-xl bg-surface-900/60 border border-surface-700/40 p-4 text-center">
-              <div className="flex items-center justify-center gap-1.5 mb-1">
-                <Icon name="activity" className="w-4 h-4 text-brand-400" />
-                <span className="text-xs text-surface-500 uppercase tracking-wider">Speed</span>
-              </div>
-              <p className="text-xl font-bold text-surface-100">{speed}</p>
-            </div>
-
-            <div className="rounded-xl bg-surface-900/60 border border-surface-700/40 p-4 text-center">
-              <div className="flex items-center justify-center gap-1.5 mb-1">
-                <Icon name="clock" className="w-4 h-4 text-brand-400" />
-                <span className="text-xs text-surface-500 uppercase tracking-wider">ETA</span>
-              </div>
-              <p className="text-xl font-bold text-surface-100">{eta}</p>
-            </div>
-
-            <div className="rounded-xl bg-surface-900/60 border border-surface-700/40 p-4 text-center">
-              <div className="flex items-center justify-center gap-1.5 mb-1">
-                <Icon name="image" className="w-4 h-4 text-brand-400" />
-                <span className="text-xs text-surface-500 uppercase tracking-wider">Size</span>
-              </div>
-              <p className="text-xl font-bold text-surface-100">{formatBytes(sync?.bytes_synced || 0)}</p>
-            </div>
+          <div className="grid grid-cols-2 gap-3 sm:gap-4">
+            <HeroStat icon="arrow-up-tray" label="Files">
+              {animatedFiles.toLocaleString()}
+              <span className="text-sm font-normal text-surface-500"> / {totalFiles.toLocaleString()}</span>
+            </HeroStat>
+            <HeroStat icon="activity" label="Speed">{speed}</HeroStat>
+            <HeroStat icon="clock" label="ETA">{eta}</HeroStat>
+            <HeroStat icon="image" label="Size">{formatBytes(sync?.bytes_synced || 0)}</HeroStat>
           </div>
 
           {currentFile && (
-            <p className="mt-4 text-xs text-surface-500 truncate text-center md:text-left">
+            <p className="mt-4 truncate text-center font-mono text-[11px] text-surface-500 md:text-left" title={currentFile}>
               {currentFile}
             </p>
           )}
         </div>
       </div>
-    </div>
+    </motion.div>
   )
 }
 
 /* ─── Gradient border card wrapper ─── */
 function GradientCard({ children, className = '', delay = 0 }) {
+  const reduceMotion = useReducedMotion()
   return (
-    <div
-      className={`relative rounded-lg p-[1px] bg-gradient-to-br from-brand-500/20 via-surface-700/40 to-brand-500/10 animate-in fade-in slide-in-from-bottom-2 fill-mode-backwards ${className}`}
-      style={{ animationDelay: `${delay}ms`, animationDuration: '500ms' }}
+    <motion.div
+      initial={reduceMotion ? false : { opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.45, delay: delay / 1000, ease: 'easeOut' }}
+      className={`group relative rounded-lg p-[1px] bg-gradient-to-br from-brand-500/20 via-surface-700/40 to-brand-500/10 ${className}`}
     >
-      <div className="relative bg-surface-800/55 rounded-lg p-4 shadow-sm shadow-black/10 h-full">
+      <div className="relative h-full rounded-lg bg-surface-800/55 p-4 shadow-sm shadow-black/10 transition-colors duration-300 group-hover:bg-surface-800/70">
         {children}
       </div>
-    </div>
+    </motion.div>
   )
 }
 
@@ -309,8 +333,8 @@ function StatusDot({ variant = 'success', pulse = false }) {
     neutral: 'bg-surface-500',
   }
   return (
-    <span className={`relative flex h-2.5 w-2.5 ${pulse ? '' : ''}`}>
-      {pulse && <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${colorMap[variant]} opacity-60`} style={{ animationDuration: '2s' }} />}
+    <span className="relative flex h-2.5 w-2.5">
+      {pulse && <span className={`absolute inline-flex h-full w-full rounded-full opacity-60 motion-safe:animate-ping ${colorMap[variant]}`} style={{ animationDuration: '2s' }} />}
       <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${colorMap[variant]}`} />
     </span>
   )
@@ -334,21 +358,25 @@ function SparklineBar({ percent, variant = 'success' }) {
 
 /* ─── Stat mini-card ─── */
 function StatMiniCard({ icon, label, value, delay = 0 }) {
+  const reduceMotion = useReducedMotion()
   return (
-    <div
-      className="relative overflow-hidden rounded-xl border border-surface-700/40 bg-surface-800/50 p-4 animate-in fade-in slide-in-from-bottom-2 fill-mode-backwards"
-      style={{ animationDelay: `${delay}ms`, animationDuration: '400ms' }}
+    <motion.div
+      initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, delay: delay / 1000, ease: 'easeOut' }}
+      className="group relative overflow-hidden rounded-xl border border-surface-700/40 bg-surface-800/50 p-3.5 transition-colors duration-300 hover:border-brand-500/30 sm:p-4"
     >
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-brand-500/10 flex items-center justify-center shrink-0">
-          <Icon name={icon} className="w-5 h-5 text-brand-400" />
+      <div className="pointer-events-none absolute -right-6 -top-6 h-16 w-16 rounded-full bg-brand-500/5 blur-xl transition-opacity duration-300 group-hover:opacity-100 opacity-0" aria-hidden="true" />
+      <div className="relative flex items-center gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-500/10 text-brand-400 transition-colors duration-300 group-hover:bg-brand-500/20">
+          <Icon name={icon} className="w-5 h-5" aria-hidden="true" />
         </div>
         <div className="min-w-0">
-          <p className="text-xs text-surface-500 uppercase tracking-wider">{label}</p>
-          <p className="text-sm font-bold text-surface-100 truncate">{value}</p>
+          <p className="text-[10px] uppercase tracking-wider text-surface-500">{label}</p>
+          <p className="truncate text-sm font-bold text-surface-100 tabular-nums">{value}</p>
         </div>
       </div>
-    </div>
+    </motion.div>
   )
 }
 
@@ -794,9 +822,12 @@ function SyncHistoryCard({ history }) {
             <CardTitle>Recent Syncs</CardTitle>
           </div>
         </CardHeader>
-        <div className="text-center py-6">
-          <Icon name="clock" className="w-8 h-8 text-surface-600 mx-auto mb-2" />
-          <p className="text-sm text-surface-400">No sync history yet</p>
+        <div className="flex flex-col items-center justify-center py-8 text-center" role="status">
+          <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-500/15 to-brand-700/5 border border-brand-400/10">
+            <Icon name="clock" className="h-7 w-7 text-brand-400 float-animation" aria-hidden="true" />
+          </div>
+          <p className="text-sm font-medium text-surface-300">No syncs yet</p>
+          <p className="mt-1 text-xs text-surface-500">Completed syncs will appear here</p>
         </div>
       </GradientCard>
     )
@@ -834,46 +865,78 @@ function SyncHistoryCard({ history }) {
               : '--'
 
             return (
-              <div
+              <TimelineEntry
                 key={entry.id || i}
-                className="flex items-start gap-3 py-2.5 px-1 relative"
-              >
-                {/* Timeline dot */}
-                <div className="relative z-10 mt-1.5 shrink-0">
-                  <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${entryStatus.variant === 'success' ? 'border-success bg-success/20' : entryStatus.variant === 'danger' ? 'border-danger bg-danger/20' : entryStatus.variant === 'warning' ? 'border-warning bg-warning/20' : 'border-surface-500 bg-surface-800'}`}>
-                    <div className={`w-1.5 h-1.5 rounded-full ${entryStatus.variant === 'success' ? 'bg-success' : entryStatus.variant === 'danger' ? 'bg-danger' : entryStatus.variant === 'warning' ? 'bg-warning' : 'bg-surface-500'}`} />
-                  </div>
-                </div>
-
-                <div className="flex-1 min-w-0 rounded-lg bg-surface-900/30 px-3 py-2.5">
-                  <div className="flex items-center gap-2 mb-1 flex-wrap">
-                    <StatusBadge variant={entryStatus.variant}>
-                      {entry.status}
-                    </StatusBadge>
-                    <span className="text-xs text-surface-500" title={exactTime}>
-                      {formatTimeAgo(entry.start_time)}
-                    </span>
-                    <SparklineBar percent={completion} variant={entryStatus.variant} />
-                  </div>
-                  <p className="text-sm text-surface-300">
-                    {entry.files_synced || 0} files synced
-                    {duration != null && (
-                      <span className="text-surface-500"> in {formatDuration(duration)}</span>
-                    )}
-                    {entry.bytes_synced > 0 && (
-                      <span className="text-surface-500"> · {formatBytes(entry.bytes_synced)}</span>
-                    )}
-                  </p>
-                  {entry.error && (
-                    <p className="text-xs text-danger mt-1 truncate">{entry.error}</p>
-                  )}
-                </div>
-              </div>
+                index={i}
+                entryStatus={entryStatus}
+                exactTime={exactTime}
+                entry={entry}
+                completion={completion}
+                duration={duration}
+              />
             )
           })}
         </div>
       </div>
     </GradientCard>
+  )
+}
+
+/* ─── Single timeline entry with staggered entrance ─── */
+const TIMELINE_DOT = {
+  success: 'border-success bg-success/20',
+  danger: 'border-danger bg-danger/20',
+  warning: 'border-warning bg-warning/20',
+}
+const TIMELINE_CORE = {
+  success: 'bg-success',
+  danger: 'bg-danger',
+  warning: 'bg-warning',
+}
+
+function TimelineEntry({ index, entryStatus, exactTime, entry, completion, duration }) {
+  const reduceMotion = useReducedMotion()
+  const dotClass = TIMELINE_DOT[entryStatus.variant] || 'border-surface-500 bg-surface-800'
+  const coreClass = TIMELINE_CORE[entryStatus.variant] || 'bg-surface-500'
+
+  return (
+    <motion.div
+      initial={reduceMotion ? false : { opacity: 0, x: -6 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ duration: 0.3, delay: Math.min(index * 0.05, 0.3), ease: 'easeOut' }}
+      className="relative flex items-start gap-3 px-1 py-1.5"
+    >
+      {/* Timeline dot */}
+      <div className="relative z-10 mt-3 shrink-0">
+        <div className={`flex h-5 w-5 items-center justify-center rounded-full border-2 ${dotClass}`}>
+          <div className={`h-1.5 w-1.5 rounded-full ${coreClass}`} />
+        </div>
+      </div>
+
+      <div className="min-w-0 flex-1 rounded-lg border border-transparent bg-surface-900/30 px-3 py-2.5 transition-colors duration-200 hover:border-surface-700/60 hover:bg-surface-900/50">
+        <div className="mb-1 flex flex-wrap items-center gap-2">
+          <StatusBadge variant={entryStatus.variant} size="sm">
+            {entry.status}
+          </StatusBadge>
+          <span className="text-xs text-surface-500" title={exactTime}>
+            {formatTimeAgo(entry.start_time)}
+          </span>
+          <SparklineBar percent={completion} variant={entryStatus.variant} />
+        </div>
+        <p className="text-sm text-surface-300">
+          <span className="font-medium text-surface-100 tabular-nums">{(entry.files_synced || 0).toLocaleString()}</span> files synced
+          {duration != null && (
+            <span className="text-surface-500"> in {formatDuration(duration)}</span>
+          )}
+          {entry.bytes_synced > 0 && (
+            <span className="text-surface-500"> · {formatBytes(entry.bytes_synced)}</span>
+          )}
+        </p>
+        {entry.error && (
+          <p className="mt-1 truncate text-xs text-danger" title={entry.error}>{entry.error}</p>
+        )}
+      </div>
+    </motion.div>
   )
 }
 
@@ -887,16 +950,14 @@ function PanicInfoCard({ panicInfo, onClear, clearing }) {
   const title = records.length === 1 ? 'Saved Panic' : 'Saved Panics'
 
   return (
-    <div
-      className="relative rounded-lg border-l-4 border-l-danger border-y border-r border-surface-700/60 bg-surface-800/55 shadow-sm shadow-black/10 animate-in fade-in slide-in-from-bottom-2 fill-mode-backwards"
-      style={{ animationDelay: '0ms', animationDuration: '400ms' }}
-    >
-      <div className="p-4">
+    <div className="relative overflow-hidden rounded-lg border-y border-r border-l-4 border-surface-700/60 border-l-danger bg-surface-800/55 shadow-sm shadow-black/10">
+      <div className="pointer-events-none absolute -left-10 top-0 h-full w-24 bg-danger/5 blur-2xl" aria-hidden="true" />
+      <div className="relative p-4">
         <div className="flex items-center justify-between gap-3 mb-3">
           <div className="flex items-center gap-2">
             <div className="relative">
-              <Icon name="exclamation-triangle" className="w-5 h-5 text-danger" />
-              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-danger animate-ping" style={{ animationDuration: '2s' }} />
+              <Icon name="exclamation-triangle" className="w-5 h-5 text-danger" aria-hidden="true" />
+              <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-danger motion-safe:animate-ping" style={{ animationDuration: '2s' }} />
             </div>
             <h3 className="text-sm font-semibold text-surface-200 uppercase tracking-wide">{title}</h3>
             <span className="rounded-full bg-danger/10 px-2 py-0.5 text-xs font-medium text-danger">
@@ -953,8 +1014,13 @@ function PanicRecord({ record }) {
             size="sm"
             onClick={() => setExpanded((v) => !v)}
             className="text-xs"
+            aria-expanded={expanded}
           >
-            <Icon name={expanded ? 'arrow-down' : 'chevron-right'} className="w-3 h-3" />
+            <Icon
+              name="chevron-right"
+              className={`w-3 h-3 transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`}
+              aria-hidden="true"
+            />
             {expanded ? 'Hide stack trace' : 'Show stack trace'}
           </Button>
           {expanded && (
@@ -1061,7 +1127,7 @@ function ConnectionIndicator({ wsConnected, wsError }) {
     return (
       <div className="flex items-center gap-1.5 rounded-full bg-success/10 border border-success/30 px-2.5 py-1">
         <span className="relative flex h-2 w-2">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-60" style={{ animationDuration: '2s' }} />
+          <span className="absolute inline-flex h-full w-full rounded-full bg-success opacity-60 motion-safe:animate-ping" style={{ animationDuration: '2s' }} />
           <span className="relative inline-flex rounded-full h-2 w-2 bg-success" />
         </span>
         <span className="text-[11px] font-medium text-success uppercase tracking-wider">Live</span>
@@ -1072,7 +1138,7 @@ function ConnectionIndicator({ wsConnected, wsError }) {
     return (
       <div className="flex items-center gap-1.5 rounded-full bg-danger/10 border border-danger/30 px-2.5 py-1">
         <span className="relative flex h-2 w-2">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-danger opacity-60" style={{ animationDuration: '2s' }} />
+          <span className="absolute inline-flex h-full w-full rounded-full bg-danger opacity-60 motion-safe:animate-ping" style={{ animationDuration: '2s' }} />
           <span className="relative inline-flex rounded-full h-2 w-2 bg-danger" />
         </span>
         <span className="text-[11px] font-medium text-danger uppercase tracking-wider">Offline</span>
@@ -1174,6 +1240,48 @@ function FormatSDCardModal({ open, onClose, devicePath, onConfirm, loading }) {
         </div>
       </form>
     </Modal>
+  )
+}
+
+/* ─── Layout-matching loading skeleton ─── */
+function SkeletonGradientCard() {
+  return (
+    <div className="rounded-lg p-[1px] bg-gradient-to-br from-brand-500/15 via-surface-700/40 to-brand-500/5">
+      <div className="space-y-4 rounded-lg bg-surface-800/55 p-4 shadow-sm shadow-black/10">
+        <div className="flex items-center gap-2.5">
+          <Skeleton className="h-9 w-9 rounded-xl" />
+          <Skeleton className="h-4 w-32" />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Skeleton className="h-12 w-full rounded-lg" />
+          <Skeleton className="h-12 w-full rounded-lg" />
+          <Skeleton className="h-12 w-full rounded-lg" />
+          <Skeleton className="h-12 w-full rounded-lg" />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function StatusSkeleton() {
+  return (
+    <div className="space-y-4" aria-busy="true" aria-live="polite">
+      <span className="sr-only">Loading device status…</span>
+      <div className="flex items-center justify-between">
+        <Skeleton className="h-6 w-40" />
+        <Skeleton className="h-8 w-24 rounded-lg" />
+      </div>
+      <Skeleton className="h-12 w-full rounded-lg" />
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Skeleton key={i} className="h-16 w-full rounded-xl" />
+        ))}
+      </div>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <SkeletonGradientCard />
+        <SkeletonGradientCard />
+      </div>
+    </div>
   )
 }
 
@@ -1388,22 +1496,17 @@ export default function StatusPage() {
   }, [deviceUrl, toast])
 
   if (loading && !status) {
-    return <PageLoader />
+    return <StatusSkeleton />
   }
 
   if (error && !status) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[50vh] text-center px-4">
-        <Icon name="exclamation-triangle" className="w-12 h-12 text-danger mb-4" />
-        <h2 className="text-lg font-semibold text-surface-200 mb-2">Connection Error</h2>
-        <p className="text-sm text-surface-400 mb-2 max-w-xs">{error}</p>
-        <p className="text-xs text-surface-500 mb-4 max-w-xs">
-          Make sure the device is powered on, connected to the network, and the web server is running.
-        </p>
-        <Button variant="secondary" onClick={() => fetchData()}>
-          <Icon name="arrow-path" className="w-4 h-4" />
-          Try Again
-        </Button>
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <ErrorState
+          error={error}
+          title="Can't reach the device"
+          onRetry={() => fetchData()}
+        />
       </div>
     )
   }
@@ -1415,7 +1518,7 @@ export default function StatusPage() {
       {/* Header with connection indicator */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <h2 className="text-lg font-semibold text-surface-100">Overview</h2>
+          <h2 className="text-xl font-bold tracking-tight text-surface-100 sm:text-2xl">Overview</h2>
           <ConnectionIndicator wsConnected={wsConnected} wsError={wsError} />
         </div>
         <Button
