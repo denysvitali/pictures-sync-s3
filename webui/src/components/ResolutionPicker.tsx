@@ -1,3 +1,5 @@
+import { motion, useReducedMotion } from 'framer-motion'
+
 interface ResolutionSpec {
   key: string
   label: string
@@ -46,54 +48,86 @@ interface ResolutionPickerProps {
   onChange: (next: ResolutionValue) => void
 }
 
+interface SegmentProps {
+  label: string
+  active: boolean
+  disabled?: boolean
+  reduceMotion: boolean
+  onSelect: () => void
+}
+
+function Segment({ label, active, disabled = false, reduceMotion, onSelect }: SegmentProps) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      disabled={disabled}
+      onClick={() => !disabled && onSelect()}
+      className={`relative rounded-md px-3 py-1 text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/70 focus-visible:ring-offset-1 focus-visible:ring-offset-surface-900 ${
+        active
+          ? 'text-brand-200'
+          : disabled
+            ? 'text-surface-500 cursor-not-allowed'
+            : 'text-surface-400 hover:text-surface-100'
+      } ${disabled ? 'opacity-40' : ''}`}
+    >
+      {active && (
+        <motion.span
+          layoutId="resolution-active-pill"
+          className="absolute inset-0 rounded-md border border-brand-400/30 bg-brand-500/20 shadow-sm shadow-brand-500/10"
+          transition={
+            reduceMotion
+              ? { duration: 0 }
+              : { type: 'spring', stiffness: 500, damping: 36 }
+          }
+        />
+      )}
+      <span className="relative z-10">{label}</span>
+    </button>
+  )
+}
+
 function ResolutionPicker({ value, rangeSeconds, onChange }: ResolutionPickerProps) {
+  const reduceMotion = useReducedMotion() ?? false
   const effectiveSeconds: number =
     value === 'auto' ? autoResolution(rangeSeconds) : value
   const estimatedPoints = rangeSeconds && effectiveSeconds
     ? Math.max(1, Math.round(rangeSeconds / effectiveSeconds))
     : 0
+  const autoLabel = RESOLUTIONS.find((r) => r.seconds === effectiveSeconds)?.label || `${effectiveSeconds}s`
 
   return (
-    <div className="flex max-w-full flex-col gap-1">
-      <div className="flex max-w-full flex-wrap items-center gap-1.5 rounded-lg bg-surface-800/60 p-1">
-        <button
-          type="button"
-          aria-pressed={value === 'auto'}
-          onClick={() => onChange('auto')}
-          className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
-            value === 'auto'
-              ? 'bg-brand-500/20 text-brand-300'
-              : 'text-surface-400 hover:text-surface-200'
-          }`}
-        >
-          Auto
-        </button>
+    <div className="flex max-w-full flex-col gap-1.5">
+      <div className="flex max-w-full flex-wrap items-center gap-0.5 rounded-lg border border-surface-700/60 bg-surface-900/50 p-1">
+        <Segment
+          label="Auto"
+          active={value === 'auto'}
+          reduceMotion={reduceMotion}
+          onSelect={() => onChange('auto')}
+        />
+        <span className="mx-0.5 h-4 w-px shrink-0 bg-surface-700/70" aria-hidden="true" />
         {RESOLUTIONS.map((r) => {
           const active = value === r.seconds
           const tooFine = Boolean(rangeSeconds && rangeSeconds / r.seconds > MAX_POINTS)
           return (
-            <button
+            <Segment
               key={r.key}
-              type="button"
-              aria-pressed={active}
+              label={r.label}
+              active={active}
               disabled={tooFine}
-              onClick={() => !tooFine && onChange(r.seconds)}
-              className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
-                active
-                  ? 'bg-brand-500/20 text-brand-300'
-                  : 'text-surface-400 hover:text-surface-200'
-              } ${tooFine ? 'opacity-40 cursor-not-allowed hover:text-surface-400' : ''}`}
-            >
-              {r.label}
-            </button>
+              reduceMotion={reduceMotion}
+              onSelect={() => onChange(r.seconds)}
+            />
           )
         })}
       </div>
-      <div className="px-1 text-[10px] text-surface-500">
-        ≈ {formatPoints(estimatedPoints)} points
+      <div className="flex items-center gap-1.5 px-1 text-[10px] text-surface-500">
+        <span className="inline-block h-1 w-1 rounded-full bg-brand-400/60" aria-hidden="true" />
+        <span className="tabular-nums text-surface-400">≈ {formatPoints(estimatedPoints)}</span>
+        <span>data points</span>
         {value === 'auto' && effectiveSeconds && (
-          <span className="ml-1 text-surface-600">
-            ({RESOLUTIONS.find((r) => r.seconds === effectiveSeconds)?.label || `${effectiveSeconds}s`})
+          <span className="rounded bg-surface-800/80 px-1.5 py-0.5 font-medium text-surface-400">
+            {autoLabel}
           </span>
         )}
       </div>
