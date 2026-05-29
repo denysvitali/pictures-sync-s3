@@ -19,12 +19,12 @@ function computeTrend(
 }
 
 const pillClasses: Record<Direction, string> = {
-  up: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30',
-  down: 'bg-rose-500/15 text-rose-300 border border-rose-500/30',
-  flat: 'bg-surface-700/40 text-surface-400 border border-surface-700/60',
+  up: 'bg-emerald-500/15 text-emerald-300 ring-1 ring-inset ring-emerald-500/30',
+  down: 'bg-rose-500/15 text-rose-300 ring-1 ring-inset ring-rose-500/30',
+  flat: 'bg-surface-700/40 text-surface-400 ring-1 ring-inset ring-surface-600/50',
 }
 
-const arrows: Record<Direction, string> = { up: '▲', down: '▼', flat: '–' }
+const trendWord: Record<Direction, string> = { up: 'increased', down: 'decreased', flat: 'steady' }
 
 interface MetricCardProps {
   title: string
@@ -37,6 +37,28 @@ interface MetricCardProps {
   trend?: Direction
   hint?: string
   className?: string
+}
+
+function TrendArrow({ direction }: { direction: Direction }) {
+  if (direction === 'flat') {
+    return (
+      <svg viewBox="0 0 12 12" className="h-3 w-3" fill="none" aria-hidden="true">
+        <path d="M2.5 6h7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    )
+  }
+  const up = direction === 'up'
+  return (
+    <svg viewBox="0 0 12 12" className="h-3 w-3" fill="none" aria-hidden="true">
+      <path
+        d={up ? 'M6 9.5V2.5M6 2.5 3 5.5M6 2.5 9 5.5' : 'M6 2.5v7M6 9.5 3 6.5M6 9.5 9 6.5'}
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
 }
 
 export function MetricCard({
@@ -68,33 +90,49 @@ export function MetricCard({
       : `${pct > 0 ? '+' : ''}${pct.toFixed(pct >= 10 || pct <= -10 ? 0 : 1)}%`
 
   return (
-    <Card className={className}>
-      <div className="flex items-start justify-between gap-2">
-        <span className="text-xs uppercase tracking-wide text-surface-500">{title}</span>
-        {hint && <span className="text-[10px] text-surface-500">{hint}</span>}
+    <Card glow className={`relative overflow-hidden ${className}`}>
+      {/* Accent edge tinted by the series color. */}
+      <span
+        className="pointer-events-none absolute inset-y-0 left-0 w-1"
+        style={{ background: `linear-gradient(to bottom, ${color}, transparent)` }}
+        aria-hidden="true"
+      />
+
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-surface-400">
+          <span
+            className="inline-block h-2 w-2 rounded-full"
+            style={{ backgroundColor: color }}
+            aria-hidden="true"
+          />
+          {title}
+        </span>
+        {hint && (
+          <span className="truncate text-[10px] text-surface-500" title={hint}>
+            {hint}
+          </span>
+        )}
       </div>
 
-      <div className="mt-2 flex items-end justify-between gap-3">
-        <div className="flex flex-col min-w-0">
-          <div className="flex items-baseline gap-1.5 flex-wrap">
-            <span className="text-2xl font-semibold text-surface-200 tabular-nums leading-none">
+      <div className="mt-3 flex items-end justify-between gap-3">
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <div className="flex items-baseline gap-1">
+            <span className="text-3xl font-semibold leading-none tracking-tight text-surface-100 tabular-nums">
               {displayValue}
             </span>
-            {!formatValue && unit && (
-              <span className="text-sm text-surface-500">{unit}</span>
-            )}
-            <span
-              className={`inline-flex items-center gap-0.5 text-xs rounded-md px-1.5 py-0.5 ${pillClasses[direction]}`}
-              aria-label={`change ${pctLabel}`}
-            >
-              <span aria-hidden="true">{arrows[direction]}</span>
-              <span>{pctLabel}</span>
-            </span>
+            {!formatValue && unit && <span className="text-sm text-surface-500">{unit}</span>}
           </div>
+          <span
+            className={`inline-flex w-fit items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium tabular-nums ${pillClasses[direction]}`}
+          >
+            <TrendArrow direction={direction} />
+            <span>{pctLabel}</span>
+            <span className="sr-only"> {trendWord[direction]} over range</span>
+          </span>
         </div>
 
-        <div className="shrink-0 w-2/5 flex justify-end" style={{ color }}>
-          <Sparkline data={data} valueKey={valueKey} color={color} width={120} height={32} />
+        <div className="flex shrink-0 basis-[44%] justify-end pb-0.5" style={{ color }}>
+          <Sparkline data={data} valueKey={valueKey} color={color} width={130} height={40} />
         </div>
       </div>
     </Card>

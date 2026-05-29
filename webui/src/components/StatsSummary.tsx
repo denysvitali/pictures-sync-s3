@@ -27,6 +27,13 @@ interface StatsSummaryProps {
   valueKey?: string
   formatValue?: (v: number | undefined) => string
   className?: string
+  accent?: string
+}
+
+interface Item {
+  label: string
+  value: number | undefined
+  highlight?: boolean
 }
 
 export function StatsSummary({
@@ -34,6 +41,7 @@ export function StatsSummary({
   valueKey = 'value',
   formatValue = defaultFormat,
   className = '',
+  accent,
 }: StatsSummaryProps) {
   const values = (Array.isArray(data) ? data : [])
     .map((d) => Number(d?.[valueKey]))
@@ -41,22 +49,43 @@ export function StatsSummary({
 
   const stats = computeStats(values)
 
-  const items: Array<{ label: string; value: number | undefined }> = [
+  const items: Item[] = [
     { label: 'Min', value: stats?.min },
-    { label: 'Max', value: stats?.max },
     { label: 'Avg', value: stats?.avg },
     { label: 'p95', value: stats?.p95 },
-    { label: 'Current', value: stats?.current },
+    { label: 'Max', value: stats?.max },
+    { label: 'Current', value: stats?.current, highlight: true },
   ]
 
   return (
     <dl
-      className={`grid grid-cols-5 gap-2 rounded-md border border-surface-700/60 bg-surface-800/55 p-2 ${className}`}
+      className={`grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-surface-700/60 bg-surface-700/40 sm:grid-cols-5 ${className}`}
     >
       {items.map((item) => (
-        <div key={item.label} className="flex flex-col items-start min-w-0">
-          <dt className="text-xs uppercase tracking-wide text-surface-500">{item.label}</dt>
-          <dd className="text-sm font-medium text-surface-200 tabular-nums truncate w-full">
+        <div
+          key={item.label}
+          className={`flex flex-col gap-1 px-3 py-2 ${
+            item.highlight ? 'bg-surface-800/90' : 'bg-surface-800/55'
+          }`}
+        >
+          <dt className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-surface-500">
+            {item.highlight && accent && (
+              <span
+                className="inline-block h-1.5 w-1.5 rounded-full"
+                style={{ backgroundColor: accent }}
+                aria-hidden="true"
+              />
+            )}
+            {item.label}
+          </dt>
+          <dd
+            className={`w-full truncate tabular-nums ${
+              item.highlight
+                ? 'text-sm font-semibold text-surface-100'
+                : 'text-sm font-medium text-surface-300'
+            }`}
+            title={stats ? formatValue(item.value) : undefined}
+          >
             {stats ? formatValue(item.value) : '—'}
           </dd>
         </div>

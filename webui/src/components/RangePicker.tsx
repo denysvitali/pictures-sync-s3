@@ -49,6 +49,9 @@ interface RangePickerProps {
   onChange: (next: RangeValue) => void
 }
 
+const segmentBase =
+  'relative rounded-md px-3 py-1.5 text-xs font-medium tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/70 focus-visible:ring-offset-1 focus-visible:ring-offset-surface-900'
+
 function RangePicker({ value, onChange }: RangePickerProps) {
   const isCustom = value?.preset === 'custom'
   const [open, setOpen] = useState(false)
@@ -71,8 +74,15 @@ function RangePicker({ value, onChange }: RangePickerProps) {
         setOpen(false)
       }
     }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false)
+    }
     document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
+    document.addEventListener('keydown', handleKey)
+    return () => {
+      document.removeEventListener('mousedown', handleClick)
+      document.removeEventListener('keydown', handleKey)
+    }
   }, [open])
 
   function selectPreset(key: string) {
@@ -105,7 +115,11 @@ function RangePicker({ value, onChange }: RangePickerProps) {
   }
 
   return (
-    <div className="relative flex max-w-full flex-wrap items-center gap-1.5 rounded-lg bg-surface-800/60 p-1">
+    <div
+      className="relative flex max-w-full flex-wrap items-center gap-1 rounded-lg border border-surface-700/60 bg-surface-800/60 p-1 shadow-sm shadow-black/10"
+      role="group"
+      aria-label="Time range"
+    >
       {PRESETS.map((p) => {
         const active = value?.preset === p.key
         return (
@@ -114,56 +128,70 @@ function RangePicker({ value, onChange }: RangePickerProps) {
             type="button"
             aria-pressed={active}
             onClick={() => selectPreset(p.key)}
-            className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+            className={`${segmentBase} ${
               active
-                ? 'bg-brand-500/20 text-brand-300'
-                : 'text-surface-400 hover:text-surface-200'
+                ? 'bg-brand-500/20 text-brand-200 ring-1 ring-inset ring-brand-400/40'
+                : 'text-surface-400 hover:bg-surface-700/50 hover:text-surface-100'
             }`}
           >
             {p.label}
           </button>
         )
       })}
+
+      <span className="mx-0.5 h-4 w-px bg-surface-700/70" aria-hidden="true" />
+
       <button
         type="button"
         aria-pressed={isCustom}
         aria-expanded={open}
+        aria-haspopup="dialog"
         onClick={() => setOpen((v) => !v)}
-        className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+        className={`${segmentBase} inline-flex items-center gap-1 ${
           isCustom
-            ? 'bg-brand-500/20 text-brand-300'
-            : 'text-surface-400 hover:text-surface-200'
+            ? 'bg-brand-500/20 text-brand-200 ring-1 ring-inset ring-brand-400/40'
+            : 'text-surface-400 hover:bg-surface-700/50 hover:text-surface-100'
         }`}
       >
-        Custom…
+        <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" aria-hidden="true">
+          <rect x="2.5" y="3" width="11" height="10.5" rx="1.5" stroke="currentColor" strokeWidth="1.3" />
+          <path d="M2.5 6h11M5.5 1.75v2.5M10.5 1.75v2.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+        </svg>
+        Custom
       </button>
 
       {open && (
         <div
           ref={popoverRef}
-          className="absolute right-0 top-full z-20 mt-2 w-72 rounded-lg border border-surface-700 bg-surface-900 p-3 shadow-xl"
+          role="dialog"
+          aria-label="Custom time range"
+          className="absolute right-0 top-full z-20 mt-2 w-72 rounded-xl border border-surface-700/80 bg-surface-900/95 p-3.5 shadow-2xl shadow-black/40 backdrop-blur"
         >
-          <div className="space-y-2">
-            <label className="block text-xs font-medium text-surface-300">
+          <div className="space-y-2.5">
+            <p className="text-xs font-semibold text-surface-200">Custom range</p>
+            <label className="block text-[11px] font-medium uppercase tracking-wide text-surface-400">
               From
               <input
                 type="datetime-local"
                 value={fromStr}
                 onChange={(e) => setFromStr(e.target.value)}
-                className="mt-1 w-full rounded-md border border-surface-700 bg-surface-800 px-2 py-1 text-xs text-surface-200 focus:border-brand-500 focus:outline-none"
+                className="mt-1 w-full rounded-md border border-surface-700 bg-surface-800 px-2 py-1.5 text-xs text-surface-100 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/50 [color-scheme:dark]"
               />
             </label>
-            <label className="block text-xs font-medium text-surface-300">
+            <label className="block text-[11px] font-medium uppercase tracking-wide text-surface-400">
               To
               <input
                 type="datetime-local"
                 value={toStr}
                 onChange={(e) => setToStr(e.target.value)}
-                className="mt-1 w-full rounded-md border border-surface-700 bg-surface-800 px-2 py-1 text-xs text-surface-200 focus:border-brand-500 focus:outline-none"
+                className="mt-1 w-full rounded-md border border-surface-700 bg-surface-800 px-2 py-1.5 text-xs text-surface-100 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/50 [color-scheme:dark]"
               />
             </label>
             {err && (
-              <div className="rounded-md border border-red-500/20 bg-red-500/10 px-2 py-1 text-xs text-red-400">
+              <div
+                role="alert"
+                className="rounded-md border border-danger/25 bg-danger/10 px-2 py-1.5 text-xs text-danger"
+              >
                 {err}
               </div>
             )}
@@ -171,14 +199,14 @@ function RangePicker({ value, onChange }: RangePickerProps) {
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="rounded-md px-3 py-1 text-xs font-medium text-surface-400 hover:text-surface-200"
+                className="rounded-md px-3 py-1.5 text-xs font-medium text-surface-400 transition-colors hover:bg-surface-800 hover:text-surface-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-surface-400/60"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={applyCustom}
-                className="rounded-md bg-brand-500/20 px-3 py-1 text-xs font-medium text-brand-300 hover:bg-brand-500/30"
+                className="rounded-md bg-brand-500/20 px-3 py-1.5 text-xs font-medium text-brand-200 ring-1 ring-inset ring-brand-400/40 transition-colors hover:bg-brand-500/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400/70"
               >
                 Apply
               </button>
