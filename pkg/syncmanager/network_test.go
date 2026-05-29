@@ -1023,54 +1023,6 @@ endpoint = %s
 }
 
 // TestSummary generates a summary report of all network bugs found
-func TestSummary(t *testing.T) {
-	t.Log("")
-	t.Log("╔═══════════════════════════════════════════════════════════════╗")
-	t.Log("║          NETWORK RESILIENCE BUG REPORT SUMMARY               ║")
-	t.Log("╚═══════════════════════════════════════════════════════════════╝")
-	t.Log("")
-	t.Log("CRITICAL BUGS (Immediate attention required):")
-	t.Log("  1. No retry mechanism for transient network failures")
-	t.Log("     Risk: Single network hiccup causes complete sync failure")
-	t.Log("     Fix: Implement exponential backoff retry wrapper")
-	t.Log("")
-	t.Log("  2. No timeout configuration")
-	t.Log("     Risk: Sync can hang indefinitely on network issues")
-	t.Log("     Fix: Add context.WithTimeout() and configure rclone timeouts")
-	t.Log("")
-	t.Log("  3. GetRemoteSize() returns 0 on error")
-	t.Log("     Risk: Data corruption from incorrect resume state")
-	t.Log("     Fix: Return error instead of 0 when remote check fails")
-	t.Log("")
-	t.Log("HIGH PRIORITY BUGS:")
-	t.Log("  4. Cancel during network error leaves inconsistent state")
-	t.Log("     Risk: Prevents future sync attempts until reboot")
-	t.Log("")
-	t.Log("  5. No progress channel cleanup mechanism")
-	t.Log("     Risk: Memory leak on repeated WebSocket disconnects")
-	t.Log("")
-	t.Log("MEDIUM PRIORITY BUGS:")
-	t.Log("  6. No HTTP transport configuration")
-	t.Log("     Risk: Connection pool exhaustion on long syncs")
-	t.Log("")
-	t.Log("  7. No DNS failure retry")
-	t.Log("     Risk: First sync after boot may fail needlessly")
-	t.Log("")
-	t.Log("LOW PRIORITY ISSUES:")
-	t.Log("  8. No proxy configuration UI")
-	t.Log("  9. TLS certificate errors not user-friendly")
-	t.Log("")
-	t.Log("RECOMMENDATIONS:")
-	t.Log("  • Add retry logic with exponential backoff")
-	t.Log("  • Configure rclone timeout and retry parameters")
-	t.Log("  • Fix GetRemoteSize() error handling")
-	t.Log("  • Add UnsubscribeProgress() method")
-	t.Log("  • Add comprehensive error classification")
-	t.Log("  • Implement connection health monitoring")
-	t.Log("")
-}
-
-// Mock slow reader for testing timeout scenarios
 type slowReader struct {
 	data  []byte
 	pos   int

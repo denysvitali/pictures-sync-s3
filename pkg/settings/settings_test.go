@@ -1033,49 +1033,6 @@ func TestFileSystemEdgeCases(t *testing.T) {
 }
 
 // TestSummary provides a comprehensive summary of all bugs found
-func TestSummary(t *testing.T) {
-	t.Log("=== COMPREHENSIVE BUG SUMMARY ===")
-	t.Log("")
-	t.Log("CRITICAL SECURITY BUGS:")
-	t.Log("1. No validation on remote name/path - allows injection attacks")
-	t.Log("2. Exported struct fields allow validation bypass")
-	t.Log("3. No protection against symlink attacks on settings file")
-	t.Log("4. Settings file path is hard-coded, can't be overridden for testing")
-	t.Log("")
-	t.Log("CRITICAL DATA CORRUPTION BUGS:")
-	t.Log("5. Save() uses RLock instead of Lock - allows concurrent writes to temp file")
-	t.Log("6. No file locking mechanism - multiple processes could corrupt settings")
-	t.Log("7. Cannot explicitly set numeric values to 0 (they get replaced with defaults)")
-	t.Log("8. Unknown JSON fields are silently discarded on load/save (version migration issues)")
-	t.Log("")
-	t.Log("HIGH SEVERITY VALIDATION BUGS:")
-	t.Log("9. No validation on ReformatThreshold (accepts negative, >100, NaN, Infinity)")
-	t.Log("10. No validation on Transfers/Checkers (accepts negative, extremely large values)")
-	t.Log("11. No length limits on string fields (DOS potential)")
-	t.Log("12. No sanitization of special characters in paths/names")
-	t.Log("13. Google Photos can be enabled without a remote name")
-	t.Log("")
-	t.Log("MEDIUM SEVERITY BUGS:")
-	t.Log("14. No settings format version field (migration risks)")
-	t.Log("15. Cannot distinguish between missing fields and zero values")
-	t.Log("16. No disk space check before saving")
-	t.Log("17. No maximum file size check on load (memory exhaustion)")
-	t.Log("18. No JSON depth limit check (stack overflow)")
-	t.Log("")
-	t.Log("LOW SEVERITY BUGS:")
-	t.Log("19. Empty/whitespace-only strings accepted for required fields")
-	t.Log("20. Control characters not stripped from string values")
-	t.Log("")
-	t.Log("DESIGN ISSUES:")
-	t.Log("21. Hard-coded file path makes unit testing difficult")
-	t.Log("22. No interface/dependency injection for persistence layer")
-	t.Log("23. Settings struct has too many responsibilities (persistence + business logic)")
-	t.Log("")
-}
-
-// TestSettingsRoundTrip verifies that every field survives a Save/Load cycle.
-// This prevents the bug where a new field is added to the Settings struct
-// but not included in the JSON serialization or default application logic.
 func TestSettingsRoundTrip(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "settings.json")

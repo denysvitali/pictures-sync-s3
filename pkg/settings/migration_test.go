@@ -949,50 +949,6 @@ func TestRealWorldMigrationScenarios(t *testing.T) {
 }
 
 // TestMigrationBugsSummary provides comprehensive summary
-func TestMigrationBugsSummary(t *testing.T) {
-	t.Log("=== CONFIGURATION MIGRATION BUGS FOUND ===")
-	t.Log("")
-	t.Log("CRITICAL BUGS:")
-	t.Log("1. No version field - Cannot detect config format version")
-	t.Log("2. No backup mechanism - Old config lost if save corrupts")
-	t.Log("3. Zero values indistinguishable from missing - Cannot set explicit 0")
-	t.Log("4. Unknown fields discarded - Downgrade loses new settings")
-	t.Log("5. Type changes break loading - No conversion logic")
-	t.Log("")
-	t.Log("COMPATIBILITY ISSUES:")
-	t.Log("6. Downgrade from v3->v2 loses Google Photos settings")
-	t.Log("7. Downgrade from v3->v1 loses transfers, checkers, Google Photos")
-	t.Log("8. Downgrade/upgrade cycle resets custom values to defaults")
-	t.Log("9. Default value changes affect existing configs unexpectedly")
-	t.Log("10. Field renames cause silent data loss")
-	t.Log("")
-	t.Log("DATA CORRUPTION RISKS:")
-	t.Log("11. Orphaned .tmp files after power loss")
-	t.Log("12. No checksum validation for corruption detection")
-	t.Log("13. No recovery from truncated files")
-	t.Log("14. Concurrent migrations possible (no locking)")
-	t.Log("15. No rollback on partial migration failure")
-	t.Log("")
-	t.Log("MIGRATION ISSUES:")
-	t.Log("16. Zero value migration loop - User cannot set 0")
-	t.Log("17. No migration path documentation")
-	t.Log("18. No warning on incompatible version downgrade")
-	t.Log("19. Manual config edits not preserved")
-	t.Log("20. No validation after migration")
-	t.Log("")
-	t.Log("RECOMMENDATIONS:")
-	t.Log("- Add 'version' field to Settings struct")
-	t.Log("- Use pointers for optional fields to detect omitempty")
-	t.Log("- Implement settings.json.bak backup mechanism")
-	t.Log("- Add checksum for corruption detection")
-	t.Log("- Clean up .tmp files on Load()")
-	t.Log("- Add unknown field preservation during migration")
-	t.Log("- Implement version-specific migration functions")
-	t.Log("- Add config validation after migration")
-	t.Log("- Document migration paths and breaking changes")
-}
-
-// TestMigrationWithValidation tests if migration validates final state
 func TestMigrationWithValidation(t *testing.T) {
 	t.Run("BUG_no_validation_after_migration", func(t *testing.T) {
 		// Config migrates successfully but ends up in invalid state
