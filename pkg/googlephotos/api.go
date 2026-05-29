@@ -9,6 +9,8 @@ import (
 	"log"
 	"net/http"
 	"sort"
+	"strconv"
+	"strings"
 )
 
 const maxBatchSize = 50
@@ -419,12 +421,13 @@ func (c *Client) DeleteAlbumContext(ctx context.Context, albumID string) error {
 
 // SortProgress tracks the progress of an album sort-by-shoot-time operation.
 type SortProgress struct {
-	Status      string `json:"status"` // "listing", "sorting", "creating-album", "adding", "deleting-old", "completed", "error"
-	TotalItems  int    `json:"total_items"`
-	CurrentItem int    `json:"current_item"`
-	AddedItems  int    `json:"added_items"`
-	NewAlbumID  string `json:"new_album_id,omitempty"`
-	Error       string `json:"error,omitempty"`
+	Status       string `json:"status"` // "listing", "sorting", "creating-album", "adding", "deleting-old", "completed", "error"
+	TotalItems   int    `json:"total_items"`
+	CurrentItem  int    `json:"current_item"`
+	AddedItems   int    `json:"added_items"`
+	Inaccessible int    `json:"inaccessible,omitempty"` // items in the album the app cannot see (uploaded by a different OAuth client)
+	NewAlbumID   string `json:"new_album_id,omitempty"`
+	Error        string `json:"error,omitempty"`
 }
 
 // SortAlbumByShootTime reorders all media items in an album by photo shoot time
@@ -448,6 +451,28 @@ func (c *Client) SortAlbumByShootTime(ctx context.Context, albumID string, onPro
 		p := SortProgress{Status: "error", Error: err.Error()}
 		report(p)
 		return p, fmt.Errorf("list album items: %w", err)
+	}
+
+	// Phase 1b: verify the app can see every item before doing anything
+	// destructive. The Library API only returns app-created media (scope
+	// readonly.appcreateddata), so items uploaded by a different OAuth client
+	// (e.g. an rclone googlephotos remote using its own client_id) are invisible
+	// here. Album metadata still reports the true total, so a mismatch means a
+	// sort would silently drop the inaccessible items — refuse and leave the
+	// album untouched rather than delete it.
+	oldAlbum, err := c.GetAlbumContext(ctx, albumID)
+	if err != nil {
+		p := SortProgress{Status: "error", TotalItems: len(items), Error: err.Error()}
+		report(p)
+		return p, fmt.Errorf("get album: %w", err)
+	}
+	if reported, perr := strconv.Atoi(strings.TrimSpace(oldAlbum.MediaItemsCount)); perr == nil && reported > len(items) {
+		inaccessible := reported - len(items)
+		msg := fmt.Sprintf("album reports %d items but only %d are accessible to this app; %d item(s) were uploaded by a different OAuth client and would be lost by a sort. Aborted — album left unchanged. Re-upload those items through this app's client (or unify the rclone/app client_id) and retry.", reported, len(items), inaccessible)
+		p := SortProgress{Status: "error", TotalItems: len(items), Inaccessible: inaccessible, Error: msg}
+		report(p)
+		log.Printf("[GooglePhotos] Album %s sort aborted: %s", albumID, msg)
+		return p, fmt.Errorf("sort aborted: %s", msg)
 	}
 
 	if len(items) <= 1 {
@@ -490,14 +515,8 @@ func (c *Client) SortAlbumByShootTime(ctx context.Context, albumID string, onPro
 		return p, nil
 	}
 
-	// Phase 3: fetch old album title and create a new sorted album.
+	// Phase 3: create a new sorted album (old album metadata already fetched above).
 	report(SortProgress{Status: "creating-album", TotalItems: len(items)})
-	oldAlbum, err := c.GetAlbumContext(ctx, albumID)
-	if err != nil {
-		p := SortProgress{Status: "error", TotalItems: len(items), Error: err.Error()}
-		report(p)
-		return p, fmt.Errorf("get old album: %w", err)
-	}
 	newTitle := oldAlbum.Title + " (sorted)"
 	newAlbum, err := c.CreateAlbumContext(ctx, newTitle)
 	if err != nil {

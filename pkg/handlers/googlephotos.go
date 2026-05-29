@@ -27,9 +27,9 @@ import (
 // oauthStartRateLimiters tracks per-IP rate limits for the OAuth start endpoint.
 // Allows up to 5 auth-start attempts per minute with a burst of 3.
 var (
-	oauthStartLimiters     = make(map[string]*oauthRateLimitEntry)
-	oauthStartLimitersMu   sync.Mutex
-	oauthStartIdleTimeout  = 15 * time.Minute
+	oauthStartLimiters    = make(map[string]*oauthRateLimitEntry)
+	oauthStartLimitersMu  sync.Mutex
+	oauthStartIdleTimeout = 15 * time.Minute
 )
 
 type oauthRateLimitEntry struct {
@@ -810,7 +810,11 @@ func (ctx *Context) runAlbumSort(client *googlephotos.Client, albumID string) {
 	})
 
 	albumSortOpsMu.Lock()
-	if err != nil {
+	// SortAlbumByShootTime returns a populated progress (with Status, Error, and
+	// any Inaccessible count) even on failure, so surface it directly rather than
+	// flattening to a bare error — the UI needs the inaccessible-item count to
+	// explain why a sort was refused.
+	if err != nil && progress.Status == "" {
 		albumSortOps[albumID] = &googlephotos.SortProgress{Status: "error", Error: err.Error()}
 	} else {
 		albumSortOps[albumID] = &progress
@@ -845,12 +849,13 @@ func (ctx *Context) handleGooglePhotosAlbumSortProgress(w http.ResponseWriter, r
 	}
 
 	httputil.JSON(w, http.StatusOK, map[string]any{
-		"album_id":      albumID,
-		"status":        progress.Status,
-		"total_items":   progress.TotalItems,
-		"added_items":   progress.AddedItems,
-		"new_album_id":  progress.NewAlbumID,
-		"error":         progress.Error,
+		"album_id":     albumID,
+		"status":       progress.Status,
+		"total_items":  progress.TotalItems,
+		"added_items":  progress.AddedItems,
+		"inaccessible": progress.Inaccessible,
+		"new_album_id": progress.NewAlbumID,
+		"error":        progress.Error,
 	})
 }
 

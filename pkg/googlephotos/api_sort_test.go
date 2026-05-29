@@ -21,6 +21,8 @@ func TestSortAlbumByShootTime_AlreadySorted(t *testing.T) {
 		switch {
 		case r.URL.Path == "/v1/mediaItems:search":
 			json.NewEncoder(w).Encode(ListMediaItemsResponse{MediaItems: items})
+		case r.URL.Path == "/v1/albums/album-1" && r.Method == "GET":
+			json.NewEncoder(w).Encode(Album{ID: "album-1", Title: "card-ABC", MediaItemsCount: "3"})
 		default:
 			http.Error(w, fmt.Sprintf("unexpected path: %s", r.URL.Path), http.StatusNotFound)
 		}
@@ -39,6 +41,56 @@ func TestSortAlbumByShootTime_AlreadySorted(t *testing.T) {
 	}
 	if progress.TotalItems != 3 {
 		t.Errorf("expected 3 total items, got %d", progress.TotalItems)
+	}
+}
+
+func TestSortAlbumByShootTime_AbortsOnInaccessibleItems(t *testing.T) {
+	// The album reports 500 items but the Library API only returns 3 (the rest
+	// were uploaded by a different OAuth client). A sort must abort and leave the
+	// album untouched rather than silently produce a 3-item album.
+	items := []*MediaItem{
+		{ID: "item-1", Filename: "a.jpg", MediaMetadata: MediaMetadata{CreationTime: time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)}},
+		{ID: "item-2", Filename: "b.jpg", MediaMetadata: MediaMetadata{CreationTime: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)}},
+		{ID: "item-3", Filename: "c.jpg", MediaMetadata: MediaMetadata{CreationTime: time.Date(2024, 3, 1, 0, 0, 0, 0, time.UTC)}},
+	}
+
+	var createdAlbum, deletedOldAlbum bool
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v1/mediaItems:search":
+			json.NewEncoder(w).Encode(ListMediaItemsResponse{MediaItems: items})
+		case r.URL.Path == "/v1/albums/album-1" && r.Method == "GET":
+			json.NewEncoder(w).Encode(Album{ID: "album-1", Title: "card-ABC", MediaItemsCount: "500"})
+		case r.URL.Path == "/v1/albums" && r.Method == "POST":
+			createdAlbum = true
+			json.NewEncoder(w).Encode(Album{ID: "new-id", Title: "card-ABC (sorted)"})
+		case r.URL.Path == "/v1/albums/album-1" && r.Method == "DELETE":
+			deletedOldAlbum = true
+			json.NewEncoder(w).Encode("{}")
+		default:
+			http.Error(w, fmt.Sprintf("unexpected: %s %s", r.Method, r.URL.Path), http.StatusNotFound)
+		}
+	})
+
+	_, cleanup := setupRemoveTestServer(t, handler)
+	defer cleanup()
+	client := newRemoveTestClient(t)
+
+	progress, err := client.SortAlbumByShootTime(context.Background(), "album-1", nil)
+	if err == nil {
+		t.Fatal("expected error when album has inaccessible items")
+	}
+	if progress.Status != "error" {
+		t.Errorf("expected status error, got %s", progress.Status)
+	}
+	if progress.Inaccessible != 497 {
+		t.Errorf("expected 497 inaccessible items, got %d", progress.Inaccessible)
+	}
+	if createdAlbum {
+		t.Error("must not create a new album when items are inaccessible")
+	}
+	if deletedOldAlbum {
+		t.Error("must not delete the original album when items are inaccessible")
 	}
 }
 
