@@ -48,3 +48,46 @@ func BuildGooglePhotosRcloneConfig(remoteName, clientID, clientSecret string, to
 
 	return []byte(b.String()), nil
 }
+
+// ParseGooglePhotosRcloneConfig extracts the client_id and client_secret from
+// the named googlephotos remote in rclone.conf INI content. It returns empty
+// strings when the section or keys are absent.
+//
+// This is the read counterpart to BuildGooglePhotosRcloneConfig: it lets the
+// native Google Photos API client operate under the exact same OAuth client_id
+// that rclone uploads with, so app-side album operations can see every item
+// rclone wrote (the Library API only exposes media created by the requesting
+// OAuth client).
+func ParseGooglePhotosRcloneConfig(data []byte, remoteName string) (clientID, clientSecret string) {
+	remoteName = strings.TrimSpace(remoteName)
+	if remoteName == "" {
+		return "", ""
+	}
+
+	inSection := false
+	for _, raw := range strings.Split(string(data), "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, ";") || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			name := strings.TrimSpace(line[1 : len(line)-1])
+			inSection = name == remoteName
+			continue
+		}
+		if !inSection {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		switch strings.TrimSpace(key) {
+		case "client_id":
+			clientID = strings.TrimSpace(value)
+		case "client_secret":
+			clientSecret = strings.TrimSpace(value)
+		}
+	}
+	return clientID, clientSecret
+}

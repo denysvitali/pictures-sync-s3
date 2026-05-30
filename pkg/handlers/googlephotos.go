@@ -83,6 +83,32 @@ func oauthErrorType(err error) string {
 	return fmt.Sprintf("%T", errors.Unwrap(err))
 }
 
+// googlePhotosOAuthCreds returns the OAuth client_id/secret the native Google
+// Photos API client should use. It prefers the values already persisted in the
+// rclone googlephotos remote so the app operates under the exact same OAuth
+// client rclone uploads with — the Library API only exposes media created by
+// the requesting client_id, so a mismatch makes rclone-uploaded items invisible
+// to album list/sort/clear. It falls back to the settings credentials when the
+// remote isn't configured yet (i.e. before the first OAuth connect, which is
+// what seeds rclone.conf in the first place).
+func (ctx *Context) googlePhotosOAuthCreds() (clientID, clientSecret string) {
+	remoteName := "gphotos"
+	if ctx.AppSettings != nil {
+		if name := ctx.AppSettings.GetGooglePhotosRemoteName(); name != "" {
+			remoteName = name
+		}
+	}
+	if data, err := os.ReadFile(state.GetRcloneConfigPath()); err == nil {
+		if id, secret := validation.ParseGooglePhotosRcloneConfig(data, remoteName); id != "" {
+			return id, secret
+		}
+	}
+	if ctx.AppSettings != nil {
+		return ctx.AppSettings.GetGooglePhotosClientID(), ctx.AppSettings.GetGooglePhotosClientSecret()
+	}
+	return "", ""
+}
+
 // HandleGooglePhotosStatus returns whether Google Photos is configured via
 // rclone. This reads rclone.conf directly instead of going through rclone's
 // global config state, so it stays responsive while a long sync is running.
@@ -529,12 +555,7 @@ func (ctx *Context) HandleGooglePhotosAlbums(w http.ResponseWriter, r *http.Requ
 }
 
 func (ctx *Context) handleGooglePhotosAlbumList(w http.ResponseWriter, r *http.Request) {
-	clientID := ""
-	clientSecret := ""
-	if ctx.AppSettings != nil {
-		clientID = ctx.AppSettings.GetGooglePhotosClientID()
-		clientSecret = ctx.AppSettings.GetGooglePhotosClientSecret()
-	}
+	clientID, clientSecret := ctx.googlePhotosOAuthCreds()
 	if clientID == "" || clientSecret == "" {
 		http.Error(w, "Google Photos credentials not configured", http.StatusPreconditionFailed)
 		return
@@ -578,12 +599,7 @@ func (ctx *Context) handleGooglePhotosAlbumClear(w http.ResponseWriter, r *http.
 		return
 	}
 
-	clientID := ""
-	clientSecret := ""
-	if ctx.AppSettings != nil {
-		clientID = ctx.AppSettings.GetGooglePhotosClientID()
-		clientSecret = ctx.AppSettings.GetGooglePhotosClientSecret()
-	}
+	clientID, clientSecret := ctx.googlePhotosOAuthCreds()
 	if clientID == "" || clientSecret == "" {
 		http.Error(w, "Google Photos credentials not configured", http.StatusPreconditionFailed)
 		return
@@ -763,12 +779,7 @@ func (ctx *Context) handleGooglePhotosAlbumSort(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	clientID := ""
-	clientSecret := ""
-	if ctx.AppSettings != nil {
-		clientID = ctx.AppSettings.GetGooglePhotosClientID()
-		clientSecret = ctx.AppSettings.GetGooglePhotosClientSecret()
-	}
+	clientID, clientSecret := ctx.googlePhotosOAuthCreds()
 	if clientID == "" || clientSecret == "" {
 		http.Error(w, "Google Photos credentials not configured", http.StatusPreconditionFailed)
 		return
@@ -870,8 +881,7 @@ func truncateErr(s string, max int) string {
 // reorders each one by photo shoot time (EXIF creation time). It runs after
 // the main sync completes so newly uploaded photos are also sorted.
 func (ctx *Context) sortGooglePhotosAlbumsByShootTime() {
-	clientID := ctx.AppSettings.GetGooglePhotosClientID()
-	clientSecret := ctx.AppSettings.GetGooglePhotosClientSecret()
+	clientID, clientSecret := ctx.googlePhotosOAuthCreds()
 	if clientID == "" || clientSecret == "" {
 		log.Println("[GooglePhotos] Sort by shoot time: missing OAuth credentials, skipping")
 		return
