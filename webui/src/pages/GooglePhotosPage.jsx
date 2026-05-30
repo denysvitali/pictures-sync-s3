@@ -558,6 +558,12 @@ function AlbumsPanel({ albums, loading, onClear, clearingId, clearProgress, onSo
             const sortLabel = sortActive ? sortStatusLabel : 'Sort'
             const hasSortProgress = sortActive && Number(sp?.total_items) > 0
             const sortError = sp?.status === 'error' ? (sp?.error || 'Failed to sort album') : ''
+            // When a sort is refused because some items are owned by a different
+            // OAuth client, show a friendlier "left untouched" warning instead of
+            // a generic failure. inaccessible = items the app cannot see.
+            const sortInaccessible = sp?.status === 'error' ? Number(sp?.inaccessible || 0) : 0
+            const sortAccessible = Number(sp?.total_items || 0)
+            const sortReported = sortAccessible + sortInaccessible
 
             const clearPct = Number(progress?.total_items) > 0
               ? clampPercent((Number(progress?.removed_items || 0) / Number(progress.total_items)) * 100)
@@ -652,7 +658,21 @@ function AlbumsPanel({ albums, loading, onClear, clearingId, clearProgress, onSo
                   )}
                 </AnimatePresence>
 
-                {sortError && (
+                {sortError && sortInaccessible > 0 && (
+                  <div className="mt-3 rounded-lg border border-amber-500/20 bg-amber-500/10 p-3">
+                    <p className="flex items-center gap-1.5 text-xs font-medium text-amber-300">
+                      <Icon name="exclamation-triangle" className="h-3.5 w-3.5" />
+                      Sort skipped — album left untouched
+                    </p>
+                    <p className="mt-1 text-xs text-amber-200">
+                      Only {sortAccessible} of {sortReported} items are visible to this app.
+                      The other {sortInaccessible} were uploaded by a different account or client
+                      (e.g. an rclone remote) and can&apos;t be sorted from here. Re-upload them
+                      through this app, then try again.
+                    </p>
+                  </div>
+                )}
+                {sortError && sortInaccessible === 0 && (
                   <div className="mt-3 rounded-lg border border-rose-500/20 bg-rose-500/10 p-3">
                     <p className="flex items-center gap-1.5 text-xs font-medium text-rose-400">
                       <Icon name="exclamation-triangle" className="h-3.5 w-3.5" />
@@ -878,7 +898,11 @@ export default function GooglePhotosPage() {
               toast.success(`Sorted "${albumTitle}" — ${data?.total_items || 0} items reordered`)
               loadAlbums()
             } else if (data?.status === 'error') {
-              toast.error(`Failed to sort album: ${data?.error || 'Unknown error'}`)
+              if (Number(data?.inaccessible || 0) > 0) {
+                toast.error(`Sort skipped: ${data.inaccessible} item(s) aren't visible to this app — album left untouched`)
+              } else {
+                toast.error(`Failed to sort album: ${data?.error || 'Unknown error'}`)
+              }
             }
           }
         } catch (err) {
