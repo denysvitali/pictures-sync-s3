@@ -348,6 +348,26 @@ func TestRetryableErrorDetection(t *testing.T) {
 			err:         &testErr{"503 Service Unavailable"},
 			shouldRetry: true,
 		},
+		{
+			name:        "GooglePhotosMediaItemInternal",
+			err:         &testErr{"failed to commit batch: batch upload failed: upload failed: Failed: There was an error while trying to create this media item. (13)"},
+			shouldRetry: true,
+		},
+		{
+			name:        "GooglePhotosUnavailable",
+			err:         &testErr{"upload failed: backend unavailable (14)"},
+			shouldRetry: true,
+		},
+		{
+			name:        "GooglePhotosCommitBatch",
+			err:         &testErr{"failed to commit batch: something transient"},
+			shouldRetry: true,
+		},
+		{
+			name:        "GooglePhotosPermanentInvalidArgument",
+			err:         &testErr{"upload failed: invalid argument (3)"},
+			shouldRetry: false,
+		},
 	}
 
 	for _, tt := range tests {

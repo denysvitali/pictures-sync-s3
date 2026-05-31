@@ -202,19 +202,14 @@ func (m *Manager) SyncCardsToGooglePhotos(ctx context.Context, force bool) error
 		m.monitorGooglePhotosProgress(syncCtx, stats, totalFiles, totalBytes, done)
 	}()
 
-	var lastErr error
+	var cardErrs []error
+	cancelled := false
 	processedFiles := 0
 	processedBytes := int64(0)
 
 	for i, card := range cards {
-		select {
-		case <-syncCtx.Done():
-			lastErr = fmt.Errorf("Google Photos sync cancelled")
-			break
-		default:
-		}
-
-		if lastErr != nil {
+		if syncCtx.Err() != nil {
+			cancelled = true
 			break
 		}
 
@@ -235,8 +230,15 @@ func (m *Manager) SyncCardsToGooglePhotos(ctx context.Context, force bool) error
 		processedBytes += cardBytes
 
 		if err != nil {
+			// A cancelled context stops the whole run; any other card failure is
+			// isolated so the remaining cards still get a chance to sync. We
+			// collect the errors and report them at the end.
+			if errors.Is(err, context.Canceled) || syncCtx.Err() != nil {
+				cancelled = true
+				break
+			}
 			log.Printf("Warning: failed to sync card %s to Google Photos: %v", card.Name, err)
-			lastErr = err
+			cardErrs = append(cardErrs, fmt.Errorf("card %s: %w", card.Name, err))
 		}
 	}
 
@@ -244,16 +246,21 @@ func (m *Manager) SyncCardsToGooglePhotos(ctx context.Context, force bool) error
 	close(done)
 	<-monitorDone
 
-	if lastErr != nil {
+	if cancelled {
+		cardErrs = append(cardErrs, fmt.Errorf("Google Photos sync cancelled"))
+	}
+
+	if len(cardErrs) > 0 {
+		err := errors.Join(cardErrs...)
 		metrics.Inc("pictures_sync_error_total", map[string]string{"remote": "googlephotos", "reason": "unknown"})
 		m.setGooglePhotosProgress(Progress{
 			Status:           "error",
 			TransferredFiles: processedFiles,
 			TotalFiles:       totalFiles,
 			BytesTransferred: processedBytes,
-			Error:            lastErr.Error(),
+			Error:            err.Error(),
 		})
-		return lastErr
+		return err
 	}
 
 	metrics.Inc("pictures_sync_success_total", map[string]string{"remote": "googlephotos"})
@@ -417,21 +424,10 @@ func (m *Manager) syncCardToGooglePhotos(ctx context.Context, srcPath, dstPath s
 
 	jobsCh := make(chan googlePhotosCopyJob)
 	var wg sync.WaitGroup
-	var errMu sync.Mutex
-	var firstErr error
 	var stateMu sync.Mutex
-
-	recordErr := func(err error) {
-		if err == nil {
-			return
-		}
-		errMu.Lock()
-		if firstErr == nil {
-			firstErr = err
-			cancel()
-		}
-		errMu.Unlock()
-	}
+	var failMu sync.Mutex
+	var failed int
+	var lastFailErr error
 
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
@@ -446,8 +442,21 @@ func (m *Manager) syncCardToGooglePhotos(ctx context.Context, srcPath, dstPath s
 					return copyErr
 				}, isRetryableError, fmt.Sprintf("Google Photos copy %s", job.src.Remote()))
 				if err != nil {
-					recordErr(err)
-					return
+					// A cancelled context aborts the whole card (user cancel or
+					// shutdown). Any other failure is isolated to this one file:
+					// log it, count it, and keep uploading the rest of the album
+					// rather than tearing down the entire multi-card sync for a
+					// single bad item. The file simply isn't recorded as
+					// uploaded, so a later run retries it.
+					if copyCtx.Err() != nil {
+						return
+					}
+					log.Printf("Google Photos sync: giving up on %s after retries: %v", job.src.Remote(), err)
+					failMu.Lock()
+					failed++
+					lastFailErr = err
+					failMu.Unlock()
+					continue
 				}
 				// Mark as uploaded in local state.
 				stateKey := job.albumName + "/" + job.src.Remote()
@@ -477,15 +486,24 @@ sendJobs:
 		log.Printf("Google Photos sync: failed to save upload state: %v", err)
 	}
 
-	if firstErr != nil {
-		return 0, 0, firstErr
+	// Context cancellation (user cancel / shutdown) takes precedence and is
+	// reported as-is so the caller can stop the whole run.
+	if err := ctx.Err(); err != nil {
+		return 0, 0, err
 	}
 	if err := copyCtx.Err(); err != nil && err != context.Canceled {
 		return 0, 0, err
 	}
-	if err := ctx.Err(); err != nil {
-		return 0, 0, err
+
+	// Per-file failures don't abort the card: the files that did upload are
+	// recorded in state above and counted as transferred. Surface a summary
+	// error so the card is reported as partially failed and a later run
+	// retries the stragglers, but let the caller continue to the next card.
+	if failed > 0 {
+		log.Printf("Google Photos sync: %d of %d file(s) failed to upload to %s", failed, len(jobs), dstPath)
+		return beforeCount - failed, beforeBytes, fmt.Errorf("%d of %d file(s) failed to upload to %s (last error: %w)", failed, len(jobs), dstPath, lastFailErr)
 	}
+
 	log.Printf("Google Photos sync: upload completed for %s", dstPath)
 
 	return beforeCount, beforeBytes, nil
