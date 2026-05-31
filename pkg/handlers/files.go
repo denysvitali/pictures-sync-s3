@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -336,6 +337,69 @@ func (ctx *Context) HandleThumbnail(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[Gallery] thumbnail write failed path=%q duration=%s error=%v", requestedPath, time.Since(start), err)
 	}
 	log.Printf("[Gallery] thumbnail complete path=%q size=%d duration=%s", requestedPath, len(preview.Data), time.Since(start))
+}
+
+// HandleFileThumbnail serves a small JPEG thumbnail for an image stored on the
+// remote (B2/cloud). It backs the Google Photos page previews, which show what
+// each B2 card will sync. To stay cheap it first fetches only the leading bytes
+// of a JPEG to read the embedded EXIF thumbnail, falling back to downloading and
+// decoding the full image when no embedded thumbnail is available.
+func (ctx *Context) HandleFileThumbnail(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	filePath := r.URL.Query().Get("path")
+	if filePath == "" {
+		http.Error(w, "path parameter required", http.StatusBadRequest)
+		return
+	}
+
+	ext := strings.ToLower(filepath.Ext(filePath))
+	if _, ok := fileViewImageContentTypes[ext]; !ok {
+		http.Error(w, "unsupported file type", http.StatusBadRequest)
+		return
+	}
+
+	// Fast path: only JPEGs carry an embedded EXIF thumbnail. Pull ~1 MiB —
+	// enough to cover the APP1 segment — and try to extract it without ever
+	// downloading the full-resolution image.
+	if ext == ".jpg" || ext == ".jpeg" {
+		const exifPrefixBytes = 1 << 20
+		var buf bytes.Buffer
+		if err := ctx.SyncMgr.GetFileRange(filePath, &buf, exifPrefixBytes); err == nil {
+			if preview, err := sdcardbrowser.ThumbnailFromBytes(buf.Bytes()); err == nil {
+				writeThumbnailResponse(w, preview)
+				return
+			}
+		}
+	}
+
+	// Fallback: download the whole image (bounded) and decode + resize.
+	const maxFullBytes = 50 << 20
+	var buf bytes.Buffer
+	if err := ctx.SyncMgr.GetFileRange(filePath, &buf, maxFullBytes); err != nil {
+		log.Printf("[Gallery] B2 thumbnail fetch failed path=%q error=%v", filePath, err)
+		http.Error(w, "failed to retrieve file", http.StatusBadGateway)
+		return
+	}
+
+	preview, err := sdcardbrowser.ThumbnailFromBytes(buf.Bytes())
+	if err != nil {
+		log.Printf("[Gallery] B2 thumbnail decode failed path=%q error=%v", filePath, err)
+		http.Error(w, "failed to generate thumbnail", http.StatusUnprocessableEntity)
+		return
+	}
+	writeThumbnailResponse(w, preview)
+}
+
+func writeThumbnailResponse(w http.ResponseWriter, preview *sdcardbrowser.Preview) {
+	w.Header().Set("Content-Type", preview.ContentType)
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	if _, err := w.Write(preview.Data); err != nil {
+		log.Printf("[Gallery] thumbnail write failed error=%v", err)
+	}
 }
 
 // SDCardFileInfo contains file metadata including EXIF data

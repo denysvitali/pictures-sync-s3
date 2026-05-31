@@ -639,7 +639,8 @@ func (filesTestErroringSync) ListFiles(string) ([]syncmanager.FileInfo, error) {
 func (filesTestErroringSync) ListFilesPaginated(string, int, int) (*syncmanager.FileListResult, error) {
 	return &syncmanager.FileListResult{}, nil
 }
-func (filesTestErroringSync) GetFile(string, io.Writer) error { return nil }
+func (filesTestErroringSync) GetFile(string, io.Writer) error             { return nil }
+func (filesTestErroringSync) GetFileRange(string, io.Writer, int64) error { return nil }
 func (filesTestErroringSync) GetPublicLink(string) (string, error) {
 	return "", errors.New("signing service unavailable")
 }
@@ -650,4 +651,7 @@ func (filesTestErroringSync) SyncCardsToGooglePhotos(context.Context, bool, []st
 }
 func (filesTestErroringSync) GetGooglePhotosProgress() syncmanager.Progress {
 	return syncmanager.Progress{}
+}
+func (filesTestErroringSync) GetGooglePhotosCardSummary(context.Context, string) (syncmanager.GooglePhotosCardSummary, error) {
+	return syncmanager.GooglePhotosCardSummary{}, nil
 }

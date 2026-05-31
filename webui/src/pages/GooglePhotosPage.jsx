@@ -15,8 +15,9 @@ import {
   startGooglePhotosSync,
   cancelGooglePhotosSync,
   getGooglePhotosSyncProgress,
-  getGooglePhotosAlbums,
-  getGooglePhotosAlbumPreview,
+  getGooglePhotosCards,
+  getGooglePhotosCardSummary,
+  getRemoteThumbnailUrl,
   clearGooglePhotosAlbum,
   getGooglePhotosAlbumClearProgress,
   sortGooglePhotosAlbum,
@@ -465,23 +466,35 @@ function SyncStartingPanel({ reduceMotion }) {
   )
 }
 
-function AlbumsHeader({ count }) {
+function PreviewThumb({ path, deviceUrl }) {
+  const [errored, setErrored] = useState(false)
+  const name = String(path || '').split('/').pop()
   return (
-    <CardHeader>
-      <div className="flex items-center gap-2">
-        <Icon name="folder" className="h-5 w-5 text-brand-400" />
-        <CardTitle>Albums</CardTitle>
-      </div>
-      {count > 0 && (
-        <StatusBadge variant="neutral">
-          {count} {count === 1 ? 'album' : 'albums'}
-        </StatusBadge>
+    <div
+      className="relative aspect-square overflow-hidden rounded-md border border-surface-700/50 bg-surface-900"
+      title={name}
+    >
+      {errored ? (
+        <div className="flex h-full w-full items-center justify-center">
+          <Icon name="image" className="h-4 w-4 text-surface-600" />
+        </div>
+      ) : (
+        <img
+          src={getRemoteThumbnailUrl(deviceUrl, path)}
+          alt={name || 'preview'}
+          loading="lazy"
+          decoding="async"
+          className="h-full w-full object-cover"
+          onError={() => setErrored(true)}
+        />
       )}
-    </CardHeader>
+    </div>
   )
 }
 
-function PreviewGrid({ preview }) {
+// PreviewGrid shows up to 4 thumbnails sourced from B2 (the sync source) so the
+// user can see what each card will sync.
+function PreviewGrid({ summary, deviceUrl }) {
   const tiles = (
     <div className="mt-3 grid grid-cols-4 gap-1.5">
       {Array.from({ length: 4 }).map((_, i) => (
@@ -490,54 +503,44 @@ function PreviewGrid({ preview }) {
     </div>
   )
 
-  if (!preview || preview.loading) return tiles
-
-  if (preview.error) {
+  if (!summary || summary.loading) return tiles
+  if (summary.error) {
     return <p className="mt-3 text-xs text-surface-500">Preview unavailable</p>
   }
-
-  if (!preview.items || preview.items.length === 0) {
-    return <p className="mt-3 text-xs text-surface-500">No photos to preview yet</p>
+  if (!summary.preview || summary.preview.length === 0) {
+    return <p className="mt-3 text-xs text-surface-500">No photos to preview</p>
   }
 
   return (
     <div className="mt-3 grid grid-cols-4 gap-1.5">
-      {preview.items.slice(0, 4).map((item) => {
-        const isVideo = String(item.mime_type || '').startsWith('video/')
-        const thumb = item.base_url ? `${item.base_url}=w240-h240-c` : ''
-        return (
-          <div
-            key={item.id}
-            className="relative aspect-square overflow-hidden rounded-md border border-surface-700/50 bg-surface-900"
-            title={item.filename || ''}
-          >
-            {thumb ? (
-              <img
-                src={thumb}
-                alt={item.filename || 'Google Photos preview'}
-                loading="lazy"
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center">
-                <Icon name="image" className="h-4 w-4 text-surface-600" />
-              </div>
-            )}
-            {isVideo && (
-              <span className="absolute bottom-0.5 right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/60">
-                <Icon name="play" className="h-2.5 w-2.5 text-white" />
-              </span>
-            )}
-          </div>
-        )
-      })}
+      {summary.preview.slice(0, 4).map((p) => (
+        <PreviewThumb key={p} path={p} deviceUrl={deviceUrl} />
+      ))}
     </div>
   )
 }
 
-function AlbumsPanel({
-  albums,
+function CardsHeader({ count }) {
+  return (
+    <CardHeader>
+      <div className="flex items-center gap-2">
+        <Icon name="folder" className="h-5 w-5 text-brand-400" />
+        <CardTitle>Cards to sync</CardTitle>
+      </div>
+      {count > 0 && (
+        <StatusBadge variant="neutral">
+          {count} {count === 1 ? 'card' : 'cards'}
+        </StatusBadge>
+      )}
+    </CardHeader>
+  )
+}
+
+function CardsPanel({
+  cards,
   loading,
+  summaries,
+  deviceUrl,
   onClear,
   clearingId,
   clearProgress,
@@ -545,17 +548,16 @@ function AlbumsPanel({
   sortingId,
   sortProgress,
   reduceMotion,
-  selectedIds,
-  onToggleAlbum,
+  selectedNames,
+  onToggleCard,
   onToggleAll,
-  previews,
   onSyncSelected,
   syncing,
 }) {
   if (loading) {
     return (
       <Card>
-        <AlbumsHeader count={0} />
+        <CardsHeader count={0} />
         <ul className="space-y-2" aria-hidden="true">
           {Array.from({ length: 3 }).map((_, i) => (
             <li key={i} className="flex items-center gap-3 rounded-lg border border-surface-700/50 bg-surface-900/40 p-3">
@@ -572,30 +574,30 @@ function AlbumsPanel({
     )
   }
 
-  if (!albums || albums.length === 0) {
+  if (!cards || cards.length === 0) {
     return (
       <Card>
-        <AlbumsHeader count={0} />
+        <CardsHeader count={0} />
         <EmptyState
           compact
           icon="folder"
-          title="No albums yet"
-          description="Run a sync to create app-managed albums in Google Photos."
+          title="No cards found"
+          description="No card folders were found on your B2 remote. Back up an SD card first, then sync it to Google Photos."
         />
       </Card>
     )
   }
 
-  const selectedCount = albums.reduce((n, a) => (selectedIds?.has(a.id) ? n + 1 : n), 0)
-  const allSelected = albums.length > 0 && selectedCount === albums.length
+  const selectedCount = cards.reduce((n, c) => (selectedNames?.has(c.name) ? n + 1 : n), 0)
+  const allSelected = cards.length > 0 && selectedCount === cards.length
 
   return (
     <Card>
-      <AlbumsHeader count={albums.length} />
+      <CardsHeader count={cards.length} />
       <div className="space-y-3">
         <p className="text-xs text-surface-500">
-          These are the albums created by this app. Tick the albums you want to sync, preview their photos, sort an album,
-          or clear it to remove all photos this app uploaded.
+          These are the card folders on your B2 remote — the source of the sync. Tick the cards you want to upload to
+          Google Photos, preview their photos, and track how many files have been transferred so far.
         </p>
 
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-surface-700/50 bg-surface-900/40 p-2.5">
@@ -625,11 +627,19 @@ function AlbumsPanel({
         </div>
 
         <ul className="space-y-2">
-          {albums.map((album) => {
-            const isSelected = Boolean(selectedIds?.has(album.id))
-            const preview = previews?.[album.id]
-            const progress = clearProgress?.[album.id]
-            const isClearing = clearingId === album.id
+          {cards.map((card) => {
+            const albumId = card.album_id || ''
+            const hasAlbum = albumId !== ''
+            const isSelected = Boolean(selectedNames?.has(card.name))
+            const summary = summaries?.[card.name]
+            const totalFiles = Number(summary?.total_files || 0)
+            const transferredFiles = Number(summary?.transferred_files || 0)
+            const transferPct = totalFiles > 0 ? clampPercent((transferredFiles / totalFiles) * 100) : 0
+            const fullyTransferred = totalFiles > 0 && transferredFiles >= totalFiles
+            const summaryLoading = !summary || summary.loading
+
+            const progress = clearProgress?.[albumId]
+            const isClearing = clearingId === albumId && hasAlbum
             const clearLabel = isClearing && progress?.status === 'clearing' && progress?.total_items > 0
               ? `Removing ${progress.removed_items}/${progress.total_items}...`
               : 'Clear'
@@ -643,8 +653,8 @@ function AlbumsPanel({
                 errorLower.includes('no permission') ||
                 errorLower.includes('permission'))
 
-            const sp = sortProgress?.[album.id]
-            const isSorting = sortingId === album.id
+            const sp = sortProgress?.[albumId]
+            const isSorting = sortingId === albumId && hasAlbum
             const sortActive = isSorting && sp?.status !== 'completed' && sp?.status !== 'error'
             const sortStatusLabel = (() => {
               switch (sp?.status) {
@@ -667,9 +677,6 @@ function AlbumsPanel({
             const sortLabel = sortActive ? sortStatusLabel : 'Sort'
             const hasSortProgress = sortActive && Number(sp?.total_items) > 0
             const sortError = sp?.status === 'error' ? (sp?.error || 'Failed to sort album') : ''
-            // When a sort is refused because some items are owned by a different
-            // OAuth client, show a friendlier "left untouched" warning instead of
-            // a generic failure. inaccessible = items the app cannot see.
             const sortInaccessible = sp?.status === 'error' ? Number(sp?.inaccessible || 0) : 0
             const sortAccessible = Number(sp?.total_items || 0)
             const sortReported = sortAccessible + sortInaccessible
@@ -681,11 +688,11 @@ function AlbumsPanel({
               ? clampPercent((Number(sp?.added_items || 0) / Number(sp.total_items)) * 100)
               : 0
             const busy = isSorting || isClearing
-            const initial = (album.title || '?').trim().charAt(0).toUpperCase() || '?'
+            const initial = (card.name || '?').trim().charAt(0).toUpperCase() || '?'
 
             return (
               <li
-                key={album.id}
+                key={card.name}
                 className={`overflow-hidden rounded-lg border bg-surface-900/40 p-3 transition-colors ${
                   busy
                     ? 'border-brand-400/40'
@@ -700,17 +707,21 @@ function AlbumsPanel({
                       type="checkbox"
                       className="h-4 w-4 shrink-0 cursor-pointer rounded border-surface-600 bg-surface-800 accent-brand-500"
                       checked={isSelected}
-                      onChange={(e) => onToggleAlbum(album.id, e.target.checked)}
-                      aria-label={`Select album ${album.title}`}
+                      onChange={(e) => onToggleCard(card.name, e.target.checked)}
+                      aria-label={`Select card ${card.name}`}
                     />
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-brand-400/20 bg-gradient-to-br from-brand-500/20 to-brand-700/10 text-sm font-bold text-brand-300">
                       {initial}
                     </div>
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-surface-100">{album.title}</p>
+                      <p className="truncate text-sm font-medium text-surface-100">{card.name}</p>
                       <p className="flex items-center gap-1 text-xs text-surface-500">
                         <Icon name="image" className="h-3 w-3" />
-                        {album.mediaItemsCount ? `${album.mediaItemsCount} items` : 'Empty'}
+                        {summaryLoading
+                          ? 'Counting…'
+                          : totalFiles > 0
+                            ? `${totalFiles} file${totalFiles === 1 ? '' : 's'} · ${formatBytes(summary?.total_bytes)}`
+                            : 'No photos'}
                       </p>
                     </div>
                   </div>
@@ -719,8 +730,9 @@ function AlbumsPanel({
                       variant="secondary"
                       size="sm"
                       loading={isSorting}
-                      disabled={isSorting || isClearing}
-                      onClick={() => onSort(album.id, album.title)}
+                      disabled={!hasAlbum || isSorting || isClearing}
+                      title={hasAlbum ? 'Sort the Google Photos album by shoot time' : 'Sync this card first to enable sorting'}
+                      onClick={() => onSort(albumId, card.name)}
                     >
                       <Icon name="sort" className="h-4 w-4" />
                       {sortLabel}
@@ -729,8 +741,9 @@ function AlbumsPanel({
                       variant="danger"
                       size="sm"
                       loading={isClearing}
-                      disabled={isClearing || isSorting}
-                      onClick={() => onClear(album.id, album.title)}
+                      disabled={!hasAlbum || isClearing || isSorting}
+                      title={hasAlbum ? 'Remove all photos this app uploaded to the album' : 'Sync this card first to enable clearing'}
+                      onClick={() => onClear(albumId, card.name)}
                     >
                       <Icon name="trash" className="h-4 w-4" />
                       {clearLabel}
@@ -738,7 +751,24 @@ function AlbumsPanel({
                   </div>
                 </div>
 
-                <PreviewGrid preview={preview} />
+                {!summaryLoading && totalFiles > 0 && (
+                  <div className="mt-3 space-y-1.5">
+                    <div className="flex items-center justify-between text-xs text-surface-400">
+                      <span className="flex items-center gap-1">
+                        <Icon name={fullyTransferred ? 'check' : 'cloud'} className="h-3 w-3" />
+                        {fullyTransferred ? 'Transferred to Google Photos' : 'Transferred so far'}
+                      </span>
+                      <span className="tabular-nums">{transferredFiles}/{totalFiles}</span>
+                    </div>
+                    <ProgressBar
+                      percentage={transferPct}
+                      tone={fullyTransferred ? 'success' : 'brand'}
+                      reduceMotion={reduceMotion}
+                    />
+                  </div>
+                )}
+
+                <PreviewGrid summary={summary} deviceUrl={deviceUrl} />
 
                 <AnimatePresence initial={false}>
                   {hasProgressCounts && (
@@ -871,16 +901,16 @@ export default function GooglePhotosPage() {
   const [disconnecting, setDisconnecting] = useState(false)
   const [progress, setProgress] = useState(null)
   const [statusError, setStatusError] = useState(null)
-  const [albums, setAlbums] = useState(null)
-  const [albumsLoading, setAlbumsLoading] = useState(false)
+  const [cards, setCards] = useState(null)
+  const [cardsLoading, setCardsLoading] = useState(false)
+  const [cardSummaries, setCardSummaries] = useState({})
   const [clearingAlbumId, setClearingAlbumId] = useState(null)
   const [clearProgress, setClearProgress] = useState({})
   const [sortingAlbumId, setSortingAlbumId] = useState(null)
   const [sortProgress, setSortProgress] = useState({})
-  const [selectedAlbumIds, setSelectedAlbumIds] = useState(() => new Set())
-  const [albumPreviews, setAlbumPreviews] = useState({})
-  const knownAlbumIdsRef = useRef(new Set())
-  const previewFetchedRef = useRef(new Set())
+  const [selectedCardNames, setSelectedCardNames] = useState(() => new Set())
+  const knownCardNamesRef = useRef(new Set())
+  const summaryFetchedRef = useRef(new Set())
   const progressIntervalRef = useRef(null)
   const statusIntervalRef = useRef(null)
   const clearProgressIntervalRef = useRef(null)
@@ -936,38 +966,37 @@ export default function GooglePhotosPage() {
     setLoading(false)
   }, [loadStatus, loadSyncProgress])
 
-  const loadAlbums = useCallback(async () => {
+  // List the B2 source cards (the sync source). Each carries its matched Google
+  // Photos album id (when already synced) so sort/clear can target the album.
+  const loadCards = useCallback(async () => {
     if (!deviceUrl) return
-    setAlbumsLoading(true)
+    setCardsLoading(true)
     try {
-      const data = await getGooglePhotosAlbums(deviceUrl)
-      setAlbums(data?.albums || [])
+      const data = await getGooglePhotosCards(deviceUrl)
+      setCards(data?.cards || [])
     } catch (err) {
-      setAlbums([])
+      setCards([])
     } finally {
-      setAlbumsLoading(false)
+      setCardsLoading(false)
     }
   }, [deviceUrl])
 
-  // Fetch a 4-photo preview for each album that hasn't been fetched yet. Runs
-  // lazily as albums load so the album list stays responsive.
-  const loadAlbumPreviews = useCallback(
-    async (albumList) => {
-      if (!deviceUrl || !albumList) return
-      for (const album of albumList) {
-        if (previewFetchedRef.current.has(album.id)) continue
-        previewFetchedRef.current.add(album.id)
-        setAlbumPreviews((prev) => ({ ...prev, [album.id]: { loading: true, items: [], error: null } }))
+  // Lazily fetch each card's summary (file count, bytes, transferred count, and
+  // up to 4 preview paths) so the card list renders immediately and fills in.
+  const loadCardSummaries = useCallback(
+    async (cardList) => {
+      if (!deviceUrl || !cardList) return
+      for (const card of cardList) {
+        if (summaryFetchedRef.current.has(card.name)) continue
+        summaryFetchedRef.current.add(card.name)
+        setCardSummaries((prev) => ({ ...prev, [card.name]: { loading: true } }))
         try {
-          const data = await getGooglePhotosAlbumPreview(deviceUrl, album.id)
-          setAlbumPreviews((prev) => ({
-            ...prev,
-            [album.id]: { loading: false, items: data?.items || [], error: null },
-          }))
+          const data = await getGooglePhotosCardSummary(deviceUrl, card.name)
+          setCardSummaries((prev) => ({ ...prev, [card.name]: { loading: false, ...data } }))
         } catch (err) {
-          setAlbumPreviews((prev) => ({
+          setCardSummaries((prev) => ({
             ...prev,
-            [album.id]: { loading: false, items: [], error: describeError(err) },
+            [card.name]: { loading: false, error: describeError(err) },
           }))
         }
       }
@@ -975,20 +1004,20 @@ export default function GooglePhotosPage() {
     [deviceUrl]
   )
 
-  const handleToggleAlbum = useCallback((albumId, checked) => {
-    setSelectedAlbumIds((prev) => {
+  const handleToggleCard = useCallback((cardName, checked) => {
+    setSelectedCardNames((prev) => {
       const next = new Set(prev)
-      if (checked) next.add(albumId)
-      else next.delete(albumId)
+      if (checked) next.add(cardName)
+      else next.delete(cardName)
       return next
     })
   }, [])
 
   const handleToggleAll = useCallback(
     (checked) => {
-      setSelectedAlbumIds(() => (checked && albums ? new Set(albums.map((a) => a.id)) : new Set()))
+      setSelectedCardNames(() => (checked && cards ? new Set(cards.map((c) => c.name)) : new Set()))
     },
-    [albums]
+    [cards]
   )
 
   const handleClearAlbum = useCallback(
@@ -1020,9 +1049,10 @@ export default function GooglePhotosPage() {
               setClearingAlbumId(null)
               if (data?.status === 'completed') {
                 toast.success(`Cleared ${data?.removed_items || 0} item(s) from "${albumTitle}"`)
-                // Force the preview to refetch — the album is now empty.
-                previewFetchedRef.current.delete(albumId)
-                loadAlbums()
+                // Clearing wipes the album and its local upload ledger, so the
+                // card's transferred count and preview must be recomputed.
+                summaryFetchedRef.current.delete(albumTitle)
+                loadCards()
               } else if (data?.status === 'error') {
                 toast.error(`Failed to clear album: ${data?.error || 'Unknown error'}`)
               }
@@ -1041,7 +1071,7 @@ export default function GooglePhotosPage() {
         toast.error(`Failed to start clearing: ${describeError(err)}`)
       }
     },
-    [deviceUrl, toast, loadAlbums]
+    [deviceUrl, toast, loadCards]
   )
 
   // Poll the backend for an album sort that is running server-side. Safe to
@@ -1066,7 +1096,9 @@ export default function GooglePhotosPage() {
             setSortingAlbumId(null)
             if (data?.status === 'completed') {
               toast.success(`Sorted "${albumTitle}" — ${data?.total_items || 0} items reordered`)
-              loadAlbums()
+              // The sort recreates the album with a new id; refresh the matched
+              // album ids so subsequent sort/clear target the right album.
+              loadCards()
             } else if (data?.status === 'error') {
               if (Number(data?.inaccessible || 0) > 0) {
                 toast.error(`Sort skipped: ${data.inaccessible} item(s) aren't visible to this app — album left untouched`)
@@ -1085,7 +1117,7 @@ export default function GooglePhotosPage() {
 
       sortProgressIntervalRef.current = interval
     },
-    [deviceUrl, toast, loadAlbums]
+    [deviceUrl, toast, loadCards]
   )
 
   const handleSortAlbum = useCallback(
@@ -1112,45 +1144,46 @@ export default function GooglePhotosPage() {
 
   useEffect(() => {
     if (status?.connected) {
-      loadAlbums()
+      loadCards()
     }
-  }, [status?.connected, loadAlbums])
+  }, [status?.connected, loadCards])
 
-  // Reconcile album selection whenever the album list changes: newly appeared
-  // albums default to selected, user toggles for still-present albums are kept,
-  // and removed albums are dropped. Also kick off lazy preview loading.
+  // Reconcile card selection whenever the card list changes: newly appeared
+  // cards default to selected, user toggles for still-present cards are kept,
+  // and removed cards are dropped. Also kick off lazy summary loading.
   useEffect(() => {
-    if (!albums) return
-    setSelectedAlbumIds((prev) => {
+    if (!cards) return
+    setSelectedCardNames((prev) => {
       const next = new Set()
-      for (const album of albums) {
-        const wasKnown = knownAlbumIdsRef.current.has(album.id)
-        if (!wasKnown || prev.has(album.id)) next.add(album.id)
+      for (const card of cards) {
+        const wasKnown = knownCardNamesRef.current.has(card.name)
+        if (!wasKnown || prev.has(card.name)) next.add(card.name)
       }
       return next
     })
-    knownAlbumIdsRef.current = new Set(albums.map((a) => a.id))
-    if (albums.length > 0) {
-      loadAlbumPreviews(albums)
+    knownCardNamesRef.current = new Set(cards.map((c) => c.name))
+    if (cards.length > 0) {
+      loadCardSummaries(cards)
     }
-  }, [albums, loadAlbumPreviews])
+  }, [cards, loadCardSummaries])
 
   // Reconcile with sorts still running on the device. A sort runs in the
   // background server-side, so if the user navigated away and came back we
   // re-attach to it instead of showing an idle "Sort" button.
   useEffect(() => {
-    if (!deviceUrl || sortingAlbumId || !albums || albums.length === 0) return
+    if (!deviceUrl || sortingAlbumId || !cards || cards.length === 0) return
     let cancelled = false
     ;(async () => {
-      for (const album of albums) {
+      for (const card of cards) {
+        if (!card.album_id) continue
         try {
-          const data = await getGooglePhotosAlbumSortProgress(deviceUrl, album.id)
+          const data = await getGooglePhotosAlbumSortProgress(deviceUrl, card.album_id)
           if (cancelled) return
           const st = data?.status
           if (st && st !== 'idle' && st !== 'completed' && st !== 'error') {
-            setSortProgress((prev) => ({ ...prev, [album.id]: data }))
-            setSortingAlbumId(album.id)
-            pollSortProgress(album.id, album.title)
+            setSortProgress((prev) => ({ ...prev, [card.album_id]: data }))
+            setSortingAlbumId(card.album_id)
+            pollSortProgress(card.album_id, card.name)
             return
           }
         } catch {
@@ -1161,7 +1194,7 @@ export default function GooglePhotosPage() {
     return () => {
       cancelled = true
     }
-  }, [deviceUrl, albums, sortingAlbumId, pollSortProgress])
+  }, [deviceUrl, cards, sortingAlbumId, pollSortProgress])
 
   useEffect(() => {
     if (!deviceUrl) return
@@ -1321,17 +1354,17 @@ export default function GooglePhotosPage() {
     }
   }, [deviceUrl, status?.connected, toast, loadSyncProgress])
 
-  // Sync only the albums the user ticked. Album titles map 1:1 to card names
-  // (e.g. "card-00001"), which the backend uses to filter the sync.
+  // Sync only the cards the user ticked. The backend filters the B2 → Google
+  // Photos sync to these card names.
   const handleSyncSelected = useCallback(() => {
-    if (!albums) return
-    const cards = albums.filter((a) => selectedAlbumIds.has(a.id)).map((a) => a.title)
-    if (cards.length === 0) {
-      toast.error('Select at least one album to sync')
+    if (!cards) return
+    const names = cards.filter((c) => selectedCardNames.has(c.name)).map((c) => c.name)
+    if (names.length === 0) {
+      toast.error('Select at least one card to sync')
       return
     }
-    handleSync(false, cards)
-  }, [albums, selectedAlbumIds, handleSync, toast])
+    handleSync(false, names)
+  }, [cards, selectedCardNames, handleSync, toast])
 
   const handleCancelSync = useCallback(async () => {
     if (!deviceUrl) return
@@ -1407,9 +1440,11 @@ export default function GooglePhotosPage() {
 
       {isConnected && (
         <motion.div variants={itemVariants}>
-          <AlbumsPanel
-            albums={albums}
-            loading={albumsLoading}
+          <CardsPanel
+            cards={cards}
+            loading={cardsLoading}
+            summaries={cardSummaries}
+            deviceUrl={deviceUrl}
             onClear={handleClearAlbum}
             clearingId={clearingAlbumId}
             clearProgress={clearProgress}
@@ -1417,10 +1452,9 @@ export default function GooglePhotosPage() {
             sortingId={sortingAlbumId}
             sortProgress={sortProgress}
             reduceMotion={reduceMotion}
-            selectedIds={selectedAlbumIds}
-            onToggleAlbum={handleToggleAlbum}
+            selectedNames={selectedCardNames}
+            onToggleCard={handleToggleCard}
             onToggleAll={handleToggleAll}
-            previews={albumPreviews}
             onSyncSelected={handleSyncSelected}
             syncing={syncing}
           />

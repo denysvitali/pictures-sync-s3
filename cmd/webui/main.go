@@ -416,6 +416,7 @@ func main() {
 	http.HandleFunc("/api/files/paginated", ctx.HandleFilesPaginated)
 	http.HandleFunc("/api/files/link", ctx.HandleFileLink)
 	http.HandleFunc("/api/files/view", ctx.HandleFileView)
+	http.HandleFunc("/api/files/thumbnail", ctx.HandleFileThumbnail)
 	http.HandleFunc("/api/thumbnail", ctx.HandleThumbnail)
 	http.HandleFunc("/api/sdcard/files", ctx.HandleSDCardFiles)
 	http.HandleFunc("/api/sdcard/preview", ctx.HandleSDCardPreview)
@@ -442,6 +443,8 @@ func main() {
 	http.HandleFunc("/api/googlephotos/sync/history/export", ctx.HandleGooglePhotosSyncHistoryExport)
 	http.HandleFunc("/api/googlephotos/albums", ctx.HandleGooglePhotosAlbums)
 	http.HandleFunc("/api/googlephotos/albums/", ctx.HandleGooglePhotosAlbums)
+	http.HandleFunc("/api/googlephotos/cards", ctx.HandleGooglePhotosCards)
+	http.HandleFunc("/api/googlephotos/cards/", ctx.HandleGooglePhotosCards)
 	http.HandleFunc("/ws", websocket.HandleWebSocketWithDmesg(stateMgr, eventMgr, dmesgMgr, otaMgr))
 
 	// SPA route and static assets for React frontend

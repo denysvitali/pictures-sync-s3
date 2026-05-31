@@ -152,6 +152,34 @@ func ReadThumbnail(mountPath, requestedPath string) (*Preview, error) {
 	return &Preview{ContentType: "image/jpeg", Data: buf.Bytes()}, nil
 }
 
+// ThumbnailFromBytes builds a JPEG thumbnail (max 200×200) from in-memory image
+// bytes — the same strategy as ReadThumbnail but for data fetched from a remote
+// (e.g. an rclone/B2 object) rather than a local file. It prefers the embedded
+// EXIF thumbnail for JPEGs, falling back to decoding and resizing the full
+// image. The thumbnail is rotated to match the EXIF Orientation tag.
+//
+// For JPEGs without an embedded thumbnail (or non-JPEG formats) the caller must
+// supply the full image bytes; a truncated prefix will fail the fallback decode.
+func ThumbnailFromBytes(data []byte) (*Preview, error) {
+	if thumb, orientation, err := extractEXIFThumbnailFromReader(bytes.NewReader(data)); err == nil {
+		if oriented, oerr := applyJPEGOrientation(thumb, orientation); oerr == nil {
+			return &Preview{ContentType: "image/jpeg", Data: oriented}, nil
+		}
+		// Corrupt embedded thumbnail — fall through to a full decode.
+	}
+
+	img, err := imaging.Decode(bytes.NewReader(data), imaging.AutoOrientation(true))
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode image: %w", err)
+	}
+	thumbnail := imaging.Fit(img, 200, 200, imaging.Lanczos)
+	var buf bytes.Buffer
+	if err := imaging.Encode(&buf, thumbnail, imaging.JPEG, imaging.JPEGQuality(80)); err != nil {
+		return nil, fmt.Errorf("failed to encode thumbnail: %w", err)
+	}
+	return &Preview{ContentType: "image/jpeg", Data: buf.Bytes()}, nil
+}
+
 // extractEXIFThumbnail returns the JPEG thumbnail stored in IFD1 of the EXIF
 // metadata along with the IFD0 Orientation value (defaulting to 1 when absent).
 // It only reads the JPEG's APP1 segment instead of slurping the entire image,
@@ -164,8 +192,13 @@ func extractEXIFThumbnail(filePath string) ([]byte, int, error) {
 		return nil, 0, err
 	}
 	defer f.Close()
+	return extractEXIFThumbnailFromReader(f)
+}
 
-	rawExif, err := readJPEGExifSegment(f)
+// extractEXIFThumbnailFromReader is the reader-based core of extractEXIFThumbnail
+// so both local files and in-memory remote bytes share one implementation.
+func extractEXIFThumbnailFromReader(r io.Reader) ([]byte, int, error) {
+	rawExif, err := readJPEGExifSegment(r)
 	if err != nil {
 		return nil, 0, err
 	}

@@ -261,10 +261,14 @@ export const cancelGooglePhotosSync = (d) =>
   apiRequest('/api/googlephotos/sync/cancel', { deviceUrl: d, method: 'POST' })
 export const getGooglePhotosSyncProgress = (d) =>
   apiRequest('/api/googlephotos/sync/progress', { deviceUrl: d })
-export const getGooglePhotosAlbums = (d) =>
-  apiRequest('/api/googlephotos/albums', { deviceUrl: d })
-export const getGooglePhotosAlbumPreview = (d, albumId) =>
-  apiRequest(`/api/googlephotos/albums/${albumId}/preview`, { deviceUrl: d })
+// The sync is B2 -> Google Photos, so the panel lists the B2 source cards.
+export const getGooglePhotosCards = (d) =>
+  apiRequest('/api/googlephotos/cards', { deviceUrl: d })
+export const getGooglePhotosCardSummary = (d, cardName) =>
+  apiRequest(`/api/googlephotos/cards/${encodeURIComponent(cardName)}/summary`, { deviceUrl: d })
+// Thumbnail for an image stored on the remote (B2), used for card previews.
+export const getRemoteThumbnailUrl = (d, filePath) =>
+  `${normalizeBaseUrl(d)}/api/files/thumbnail?path=${encodeURIComponent(filePath || '')}`
 export const clearGooglePhotosAlbum = (d, albumId) =>
   apiRequest(`/api/googlephotos/albums/${albumId}`, { deviceUrl: d, method: 'DELETE' })
 export const getGooglePhotosAlbumClearProgress = (d, albumId) =>

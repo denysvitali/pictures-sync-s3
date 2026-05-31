@@ -587,14 +587,110 @@ func (ctx *Context) HandleGooglePhotosAlbums(w http.ResponseWriter, r *http.Requ
 			ctx.handleGooglePhotosAlbumSortProgress(w, r)
 			return
 		}
-		if len(parts) >= 5 && parts[4] == "preview" {
-			ctx.handleGooglePhotosAlbumPreview(w, r)
-			return
-		}
 		ctx.handleGooglePhotosAlbumList(w, r)
 		return
 	}
 	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+}
+
+// HandleGooglePhotosCards exposes the B2 source cards (the sync source) for the
+// Google Photos page. The B2 remote is the source of truth for what gets synced,
+// so the UI lists cards from here rather than from Google Photos.
+// GET /api/googlephotos/cards                — list cards + matched album info
+// GET /api/googlephotos/cards/{card}/summary — per-card counts + B2 previews
+func (ctx *Context) HandleGooglePhotosCards(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	path := strings.Trim(r.URL.Path, "/")
+	parts := strings.Split(path, "/")
+	if len(parts) >= 5 && parts[4] == "summary" {
+		ctx.handleGooglePhotosCardSummary(w, r, parts[3])
+		return
+	}
+	ctx.handleGooglePhotosCardList(w, r)
+}
+
+func (ctx *Context) handleGooglePhotosCardList(w http.ResponseWriter, r *http.Request) {
+	if ctx.SyncMgr == nil {
+		http.Error(w, "Sync manager not initialized", http.StatusServiceUnavailable)
+		return
+	}
+
+	cards, err := ctx.SyncMgr.ListCardIDs()
+	if err != nil {
+		log.Printf("[GooglePhotos] Failed to list cards: %v", err)
+		http.Error(w, "Failed to list cards", http.StatusBadGateway)
+		return
+	}
+
+	// Best-effort: match each card to its Google Photos album (by title) so the
+	// UI can offer sort/clear and show the destination item count. Album lookup
+	// failures (not connected, API error) are non-fatal — we still return cards.
+	type albumInfo struct {
+		id    string
+		count string
+	}
+	albumByTitle := map[string]albumInfo{}
+	clientID, clientSecret := ctx.googlePhotosOAuthCreds()
+	if clientID != "" && clientSecret != "" {
+		tokenStore := googlephotos.NewTokenStore("")
+		client := googlephotos.NewClient(clientID, clientSecret, tokenStore)
+		if client.IsAuthenticated() {
+			if albums, err := client.ListAlbumsContext(r.Context()); err == nil {
+				for _, a := range albums {
+					if strings.HasPrefix(a.Title, "card-") {
+						albumByTitle[a.Title] = albumInfo{id: a.ID, count: a.MediaItemsCount}
+					}
+				}
+			} else {
+				log.Printf("[GooglePhotos] card list: album lookup failed: %v", err)
+			}
+		}
+	}
+
+	out := make([]map[string]any, 0, len(cards))
+	for _, c := range cards {
+		info := albumByTitle[c.Name]
+		albumCount := 0
+		if info.count != "" {
+			albumCount, _ = strconv.Atoi(info.count)
+		}
+		out = append(out, map[string]any{
+			"name":             c.Name,
+			"mod_time":         c.ModTime,
+			"album_id":         info.id,
+			"album_item_count": albumCount,
+		})
+	}
+	httputil.JSON(w, http.StatusOK, map[string]any{"cards": out})
+}
+
+func (ctx *Context) handleGooglePhotosCardSummary(w http.ResponseWriter, r *http.Request, cardName string) {
+	if ctx.SyncMgr == nil {
+		http.Error(w, "Sync manager not initialized", http.StatusServiceUnavailable)
+		return
+	}
+	if cardName == "" {
+		http.Error(w, "Missing card name", http.StatusBadRequest)
+		return
+	}
+
+	summary, err := ctx.SyncMgr.GetGooglePhotosCardSummary(r.Context(), cardName)
+	if err != nil {
+		log.Printf("[GooglePhotos] Failed to summarize card %s: %v", cardName, err)
+		http.Error(w, "Failed to read card", http.StatusBadGateway)
+		return
+	}
+
+	httputil.JSON(w, http.StatusOK, map[string]any{
+		"name":              summary.Name,
+		"total_files":       summary.TotalFiles,
+		"total_bytes":       summary.TotalBytes,
+		"transferred_files": summary.TransferredFiles,
+		"preview":           summary.Preview,
+	})
 }
 
 func (ctx *Context) handleGooglePhotosAlbumList(w http.ResponseWriter, r *http.Request) {
@@ -626,55 +722,6 @@ func (ctx *Context) handleGooglePhotosAlbumList(w http.ResponseWriter, r *http.R
 		}
 	}
 	httputil.JSON(w, http.StatusOK, map[string]any{"albums": managed})
-}
-
-// handleGooglePhotosAlbumPreview returns up to 4 media items from an album so
-// the UI can show a thumbnail preview of what an album contains before syncing.
-// GET /api/googlephotos/albums/{albumId}/preview
-func (ctx *Context) handleGooglePhotosAlbumPreview(w http.ResponseWriter, r *http.Request) {
-	path := strings.Trim(r.URL.Path, "/")
-	parts := strings.Split(path, "/")
-	if len(parts) < 4 || parts[3] == "" {
-		http.Error(w, "Missing album ID", http.StatusBadRequest)
-		return
-	}
-	albumID := parts[3]
-
-	clientID, clientSecret := ctx.googlePhotosOAuthCreds()
-	if clientID == "" || clientSecret == "" {
-		http.Error(w, "Google Photos credentials not configured", http.StatusPreconditionFailed)
-		return
-	}
-
-	tokenStore := googlephotos.NewTokenStore("")
-	client := googlephotos.NewClient(clientID, clientSecret, tokenStore)
-	if !client.IsAuthenticated() {
-		http.Error(w, "Not authenticated with Google Photos", http.StatusUnauthorized)
-		return
-	}
-
-	const previewCount = 4
-	items, err := client.ListAlbumMediaItemsPage(r.Context(), albumID, previewCount)
-	if err != nil {
-		log.Printf("[GooglePhotos] Failed to list preview items for album %s: %v", albumID, err)
-		http.Error(w, "Failed to list album preview", http.StatusInternalServerError)
-		return
-	}
-
-	previews := make([]map[string]any, 0, len(items))
-	for _, item := range items {
-		previews = append(previews, map[string]any{
-			"id":        item.ID,
-			"base_url":  item.BaseURL,
-			"mime_type": item.MimeType,
-			"filename":  item.Filename,
-		})
-	}
-
-	httputil.JSON(w, http.StatusOK, map[string]any{
-		"album_id": albumID,
-		"items":    previews,
-	})
 }
 
 func (ctx *Context) handleGooglePhotosAlbumClear(w http.ResponseWriter, r *http.Request) {

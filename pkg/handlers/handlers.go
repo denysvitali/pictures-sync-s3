@@ -32,12 +32,14 @@ type SyncManager interface {
 	ListFiles(path string) ([]syncmanager.FileInfo, error)
 	ListFilesPaginated(path string, page, pageSize int) (*syncmanager.FileListResult, error)
 	GetFile(path string, w io.Writer) error
+	GetFileRange(path string, w io.Writer, maxBytes int64) error
 	GetPublicLink(path string) (string, error)
 	// Google Photos sync (rclone-based)
 	IsGooglePhotosRunning() bool
 	CancelGooglePhotos() error
 	SyncCardsToGooglePhotos(ctx context.Context, force bool, cardFilter []string) error
 	GetGooglePhotosProgress() syncmanager.Progress
+	GetGooglePhotosCardSummary(ctx context.Context, cardName string) (syncmanager.GooglePhotosCardSummary, error)
 }
 
 type ManualSyncRequester interface {

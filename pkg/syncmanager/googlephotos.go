@@ -76,6 +76,111 @@ func ClearGooglePhotosAlbumState(albumName string) error {
 	return nil
 }
 
+// GooglePhotosCardSummary describes one B2 source card for the Google Photos
+// sync UI: how many photo/video files it holds, how many this app has already
+// uploaded to Google Photos, and a few preview image paths (relative to the
+// remote path) the UI can thumbnail.
+type GooglePhotosCardSummary struct {
+	Name             string   `json:"name"`
+	TotalFiles       int      `json:"total_files"`
+	TotalBytes       int64    `json:"total_bytes"`
+	TransferredFiles int      `json:"transferred_files"`
+	Preview          []string `json:"preview"`
+}
+
+// GetGooglePhotosCardSummary walks a single card's DCIM tree on the B2 remote to
+// count photo/video files and gather up to 4 preview image paths, and reads the
+// local upload ledger to report how many of those files have already been
+// transferred to Google Photos. The B2 remote is the sync source, so this is
+// the authoritative view of "what will be synced" and "how far along we are".
+func (m *Manager) GetGooglePhotosCardSummary(ctx context.Context, cardName string) (GooglePhotosCardSummary, error) {
+	cardName = strings.TrimSpace(cardName)
+	if cardName == "" || strings.ContainsAny(cardName, "/\\") || strings.Contains(cardName, "..") || !strings.HasPrefix(cardName, "card-") {
+		return GooglePhotosCardSummary{}, fmt.Errorf("invalid card name %q", cardName)
+	}
+
+	rcloneConfigMu.Lock()
+	defer rcloneConfigMu.Unlock()
+	if err := m.loadRcloneConfigLocked(); err != nil {
+		return GooglePhotosCardSummary{}, err
+	}
+
+	srcPath := filepath.Join(m.remoteName+":"+m.remotePath, cardName, "DCIM")
+	srcFs, err := fs.NewFs(ctx, srcPath)
+	if err != nil {
+		return GooglePhotosCardSummary{}, fmt.Errorf("failed to open card %s: %w", cardName, err)
+	}
+
+	preview := make([]string, 0, 4)
+	count, totalBytes := m.gpSummaryWalk(ctx, srcFs, "", cardName, &preview)
+
+	// Transferred count comes from the local upload ledger, whose keys are
+	// "card-<id>/<path-relative-to-DCIM>" (see syncCardToGooglePhotos).
+	transferred := 0
+	state := loadGooglePhotosRcloneState()
+	prefix := cardName + "/"
+	for key := range state.Uploaded {
+		if strings.HasPrefix(key, prefix) {
+			transferred++
+		}
+	}
+	if transferred > count {
+		transferred = count
+	}
+
+	return GooglePhotosCardSummary{
+		Name:             cardName,
+		TotalFiles:       count,
+		TotalBytes:       totalBytes,
+		TransferredFiles: transferred,
+		Preview:          preview,
+	}, nil
+}
+
+// gpSummaryWalk recursively counts photo/video files under dir and appends up to
+// 4 thumbnailable preview paths (relative to the remote path, including the card
+// and DCIM prefix) into preview.
+func (m *Manager) gpSummaryWalk(ctx context.Context, f fs.Fs, dir, cardName string, preview *[]string) (int, int64) {
+	entries, err := f.List(ctx, dir)
+	if err != nil {
+		return 0, 0
+	}
+	var count int
+	var totalBytes int64
+	for _, entry := range entries {
+		select {
+		case <-ctx.Done():
+			return count, totalBytes
+		default:
+		}
+		switch e := entry.(type) {
+		case fs.Object:
+			if isPhotoOrVideo(e.Remote()) {
+				count++
+				totalBytes += e.Size()
+				if len(*preview) < 4 && isThumbnailablePhoto(e.Remote()) {
+					*preview = append(*preview, path.Join(cardName, "DCIM", e.Remote()))
+				}
+			}
+		case fs.Directory:
+			c, b := m.gpSummaryWalk(ctx, f, e.Remote(), cardName, preview)
+			count += c
+			totalBytes += b
+		}
+	}
+	return count, totalBytes
+}
+
+// isThumbnailablePhoto reports whether a file can be turned into a preview
+// thumbnail by the server (formats the Go image stack decodes reliably).
+func isThumbnailablePhoto(filename string) bool {
+	switch strings.ToLower(filepath.Ext(filename)) {
+	case ".jpg", ".jpeg", ".png":
+		return true
+	}
+	return false
+}
+
 // SyncCardsToGooglePhotos syncs all card directories from the B2 remote to
 // Google Photos using rclone's googlephotos backend. It lists cards from the
 // B2 remote, then syncs each card's DCIM folder to gphotos:card-{id}.

@@ -3,6 +3,7 @@ package syncmanager
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -378,6 +379,54 @@ func (m *Manager) GetFileWithTimeout(path string, w io.Writer, timeout time.Dura
 		timeout = defaultFileDownloadTimeout
 	}
 	return m.getFile(path, w, timeout)
+}
+
+// GetFileRange streams at most maxBytes of a remote file into w. It is used for
+// cheap thumbnailing: fetching only the leading bytes of a JPEG is enough to
+// read the embedded EXIF thumbnail without downloading the full-resolution
+// image. When maxBytes <= 0 the whole file is streamed.
+func (m *Manager) GetFileRange(path string, w io.Writer, maxBytes int64) error {
+	if maxBytes <= 0 {
+		return m.getFile(path, w, defaultFileDownloadTimeout)
+	}
+	err := m.getFile(path, &limitedWriter{w: w, remaining: maxBytes}, defaultFileDownloadTimeout)
+	if errors.Is(err, errWriteLimitReached) {
+		// We deliberately stopped after maxBytes — not a real failure.
+		return nil
+	}
+	return err
+}
+
+// limitedWriter writes at most remaining bytes to the underlying writer and
+// silently discards the rest, signalling the copy loop to stop by returning an
+// error once the cap is hit so the upstream download can be torn down early.
+type limitedWriter struct {
+	w         io.Writer
+	remaining int64
+}
+
+// errWriteLimitReached is returned by limitedWriter once its cap is exhausted so
+// the io.Copy in getFile stops pulling bytes from the remote.
+var errWriteLimitReached = errors.New("write limit reached")
+
+func (l *limitedWriter) Write(p []byte) (int, error) {
+	if l.remaining <= 0 {
+		return 0, errWriteLimitReached
+	}
+	if int64(len(p)) > l.remaining {
+		n, err := l.w.Write(p[:l.remaining])
+		l.remaining -= int64(n)
+		if err != nil {
+			return n, err
+		}
+		// Report the full length so io.Copy treats the chunk as consumed, then
+		// stop on the next call. Returning a short count would make io.Copy emit
+		// ErrShortWrite instead of our sentinel.
+		return len(p), errWriteLimitReached
+	}
+	n, err := l.w.Write(p)
+	l.remaining -= int64(n)
+	return n, err
 }
 
 func (m *Manager) getFile(path string, w io.Writer, timeout time.Duration) error {

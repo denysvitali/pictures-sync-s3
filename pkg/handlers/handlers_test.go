@@ -80,6 +80,10 @@ func (m *mockSyncManager) SyncCardsToGooglePhotos(context.Context, bool, []strin
 func (m *mockSyncManager) GetGooglePhotosProgress() syncmanager.Progress {
 	return syncmanager.Progress{}
 }
+func (m *mockSyncManager) GetGooglePhotosCardSummary(context.Context, string) (syncmanager.GooglePhotosCardSummary, error) {
+	return syncmanager.GooglePhotosCardSummary{}, nil
+}
+func (m *mockSyncManager) GetFileRange(string, io.Writer, int64) error { return nil }
 func (m *mockSyncManager) ListFilesPaginated(path string, page, pageSize int) (*syncmanager.FileListResult, error) {
 	if m.listPagedErr != nil {
 		return nil, m.listPagedErr
