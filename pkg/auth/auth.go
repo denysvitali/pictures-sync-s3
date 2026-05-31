@@ -75,8 +75,10 @@ func SecurityHeadersMiddleware(next http.Handler) http.Handler {
 				// unsafe-inline is needed for the extensive inline CSS in templates.go
 				"style-src 'self' 'unsafe-inline'",
 
-				// img-src: Allow images from same origin and data URIs (for thumbnails/previews)
-				"img-src 'self' data: blob:",
+				// img-src: Allow images from same origin and data URIs (for thumbnails/previews).
+				// *.googleusercontent.com is required for Google Photos album thumbnail
+				// previews, which are served from Google's CDN via the media baseUrl.
+				"img-src 'self' data: blob: https://*.googleusercontent.com",
 
 				// font-src: Allow fonts from same origin and data URIs
 				"font-src 'self' data:",
