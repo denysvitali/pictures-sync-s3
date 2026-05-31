@@ -278,6 +278,46 @@ func (c *Client) ListAlbumMediaItems(ctx context.Context, albumID string) ([]*Me
 	return allItems, nil
 }
 
+// ListAlbumMediaItemsPage returns up to pageSize media items from the first
+// page of an album's contents using a single search request. It is intended for
+// cheap previews where paginating the entire album would be wasteful.
+func (c *Client) ListAlbumMediaItemsPage(ctx context.Context, albumID string, pageSize int) ([]*MediaItem, error) {
+	if pageSize <= 0 || pageSize > 100 {
+		pageSize = 100
+	}
+
+	reqBody := map[string]string{"albumId": albumID}
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal search request: %w", err)
+	}
+
+	resp, err := c.doRequestContext(ctx, "POST", fmt.Sprintf("/mediaItems:search?pageSize=%d", pageSize), bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, err
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
+	resp.Body.Close()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read media items response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, newAPIError("search", resp.StatusCode, body)
+	}
+
+	var result ListMediaItemsResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse media items response: %w", err)
+	}
+
+	if len(result.MediaItems) > pageSize {
+		result.MediaItems = result.MediaItems[:pageSize]
+	}
+	return result.MediaItems, nil
+}
+
 // BatchRemoveMediaItems removes media items from an album.
 // Requests are automatically chunked to respect the 50-item API limit.
 func (c *Client) BatchRemoveMediaItems(ctx context.Context, albumID string, mediaItemIds []string) error {

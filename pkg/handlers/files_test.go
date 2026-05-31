@@ -643,9 +643,11 @@ func (filesTestErroringSync) GetFile(string, io.Writer) error { return nil }
 func (filesTestErroringSync) GetPublicLink(string) (string, error) {
 	return "", errors.New("signing service unavailable")
 }
-func (filesTestErroringSync) IsGooglePhotosRunning() bool                         { return false }
-func (filesTestErroringSync) CancelGooglePhotos() error                           { return nil }
-func (filesTestErroringSync) SyncCardsToGooglePhotos(context.Context, bool) error { return nil }
+func (filesTestErroringSync) IsGooglePhotosRunning() bool { return false }
+func (filesTestErroringSync) CancelGooglePhotos() error   { return nil }
+func (filesTestErroringSync) SyncCardsToGooglePhotos(context.Context, bool, []string) error {
+	return nil
+}
 func (filesTestErroringSync) GetGooglePhotosProgress() syncmanager.Progress {
 	return syncmanager.Progress{}
 }

@@ -83,7 +83,10 @@ func ClearGooglePhotosAlbumState(albumName string) error {
 // When force is true the local upload-tracking state is ignored, so files
 // recorded as already uploaded are re-uploaded. Use this to recover when the
 // local state is stale (files marked uploaded but missing from Google Photos).
-func (m *Manager) SyncCardsToGooglePhotos(ctx context.Context, force bool) error {
+//
+// cardFilter optionally restricts the sync to the named cards (album titles such
+// as "card-00001"). When it is empty, every card on the remote is synced.
+func (m *Manager) SyncCardsToGooglePhotos(ctx context.Context, force bool, cardFilter []string) error {
 	m.mu.Lock()
 	if m.googlePhotosRunning {
 		m.mu.Unlock()
@@ -126,6 +129,23 @@ func (m *Manager) SyncCardsToGooglePhotos(ctx context.Context, force bool) error
 	cards, err := m.listCardIDsLocked(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to list cards: %w", err)
+	}
+
+	// Restrict to the user-selected cards when a filter was provided. An empty
+	// filter means "sync everything" (the default and first-run behaviour).
+	if len(cardFilter) > 0 {
+		allow := make(map[string]struct{}, len(cardFilter))
+		for _, name := range cardFilter {
+			allow[name] = struct{}{}
+		}
+		filtered := cards[:0]
+		for _, card := range cards {
+			if _, ok := allow[card.Name]; ok {
+				filtered = append(filtered, card)
+			}
+		}
+		cards = filtered
+		log.Printf("Google Photos sync: restricted to %d selected card(s)", len(cards))
 	}
 
 	if len(cards) == 0 {

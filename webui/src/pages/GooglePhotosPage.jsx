@@ -16,6 +16,7 @@ import {
   cancelGooglePhotosSync,
   getGooglePhotosSyncProgress,
   getGooglePhotosAlbums,
+  getGooglePhotosAlbumPreview,
   clearGooglePhotosAlbum,
   getGooglePhotosAlbumClearProgress,
   sortGooglePhotosAlbum,
@@ -480,7 +481,77 @@ function AlbumsHeader({ count }) {
   )
 }
 
-function AlbumsPanel({ albums, loading, onClear, clearingId, clearProgress, onSort, sortingId, sortProgress, reduceMotion }) {
+function PreviewGrid({ preview }) {
+  const tiles = (
+    <div className="mt-3 grid grid-cols-4 gap-1.5">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div key={i} className="aspect-square animate-shimmer rounded-md" />
+      ))}
+    </div>
+  )
+
+  if (!preview || preview.loading) return tiles
+
+  if (preview.error) {
+    return <p className="mt-3 text-xs text-surface-500">Preview unavailable</p>
+  }
+
+  if (!preview.items || preview.items.length === 0) {
+    return <p className="mt-3 text-xs text-surface-500">No photos to preview yet</p>
+  }
+
+  return (
+    <div className="mt-3 grid grid-cols-4 gap-1.5">
+      {preview.items.slice(0, 4).map((item) => {
+        const isVideo = String(item.mime_type || '').startsWith('video/')
+        const thumb = item.base_url ? `${item.base_url}=w240-h240-c` : ''
+        return (
+          <div
+            key={item.id}
+            className="relative aspect-square overflow-hidden rounded-md border border-surface-700/50 bg-surface-900"
+            title={item.filename || ''}
+          >
+            {thumb ? (
+              <img
+                src={thumb}
+                alt={item.filename || 'Google Photos preview'}
+                loading="lazy"
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center">
+                <Icon name="image" className="h-4 w-4 text-surface-600" />
+              </div>
+            )}
+            {isVideo && (
+              <span className="absolute bottom-0.5 right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/60">
+                <Icon name="play" className="h-2.5 w-2.5 text-white" />
+              </span>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function AlbumsPanel({
+  albums,
+  loading,
+  onClear,
+  clearingId,
+  clearProgress,
+  onSort,
+  sortingId,
+  sortProgress,
+  reduceMotion,
+  selectedIds,
+  onToggleAlbum,
+  onToggleAll,
+  previews,
+  onSyncSelected,
+  syncing,
+}) {
   if (loading) {
     return (
       <Card>
@@ -515,15 +586,48 @@ function AlbumsPanel({ albums, loading, onClear, clearingId, clearProgress, onSo
     )
   }
 
+  const selectedCount = albums.reduce((n, a) => (selectedIds?.has(a.id) ? n + 1 : n), 0)
+  const allSelected = albums.length > 0 && selectedCount === albums.length
+
   return (
     <Card>
       <AlbumsHeader count={albums.length} />
       <div className="space-y-3">
         <p className="text-xs text-surface-500">
-          These are the albums created by this app. You can sort an album, or clear it to remove all photos this app uploaded.
+          These are the albums created by this app. Tick the albums you want to sync, preview their photos, sort an album,
+          or clear it to remove all photos this app uploaded.
         </p>
+
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-surface-700/50 bg-surface-900/40 p-2.5">
+          <label className="flex cursor-pointer select-none items-center gap-2 text-sm text-surface-200">
+            <input
+              type="checkbox"
+              className="h-4 w-4 cursor-pointer rounded border-surface-600 bg-surface-800 accent-brand-500"
+              checked={allSelected}
+              ref={(el) => {
+                if (el) el.indeterminate = selectedCount > 0 && !allSelected
+              }}
+              onChange={(e) => onToggleAll(e.target.checked)}
+            />
+            <span>
+              {selectedCount > 0 ? `${selectedCount} selected` : 'Select all'}
+            </span>
+          </label>
+          <Button
+            size="sm"
+            loading={syncing}
+            disabled={syncing || selectedCount === 0}
+            onClick={onSyncSelected}
+          >
+            <Icon name="arrow-up-tray" className="h-4 w-4" />
+            {syncing ? 'Starting…' : `Sync selected${selectedCount > 0 ? ` (${selectedCount})` : ''}`}
+          </Button>
+        </div>
+
         <ul className="space-y-2">
           {albums.map((album) => {
+            const isSelected = Boolean(selectedIds?.has(album.id))
+            const preview = previews?.[album.id]
             const progress = clearProgress?.[album.id]
             const isClearing = clearingId === album.id
             const clearLabel = isClearing && progress?.status === 'clearing' && progress?.total_items > 0
@@ -583,11 +687,22 @@ function AlbumsPanel({ albums, loading, onClear, clearingId, clearProgress, onSo
               <li
                 key={album.id}
                 className={`overflow-hidden rounded-lg border bg-surface-900/40 p-3 transition-colors ${
-                  busy ? 'border-brand-400/40' : 'border-surface-700/60'
+                  busy
+                    ? 'border-brand-400/40'
+                    : isSelected
+                      ? 'border-brand-500/40 bg-brand-500/[0.04]'
+                      : 'border-surface-700/60'
                 }`}
               >
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex min-w-0 items-center gap-3">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 shrink-0 cursor-pointer rounded border-surface-600 bg-surface-800 accent-brand-500"
+                      checked={isSelected}
+                      onChange={(e) => onToggleAlbum(album.id, e.target.checked)}
+                      aria-label={`Select album ${album.title}`}
+                    />
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-brand-400/20 bg-gradient-to-br from-brand-500/20 to-brand-700/10 text-sm font-bold text-brand-300">
                       {initial}
                     </div>
@@ -622,6 +737,8 @@ function AlbumsPanel({ albums, loading, onClear, clearingId, clearProgress, onSo
                     </Button>
                   </div>
                 </div>
+
+                <PreviewGrid preview={preview} />
 
                 <AnimatePresence initial={false}>
                   {hasProgressCounts && (
@@ -760,6 +877,10 @@ export default function GooglePhotosPage() {
   const [clearProgress, setClearProgress] = useState({})
   const [sortingAlbumId, setSortingAlbumId] = useState(null)
   const [sortProgress, setSortProgress] = useState({})
+  const [selectedAlbumIds, setSelectedAlbumIds] = useState(() => new Set())
+  const [albumPreviews, setAlbumPreviews] = useState({})
+  const knownAlbumIdsRef = useRef(new Set())
+  const previewFetchedRef = useRef(new Set())
   const progressIntervalRef = useRef(null)
   const statusIntervalRef = useRef(null)
   const clearProgressIntervalRef = useRef(null)
@@ -828,6 +949,48 @@ export default function GooglePhotosPage() {
     }
   }, [deviceUrl])
 
+  // Fetch a 4-photo preview for each album that hasn't been fetched yet. Runs
+  // lazily as albums load so the album list stays responsive.
+  const loadAlbumPreviews = useCallback(
+    async (albumList) => {
+      if (!deviceUrl || !albumList) return
+      for (const album of albumList) {
+        if (previewFetchedRef.current.has(album.id)) continue
+        previewFetchedRef.current.add(album.id)
+        setAlbumPreviews((prev) => ({ ...prev, [album.id]: { loading: true, items: [], error: null } }))
+        try {
+          const data = await getGooglePhotosAlbumPreview(deviceUrl, album.id)
+          setAlbumPreviews((prev) => ({
+            ...prev,
+            [album.id]: { loading: false, items: data?.items || [], error: null },
+          }))
+        } catch (err) {
+          setAlbumPreviews((prev) => ({
+            ...prev,
+            [album.id]: { loading: false, items: [], error: describeError(err) },
+          }))
+        }
+      }
+    },
+    [deviceUrl]
+  )
+
+  const handleToggleAlbum = useCallback((albumId, checked) => {
+    setSelectedAlbumIds((prev) => {
+      const next = new Set(prev)
+      if (checked) next.add(albumId)
+      else next.delete(albumId)
+      return next
+    })
+  }, [])
+
+  const handleToggleAll = useCallback(
+    (checked) => {
+      setSelectedAlbumIds(() => (checked && albums ? new Set(albums.map((a) => a.id)) : new Set()))
+    },
+    [albums]
+  )
+
   const handleClearAlbum = useCallback(
     async (albumId, albumTitle) => {
       if (!deviceUrl) return
@@ -857,6 +1020,8 @@ export default function GooglePhotosPage() {
               setClearingAlbumId(null)
               if (data?.status === 'completed') {
                 toast.success(`Cleared ${data?.removed_items || 0} item(s) from "${albumTitle}"`)
+                // Force the preview to refetch — the album is now empty.
+                previewFetchedRef.current.delete(albumId)
                 loadAlbums()
               } else if (data?.status === 'error') {
                 toast.error(`Failed to clear album: ${data?.error || 'Unknown error'}`)
@@ -950,6 +1115,25 @@ export default function GooglePhotosPage() {
       loadAlbums()
     }
   }, [status?.connected, loadAlbums])
+
+  // Reconcile album selection whenever the album list changes: newly appeared
+  // albums default to selected, user toggles for still-present albums are kept,
+  // and removed albums are dropped. Also kick off lazy preview loading.
+  useEffect(() => {
+    if (!albums) return
+    setSelectedAlbumIds((prev) => {
+      const next = new Set()
+      for (const album of albums) {
+        const wasKnown = knownAlbumIdsRef.current.has(album.id)
+        if (!wasKnown || prev.has(album.id)) next.add(album.id)
+      }
+      return next
+    })
+    knownAlbumIdsRef.current = new Set(albums.map((a) => a.id))
+    if (albums.length > 0) {
+      loadAlbumPreviews(albums)
+    }
+  }, [albums, loadAlbumPreviews])
 
   // Reconcile with sorts still running on the device. A sort runs in the
   // background server-side, so if the user navigated away and came back we
@@ -1104,7 +1288,7 @@ export default function GooglePhotosPage() {
     }
   }, [deviceUrl, toast])
 
-  const handleSync = useCallback(async (force = false) => {
+  const handleSync = useCallback(async (force = false, cards = null) => {
     if (!deviceUrl) return
     if (!status?.connected) {
       toast.error('Connect Google Photos before starting a sync')
@@ -1118,10 +1302,12 @@ export default function GooglePhotosPage() {
     ) {
       return
     }
+    const selection = Array.isArray(cards) && cards.length ? cards : null
     try {
-      await startGooglePhotosSync(deviceUrl, force)
+      await startGooglePhotosSync(deviceUrl, force, selection)
       setSyncing(true)
-      toast.success(force ? 'Force re-sync to Google Photos started' : 'Sync to Google Photos started')
+      const scope = selection ? `${selection.length} selected album(s)` : 'all albums'
+      toast.success(force ? `Force re-sync of ${scope} started` : `Sync of ${scope} started`)
       await loadSyncProgress()
     } catch (err) {
       const msg = describeError(err)
@@ -1134,6 +1320,18 @@ export default function GooglePhotosPage() {
       toast.error(`Failed to start sync: ${msg}`)
     }
   }, [deviceUrl, status?.connected, toast, loadSyncProgress])
+
+  // Sync only the albums the user ticked. Album titles map 1:1 to card names
+  // (e.g. "card-00001"), which the backend uses to filter the sync.
+  const handleSyncSelected = useCallback(() => {
+    if (!albums) return
+    const cards = albums.filter((a) => selectedAlbumIds.has(a.id)).map((a) => a.title)
+    if (cards.length === 0) {
+      toast.error('Select at least one album to sync')
+      return
+    }
+    handleSync(false, cards)
+  }, [albums, selectedAlbumIds, handleSync, toast])
 
   const handleCancelSync = useCallback(async () => {
     if (!deviceUrl) return
@@ -1219,6 +1417,12 @@ export default function GooglePhotosPage() {
             sortingId={sortingAlbumId}
             sortProgress={sortProgress}
             reduceMotion={reduceMotion}
+            selectedIds={selectedAlbumIds}
+            onToggleAlbum={handleToggleAlbum}
+            onToggleAll={handleToggleAll}
+            previews={albumPreviews}
+            onSyncSelected={handleSyncSelected}
+            syncing={syncing}
           />
         </motion.div>
       )}

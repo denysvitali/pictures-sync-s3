@@ -248,10 +248,14 @@ export const startGooglePhotosAuth = (d, redirectUri) =>
   apiRequest('/api/googlephotos/auth/start', { deviceUrl: d, method: 'POST', body: { redirect_uri: redirectUri } })
 export const disconnectGooglePhotos = (d) =>
   apiRequest('/api/googlephotos/auth/disconnect', { deviceUrl: d, method: 'POST' })
-export const startGooglePhotosSync = (d, force = false) =>
-  apiRequest(`/api/googlephotos/sync${force ? '?force=true' : ''}`, {
+export const startGooglePhotosSync = (d, force = false, cards = null) =>
+  apiRequest('/api/googlephotos/sync', {
     deviceUrl: d,
     method: 'POST',
+    query: {
+      ...(force ? { force: 'true' } : {}),
+      ...(Array.isArray(cards) && cards.length ? { card: cards } : {}),
+    },
   })
 export const cancelGooglePhotosSync = (d) =>
   apiRequest('/api/googlephotos/sync/cancel', { deviceUrl: d, method: 'POST' })
@@ -259,6 +263,8 @@ export const getGooglePhotosSyncProgress = (d) =>
   apiRequest('/api/googlephotos/sync/progress', { deviceUrl: d })
 export const getGooglePhotosAlbums = (d) =>
   apiRequest('/api/googlephotos/albums', { deviceUrl: d })
+export const getGooglePhotosAlbumPreview = (d, albumId) =>
+  apiRequest(`/api/googlephotos/albums/${albumId}/preview`, { deviceUrl: d })
 export const clearGooglePhotosAlbum = (d, albumId) =>
   apiRequest(`/api/googlephotos/albums/${albumId}`, { deviceUrl: d, method: 'DELETE' })
 export const getGooglePhotosAlbumClearProgress = (d, albumId) =>

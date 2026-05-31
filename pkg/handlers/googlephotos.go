@@ -439,8 +439,13 @@ func (ctx *Context) HandleGooglePhotosSync(w http.ResponseWriter, r *http.Reques
 	// state is stale (files recorded as uploaded but missing from Google Photos).
 	force, _ := strconv.ParseBool(r.URL.Query().Get("force"))
 
+	// Optional per-album selection: repeated ?card=card-00001&card=card-00002
+	// query parameters restrict the sync to those cards. Absent/empty means
+	// sync every card (the default and first-run behaviour).
+	cardFilter := sanitizeCardFilter(r.URL.Query()["card"])
+
 	go func() {
-		if err := ctx.SyncMgr.SyncCardsToGooglePhotos(context.Background(), force); err != nil {
+		if err := ctx.SyncMgr.SyncCardsToGooglePhotos(context.Background(), force, cardFilter); err != nil {
 			log.Printf("[GooglePhotos] Sync error: %v", err)
 			return
 		}
@@ -455,7 +460,34 @@ func (ctx *Context) HandleGooglePhotosSync(w http.ResponseWriter, r *http.Reques
 		"started": true,
 		"status":  "syncing",
 		"force":   force,
+		"cards":   cardFilter,
 	})
+}
+
+// sanitizeCardFilter cleans the repeated ?card= query values into a deduplicated
+// list of managed album/card names ("card-..."). Non-matching or oversized
+// entries are dropped so a crafted request can't blow up the sync.
+func sanitizeCardFilter(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		name := strings.TrimSpace(v)
+		if name == "" || len(name) > 256 || !strings.HasPrefix(name, "card-") {
+			continue
+		}
+		if _, dup := seen[name]; dup {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // HandleGooglePhotosSyncCancel cancels the current Google Photos sync.
@@ -555,6 +587,10 @@ func (ctx *Context) HandleGooglePhotosAlbums(w http.ResponseWriter, r *http.Requ
 			ctx.handleGooglePhotosAlbumSortProgress(w, r)
 			return
 		}
+		if len(parts) >= 5 && parts[4] == "preview" {
+			ctx.handleGooglePhotosAlbumPreview(w, r)
+			return
+		}
 		ctx.handleGooglePhotosAlbumList(w, r)
 		return
 	}
@@ -590,6 +626,55 @@ func (ctx *Context) handleGooglePhotosAlbumList(w http.ResponseWriter, r *http.R
 		}
 	}
 	httputil.JSON(w, http.StatusOK, map[string]any{"albums": managed})
+}
+
+// handleGooglePhotosAlbumPreview returns up to 4 media items from an album so
+// the UI can show a thumbnail preview of what an album contains before syncing.
+// GET /api/googlephotos/albums/{albumId}/preview
+func (ctx *Context) handleGooglePhotosAlbumPreview(w http.ResponseWriter, r *http.Request) {
+	path := strings.Trim(r.URL.Path, "/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 4 || parts[3] == "" {
+		http.Error(w, "Missing album ID", http.StatusBadRequest)
+		return
+	}
+	albumID := parts[3]
+
+	clientID, clientSecret := ctx.googlePhotosOAuthCreds()
+	if clientID == "" || clientSecret == "" {
+		http.Error(w, "Google Photos credentials not configured", http.StatusPreconditionFailed)
+		return
+	}
+
+	tokenStore := googlephotos.NewTokenStore("")
+	client := googlephotos.NewClient(clientID, clientSecret, tokenStore)
+	if !client.IsAuthenticated() {
+		http.Error(w, "Not authenticated with Google Photos", http.StatusUnauthorized)
+		return
+	}
+
+	const previewCount = 4
+	items, err := client.ListAlbumMediaItemsPage(r.Context(), albumID, previewCount)
+	if err != nil {
+		log.Printf("[GooglePhotos] Failed to list preview items for album %s: %v", albumID, err)
+		http.Error(w, "Failed to list album preview", http.StatusInternalServerError)
+		return
+	}
+
+	previews := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		previews = append(previews, map[string]any{
+			"id":        item.ID,
+			"base_url":  item.BaseURL,
+			"mime_type": item.MimeType,
+			"filename":  item.Filename,
+		})
+	}
+
+	httputil.JSON(w, http.StatusOK, map[string]any{
+		"album_id": albumID,
+		"items":    previews,
+	})
 }
 
 func (ctx *Context) handleGooglePhotosAlbumClear(w http.ResponseWriter, r *http.Request) {

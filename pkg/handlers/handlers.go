@@ -36,7 +36,7 @@ type SyncManager interface {
 	// Google Photos sync (rclone-based)
 	IsGooglePhotosRunning() bool
 	CancelGooglePhotos() error
-	SyncCardsToGooglePhotos(ctx context.Context, force bool) error
+	SyncCardsToGooglePhotos(ctx context.Context, force bool, cardFilter []string) error
 	GetGooglePhotosProgress() syncmanager.Progress
 }
 
