@@ -2,6 +2,7 @@ package syncmanager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"path"
@@ -350,15 +351,25 @@ func (m *Manager) syncCardToGooglePhotos(ctx context.Context, srcPath, dstPath s
 	basenameCounts := googlePhotosBasenameCounts(objects)
 	usedNames := make(map[string]int, len(objects))
 	existingNames, listErr := listExistingObjectRemotes(ctx, dstFs)
-	// Distinguish "album listed and is empty" from "listing failed". When the
-	// listing fails we cannot confirm anything against the album, so the local
-	// upload state becomes the sole skip gate — if that state is stale (files
-	// recorded as uploaded but no longer present in Google Photos) every file
-	// is silently skipped and nothing ever re-uploads. Surface it loudly.
+	// Three outcomes, not two:
+	//  1. Listing succeeded — trust it as the authoritative skip set.
+	//  2. Listing failed with "directory not found" — the album does not exist
+	//     on Google Photos, so provably ZERO files have been uploaded. Any local
+	//     upload state for this album is therefore stale and must be ignored,
+	//     otherwise every file is silently skipped and the album never gets
+	//     created. (This is the bug that left whole cards unsynced: stale state
+	//     recorded files as uploaded even though their album was gone.)
+	//  3. Listing failed for any other (transient) reason — we can't confirm the
+	//     album's contents, so fall back to the local upload state as the sole
+	//     skip gate. Surface it loudly.
 	listingOK := listErr == nil
-	if listingOK {
+	albumMissing := errors.Is(listErr, fs.ErrorDirNotFound)
+	switch {
+	case listingOK:
 		log.Printf("Google Photos sync: album listing returned %d existing item(s)", len(existingNames))
-	} else {
+	case albumMissing:
+		log.Printf("Google Photos sync: album %s does not exist yet; local upload state is stale and will be ignored so every file re-uploads", albumName)
+	default:
 		log.Printf("Google Photos sync: WARNING album listing failed (%v); cannot verify uploads against the album, relying on local upload state only", listErr)
 	}
 
@@ -370,11 +381,13 @@ func (m *Manager) syncCardToGooglePhotos(ctx context.Context, srcPath, dstPath s
 			continue
 		}
 		// Skip if already uploaded per local state (path + size match), unless
-		// a forced re-sync was requested. Forcing ignores the local state so a
-		// user can recover from stale tracking; files genuinely already in the
-		// album are still skipped above, and Google Photos de-duplicates
+		// a forced re-sync was requested or the album is provably absent.
+		// Forcing ignores the local state so a user can recover from stale
+		// tracking; a missing album means the state is definitively stale (the
+		// files cannot exist if their album doesn't). Files genuinely already in
+		// the album are still skipped above, and Google Photos de-duplicates
 		// identical content, so re-uploading is safe.
-		if !force {
+		if !force && !albumMissing {
 			stateKey := albumName + "/" + obj.Remote()
 			if entry, ok := uploadState.Uploaded[stateKey]; ok && entry.Size == obj.Size() {
 				stateSkipped++
