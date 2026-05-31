@@ -36,7 +36,7 @@ type SyncManager interface {
 	// Google Photos sync (rclone-based)
 	IsGooglePhotosRunning() bool
 	CancelGooglePhotos() error
-	SyncCardsToGooglePhotos(ctx context.Context) error
+	SyncCardsToGooglePhotos(ctx context.Context, force bool) error
 	GetGooglePhotosProgress() syncmanager.Progress
 }
 
@@ -169,4 +169,3 @@ func (ctx *Context) manualSyncClient() ManualSyncRequester {
 	}
 	return ctx.daemonClient()
 }
-

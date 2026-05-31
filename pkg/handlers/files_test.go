@@ -623,13 +623,13 @@ func filesTestWriteJPEG(t *testing.T, mountPath, rel string) {
 // HandleFileLink exercises. All other methods are no-ops or return zero values.
 type filesTestErroringSync struct{}
 
-func (filesTestErroringSync) IsRunning() bool                          { return false }
-func (filesTestErroringSync) Cancel() error                            { return nil }
-func (filesTestErroringSync) Sync(string, string, int, int64) error    { return nil }
-func (filesTestErroringSync) SetRemote(string, string)                 {}
-func (filesTestErroringSync) SetGooglePhotos(bool, string)             {}
-func (filesTestErroringSync) ListRemotes() ([]string, error)           { return nil, nil }
-func (filesTestErroringSync) TestConnection() error                    { return nil }
+func (filesTestErroringSync) IsRunning() bool                       { return false }
+func (filesTestErroringSync) Cancel() error                         { return nil }
+func (filesTestErroringSync) Sync(string, string, int, int64) error { return nil }
+func (filesTestErroringSync) SetRemote(string, string)              {}
+func (filesTestErroringSync) SetGooglePhotos(bool, string)          {}
+func (filesTestErroringSync) ListRemotes() ([]string, error)        { return nil, nil }
+func (filesTestErroringSync) TestConnection() error                 { return nil }
 func (filesTestErroringSync) ListCardIDs() ([]syncmanager.FileInfo, error) {
 	return nil, nil
 }
@@ -643,9 +643,9 @@ func (filesTestErroringSync) GetFile(string, io.Writer) error { return nil }
 func (filesTestErroringSync) GetPublicLink(string) (string, error) {
 	return "", errors.New("signing service unavailable")
 }
-func (filesTestErroringSync) IsGooglePhotosRunning() bool                   { return false }
-func (filesTestErroringSync) CancelGooglePhotos() error                     { return nil }
-func (filesTestErroringSync) SyncCardsToGooglePhotos(context.Context) error { return nil }
+func (filesTestErroringSync) IsGooglePhotosRunning() bool                         { return false }
+func (filesTestErroringSync) CancelGooglePhotos() error                           { return nil }
+func (filesTestErroringSync) SyncCardsToGooglePhotos(context.Context, bool) error { return nil }
 func (filesTestErroringSync) GetGooglePhotosProgress() syncmanager.Progress {
 	return syncmanager.Progress{}
 }

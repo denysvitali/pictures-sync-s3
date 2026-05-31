@@ -78,7 +78,11 @@ func ClearGooglePhotosAlbumState(albumName string) error {
 // SyncCardsToGooglePhotos syncs all card directories from the B2 remote to
 // Google Photos using rclone's googlephotos backend. It lists cards from the
 // B2 remote, then syncs each card's DCIM folder to gphotos:card-{id}.
-func (m *Manager) SyncCardsToGooglePhotos(ctx context.Context) error {
+//
+// When force is true the local upload-tracking state is ignored, so files
+// recorded as already uploaded are re-uploaded. Use this to recover when the
+// local state is stale (files marked uploaded but missing from Google Photos).
+func (m *Manager) SyncCardsToGooglePhotos(ctx context.Context, force bool) error {
 	m.mu.Lock()
 	if m.googlePhotosRunning {
 		m.mu.Unlock()
@@ -225,7 +229,7 @@ func (m *Manager) SyncCardsToGooglePhotos(ctx context.Context) error {
 			BytesTransferred: processedBytes,
 		})
 
-		cardFiles, cardBytes, err := m.syncCardToGooglePhotos(syncCtx, srcPath, dstPath)
+		cardFiles, cardBytes, err := m.syncCardToGooglePhotos(syncCtx, srcPath, dstPath, force)
 		processedFiles += cardFiles
 		processedBytes += cardBytes
 
@@ -264,7 +268,7 @@ func (m *Manager) SyncCardsToGooglePhotos(ctx context.Context) error {
 
 // syncCardToGooglePhotos syncs a single card's DCIM folder to Google Photos.
 // Returns the number of files transferred and bytes transferred for this card.
-func (m *Manager) syncCardToGooglePhotos(ctx context.Context, srcPath, dstPath string) (int, int64, error) {
+func (m *Manager) syncCardToGooglePhotos(ctx context.Context, srcPath, dstPath string, force bool) (int, int64, error) {
 	workers := m.googlePhotosTransferCount()
 
 	// Align rclone config BEFORE creating dstFs: the googlephotos backend
@@ -345,7 +349,19 @@ func (m *Manager) syncCardToGooglePhotos(ctx context.Context, srcPath, dstPath s
 
 	basenameCounts := googlePhotosBasenameCounts(objects)
 	usedNames := make(map[string]int, len(objects))
-	existingNames := listExistingObjectRemotes(ctx, dstFs)
+	existingNames, listErr := listExistingObjectRemotes(ctx, dstFs)
+	// Distinguish "album listed and is empty" from "listing failed". When the
+	// listing fails we cannot confirm anything against the album, so the local
+	// upload state becomes the sole skip gate — if that state is stale (files
+	// recorded as uploaded but no longer present in Google Photos) every file
+	// is silently skipped and nothing ever re-uploads. Surface it loudly.
+	listingOK := listErr == nil
+	if listingOK {
+		log.Printf("Google Photos sync: album listing returned %d existing item(s)", len(existingNames))
+	} else {
+		log.Printf("Google Photos sync: WARNING album listing failed (%v); cannot verify uploads against the album, relying on local upload state only", listErr)
+	}
+
 	jobs := make([]googlePhotosCopyJob, 0, len(objects))
 	stateSkipped := 0
 	for _, obj := range objects {
@@ -353,14 +369,23 @@ func (m *Manager) syncCardToGooglePhotos(ctx context.Context, srcPath, dstPath s
 		if _, exists := existingNames[dstRemote]; exists {
 			continue
 		}
-		// Skip if already uploaded per local state (path + size match).
-		stateKey := albumName + "/" + obj.Remote()
-		if entry, ok := uploadState.Uploaded[stateKey]; ok && entry.Size == obj.Size() {
-			stateSkipped++
-			continue
+		// Skip if already uploaded per local state (path + size match), unless
+		// a forced re-sync was requested. Forcing ignores the local state so a
+		// user can recover from stale tracking; files genuinely already in the
+		// album are still skipped above, and Google Photos de-duplicates
+		// identical content, so re-uploading is safe.
+		if !force {
+			stateKey := albumName + "/" + obj.Remote()
+			if entry, ok := uploadState.Uploaded[stateKey]; ok && entry.Size == obj.Size() {
+				stateSkipped++
+				continue
+			}
 		}
 		jobs = append(jobs, googlePhotosCopyJob{src: obj, dstRemote: dstRemote, albumName: albumName})
 		existingNames[dstRemote] = struct{}{}
+	}
+	if force {
+		log.Printf("Google Photos sync: force re-sync requested, ignoring local upload state for %s", albumName)
 	}
 	if stateSkipped > 0 {
 		log.Printf("Google Photos sync: skipped %d file(s) already tracked in local state", stateSkipped)
@@ -492,11 +517,17 @@ func injectRemoteOption(remotePath, key, value string) string {
 	return fmt.Sprintf("%s,%s=%s%s", remotePath[:colon], key, value, remotePath[colon:])
 }
 
-func listExistingObjectRemotes(ctx context.Context, f fs.Fs) map[string]struct{} {
+// listExistingObjectRemotes lists the objects already present in the
+// destination album. The returned error is non-nil when the listing itself
+// failed (e.g. the Google Photos API refusing to enumerate album contents).
+// Callers must distinguish "listing succeeded and is empty" from "listing
+// failed": treating a failed listing as an empty album silently hands all
+// skip decisions to the local upload state, which can mask unsynced files.
+func listExistingObjectRemotes(ctx context.Context, f fs.Fs) (map[string]struct{}, error) {
 	remotes := make(map[string]struct{})
 	entries, err := f.List(ctx, "")
 	if err != nil {
-		return remotes
+		return remotes, err
 	}
 	for _, entry := range entries {
 		if _, ok := entry.(fs.Object); ok {
@@ -505,7 +536,7 @@ func listExistingObjectRemotes(ctx context.Context, f fs.Fs) map[string]struct{}
 			remotes[path.Base(strings.Trim(remote, "/"))] = struct{}{}
 		}
 	}
-	return remotes
+	return remotes, nil
 }
 
 func googlePhotosBasenameCounts(objects []fs.Object) map[string]int {

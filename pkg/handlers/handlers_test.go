@@ -73,10 +73,10 @@ func (m *mockSyncManager) GetFile(path string, w io.Writer) error {
 	}
 	return nil
 }
-func (m *mockSyncManager) GetPublicLink(path string) (string, error)     { return m.publicLink, nil }
-func (m *mockSyncManager) IsGooglePhotosRunning() bool                   { return m.googlePhotosRunning }
-func (m *mockSyncManager) CancelGooglePhotos() error                     { return nil }
-func (m *mockSyncManager) SyncCardsToGooglePhotos(context.Context) error { return nil }
+func (m *mockSyncManager) GetPublicLink(path string) (string, error)           { return m.publicLink, nil }
+func (m *mockSyncManager) IsGooglePhotosRunning() bool                         { return m.googlePhotosRunning }
+func (m *mockSyncManager) CancelGooglePhotos() error                           { return nil }
+func (m *mockSyncManager) SyncCardsToGooglePhotos(context.Context, bool) error { return nil }
 func (m *mockSyncManager) GetGooglePhotosProgress() syncmanager.Progress {
 	return syncmanager.Progress{}
 }

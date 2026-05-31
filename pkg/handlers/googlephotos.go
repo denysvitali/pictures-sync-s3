@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -433,8 +434,13 @@ func (ctx *Context) HandleGooglePhotosSync(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// force=true ignores local upload-tracking state and re-uploads everything
+	// not already confirmed present in the album. Used to recover when local
+	// state is stale (files recorded as uploaded but missing from Google Photos).
+	force, _ := strconv.ParseBool(r.URL.Query().Get("force"))
+
 	go func() {
-		if err := ctx.SyncMgr.SyncCardsToGooglePhotos(context.Background()); err != nil {
+		if err := ctx.SyncMgr.SyncCardsToGooglePhotos(context.Background(), force); err != nil {
 			log.Printf("[GooglePhotos] Sync error: %v", err)
 			return
 		}
@@ -448,6 +454,7 @@ func (ctx *Context) HandleGooglePhotosSync(w http.ResponseWriter, r *http.Reques
 	httputil.JSON(w, http.StatusOK, map[string]any{
 		"started": true,
 		"status":  "syncing",
+		"force":   force,
 	})
 }
 

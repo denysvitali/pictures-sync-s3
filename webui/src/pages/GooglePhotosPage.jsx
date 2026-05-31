@@ -308,9 +308,14 @@ function ActionPanel({
             </>
           ) : (
             <>
-              <Button onClick={onSync} loading={syncing} disabled={disablePrimary}>
+              <Button onClick={() => onSync(false)} loading={syncing} disabled={disablePrimary}>
                 <Icon name="arrow-up-tray" className="w-4 h-4" />
                 {syncing ? 'Starting…' : primaryMessage}
+              </Button>
+
+              <Button variant="secondary" onClick={() => onSync(true)} disabled={disablePrimary}>
+                <Icon name="arrow-path" className="w-4 h-4" />
+                Force re-sync
               </Button>
 
               <Button variant="secondary" onClick={onCancel} disabled={!syncing || disconnecting}>
@@ -1099,16 +1104,24 @@ export default function GooglePhotosPage() {
     }
   }, [deviceUrl, toast])
 
-  const handleSync = useCallback(async () => {
+  const handleSync = useCallback(async (force = false) => {
     if (!deviceUrl) return
     if (!status?.connected) {
       toast.error('Connect Google Photos before starting a sync')
       return
     }
+    if (
+      force &&
+      !window.confirm(
+        'Force re-sync ignores the local upload tracking and re-uploads every file not already confirmed in its album. Use this only when photos are missing from Google Photos despite a successful sync. Continue?',
+      )
+    ) {
+      return
+    }
     try {
-      await startGooglePhotosSync(deviceUrl)
+      await startGooglePhotosSync(deviceUrl, force)
       setSyncing(true)
-      toast.success('Sync to Google Photos started')
+      toast.success(force ? 'Force re-sync to Google Photos started' : 'Sync to Google Photos started')
       await loadSyncProgress()
     } catch (err) {
       const msg = describeError(err)
