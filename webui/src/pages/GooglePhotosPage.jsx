@@ -17,6 +17,7 @@ import {
   getGooglePhotosSyncProgress,
   getGooglePhotosCards,
   getGooglePhotosCardSummary,
+  getGooglePhotosAlbums,
   getRemoteThumbnailUrl,
   clearGooglePhotosAlbum,
   getGooglePhotosAlbumClearProgress,
@@ -979,6 +980,33 @@ export default function GooglePhotosPage() {
     } finally {
       setCardsLoading(false)
     }
+
+    // Resolve Google Photos album matches separately so paginating the album
+    // library never blocks the card list. Match albums to cards by title
+    // (albums are named after the card) and merge album_id / item count in when
+    // they arrive — the sort/clear controls light up progressively.
+    try {
+      const albumData = await getGooglePhotosAlbums(deviceUrl)
+      const albums = albumData?.albums || []
+      if (albums.length > 0) {
+        const byTitle = new Map(albums.map((a) => [a.title, a]))
+        setCards((prev) =>
+          prev
+            ? prev.map((c) => {
+                const a = byTitle.get(c.name)
+                if (!a) return c
+                return {
+                  ...c,
+                  album_id: a.id,
+                  album_item_count: Number.parseInt(a.mediaItemsCount, 10) || 0,
+                }
+              })
+            : prev
+        )
+      }
+    } catch {
+      // Best-effort: cards remain usable without album info.
+    }
   }, [deviceUrl])
 
   // Lazily fetch each card's summary (file count, bytes, transferred count, and
@@ -1194,20 +1222,29 @@ export default function GooglePhotosPage() {
     if (!deviceUrl || sortingAlbumId || !cards || cards.length === 0) return
     let cancelled = false
     ;(async () => {
-      for (const card of cards) {
-        if (!card.album_id) continue
-        try {
-          const data = await getGooglePhotosAlbumSortProgress(deviceUrl, card.album_id)
-          if (cancelled) return
-          const st = data?.status
-          if (st && st !== 'idle' && st !== 'completed' && st !== 'error') {
-            setSortProgress((prev) => ({ ...prev, [card.album_id]: data }))
-            setSortingAlbumId(card.album_id)
-            pollSortProgress(card.album_id, card.name)
-            return
+      // Probe every card's album in parallel — these are cheap in-memory reads
+      // on the device, but issuing them one-at-a-time made reconciliation scale
+      // with the card count. Re-attach to the first card found mid-sort.
+      const withAlbums = cards.filter((c) => c.album_id)
+      const results = await Promise.all(
+        withAlbums.map(async (card) => {
+          try {
+            const data = await getGooglePhotosAlbumSortProgress(deviceUrl, card.album_id)
+            return { card, data }
+          } catch {
+            return null
           }
-        } catch {
-          // Ignore — best-effort reconciliation.
+        })
+      )
+      if (cancelled) return
+      for (const r of results) {
+        if (!r) continue
+        const st = r.data?.status
+        if (st && st !== 'idle' && st !== 'completed' && st !== 'error') {
+          setSortProgress((prev) => ({ ...prev, [r.card.album_id]: r.data }))
+          setSortingAlbumId(r.card.album_id)
+          pollSortProgress(r.card.album_id, r.card.name)
+          return
         }
       }
     })()

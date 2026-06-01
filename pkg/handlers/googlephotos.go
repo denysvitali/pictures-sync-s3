@@ -625,43 +625,17 @@ func (ctx *Context) handleGooglePhotosCardList(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Best-effort: match each card to its Google Photos album (by title) so the
-	// UI can offer sort/clear and show the destination item count. Album lookup
-	// failures (not connected, API error) are non-fatal — we still return cards.
-	type albumInfo struct {
-		id    string
-		count string
-	}
-	albumByTitle := map[string]albumInfo{}
-	clientID, clientSecret := ctx.googlePhotosOAuthCreds()
-	if clientID != "" && clientSecret != "" {
-		tokenStore := googlephotos.NewTokenStore("")
-		client := googlephotos.NewClient(clientID, clientSecret, tokenStore)
-		if client.IsAuthenticated() {
-			if albums, err := client.ListAlbumsContext(r.Context()); err == nil {
-				for _, a := range albums {
-					if strings.HasPrefix(a.Title, "card-") {
-						albumByTitle[a.Title] = albumInfo{id: a.ID, count: a.MediaItemsCount}
-					}
-				}
-			} else {
-				log.Printf("[GooglePhotos] card list: album lookup failed: %v", err)
-			}
-		}
-	}
-
+	// Return cards straight from the (cheap) B2 listing. The Google Photos album
+	// match (album_id / item count) used to be resolved here via ListAlbums, but
+	// that paginates the user's entire album library and blocked the card list —
+	// and therefore the whole page — for many seconds. The UI now fetches album
+	// matches separately via GET /api/googlephotos/albums and merges them in, so
+	// cards render immediately and album info fills in when it arrives.
 	out := make([]map[string]any, 0, len(cards))
 	for _, c := range cards {
-		info := albumByTitle[c.Name]
-		albumCount := 0
-		if info.count != "" {
-			albumCount, _ = strconv.Atoi(info.count)
-		}
 		out = append(out, map[string]any{
-			"name":             c.Name,
-			"mod_time":         c.ModTime,
-			"album_id":         info.id,
-			"album_item_count": albumCount,
+			"name":     c.Name,
+			"mod_time": c.ModTime,
 		})
 	}
 	httputil.JSON(w, http.StatusOK, map[string]any{"cards": out})

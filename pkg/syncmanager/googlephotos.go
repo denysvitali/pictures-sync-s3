@@ -76,6 +76,24 @@ func ClearGooglePhotosAlbumState(albumName string) error {
 	return nil
 }
 
+// gpSummaryCache memoizes per-card summaries for a short window. Each summary
+// requires a full recursive walk of the card's DCIM tree on B2, which is
+// expensive over the network; the Google Photos page requests summaries for
+// every card on each load, so without a cache every page (re)load re-walks the
+// entire remote. A short TTL keeps counts fresh after a sync while making
+// repeat loads effectively instant.
+const gpSummaryCacheTTL = 30 * time.Second
+
+type gpSummaryCacheEntry struct {
+	summary   GooglePhotosCardSummary
+	fetchedAt time.Time
+}
+
+var (
+	gpSummaryCacheMu sync.Mutex
+	gpSummaryCache   = map[string]gpSummaryCacheEntry{}
+)
+
 // GooglePhotosCardSummary describes one B2 source card for the Google Photos
 // sync UI: how many photo/video files it holds, how many this app has already
 // uploaded to Google Photos, and a few preview image paths (relative to the
@@ -98,6 +116,14 @@ func (m *Manager) GetGooglePhotosCardSummary(ctx context.Context, cardName strin
 	if cardName == "" || strings.ContainsAny(cardName, "/\\") || strings.Contains(cardName, "..") || !strings.HasPrefix(cardName, "card-") {
 		return GooglePhotosCardSummary{}, fmt.Errorf("invalid card name %q", cardName)
 	}
+
+	// Serve from the short-TTL cache when fresh (see gpSummaryCache).
+	gpSummaryCacheMu.Lock()
+	if entry, ok := gpSummaryCache[cardName]; ok && time.Since(entry.fetchedAt) < gpSummaryCacheTTL {
+		gpSummaryCacheMu.Unlock()
+		return entry.summary, nil
+	}
+	gpSummaryCacheMu.Unlock()
 
 	// rcloneConfigMu only needs to guard the config load and fs.NewFs, which read
 	// the package-level rclone config globals (config.Data, the config path). Once
@@ -135,13 +161,19 @@ func (m *Manager) GetGooglePhotosCardSummary(ctx context.Context, cardName strin
 		transferred = count
 	}
 
-	return GooglePhotosCardSummary{
+	summary := GooglePhotosCardSummary{
 		Name:             cardName,
 		TotalFiles:       count,
 		TotalBytes:       totalBytes,
 		TransferredFiles: transferred,
 		Preview:          preview,
-	}, nil
+	}
+
+	gpSummaryCacheMu.Lock()
+	gpSummaryCache[cardName] = gpSummaryCacheEntry{summary: summary, fetchedAt: time.Now()}
+	gpSummaryCacheMu.Unlock()
+
+	return summary, nil
 }
 
 // gpSummaryWalk recursively counts photo/video files under dir and appends up to

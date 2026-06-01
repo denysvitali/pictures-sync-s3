@@ -266,6 +266,10 @@ export const getGooglePhotosCards = (d) =>
   apiRequest('/api/googlephotos/cards', { deviceUrl: d })
 export const getGooglePhotosCardSummary = (d, cardName) =>
   apiRequest(`/api/googlephotos/cards/${encodeURIComponent(cardName)}/summary`, { deviceUrl: d })
+// App-managed (card-*) Google Photos albums. Fetched separately from the card
+// list so paginating the album library never blocks rendering the cards.
+export const getGooglePhotosAlbums = (d) =>
+  apiRequest('/api/googlephotos/albums', { deviceUrl: d })
 // Thumbnail for an image stored on the remote (B2), used for card previews.
 export const getRemoteThumbnailUrl = (d, filePath) =>
   `${normalizeBaseUrl(d)}/api/files/thumbnail?path=${encodeURIComponent(filePath || '')}`
