@@ -986,10 +986,20 @@ export default function GooglePhotosPage() {
   const loadCardSummaries = useCallback(
     async (cardList) => {
       if (!deviceUrl || !cardList) return
-      for (const card of cardList) {
-        if (summaryFetchedRef.current.has(card.name)) continue
+      // Only fetch summaries we haven't already requested.
+      const pending = cardList.filter((card) => !summaryFetchedRef.current.has(card.name))
+      if (pending.length === 0) return
+      for (const card of pending) {
         summaryFetchedRef.current.add(card.name)
         setCardSummaries((prev) => ({ ...prev, [card.name]: { loading: true } }))
+      }
+
+      // Each summary triggers a recursive B2 walk on the device, so fetch them
+      // concurrently (bounded) instead of one-at-a-time — sequential awaits made
+      // the page take ~30s with several cards. The bound keeps us from hammering
+      // the device with one request per card all at once.
+      const CONCURRENCY = 6
+      const fetchOne = async (card) => {
         try {
           const data = await getGooglePhotosCardSummary(deviceUrl, card.name)
           setCardSummaries((prev) => ({ ...prev, [card.name]: { loading: false, ...data } }))
@@ -1000,6 +1010,16 @@ export default function GooglePhotosPage() {
           }))
         }
       }
+      let next = 0
+      const worker = async () => {
+        while (next < pending.length) {
+          const card = pending[next++]
+          await fetchOne(card)
+        }
+      }
+      await Promise.all(
+        Array.from({ length: Math.min(CONCURRENCY, pending.length) }, worker)
+      )
     },
     [deviceUrl]
   )

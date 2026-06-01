@@ -99,14 +99,21 @@ func (m *Manager) GetGooglePhotosCardSummary(ctx context.Context, cardName strin
 		return GooglePhotosCardSummary{}, fmt.Errorf("invalid card name %q", cardName)
 	}
 
+	// rcloneConfigMu only needs to guard the config load and fs.NewFs, which read
+	// the package-level rclone config globals (config.Data, the config path). Once
+	// the Fs is constructed it is self-contained — List operations on it don't
+	// touch those globals — so we release the lock before the recursive walk.
+	// This lets per-card summaries (the Google Photos page fans these out) walk B2
+	// concurrently instead of serializing every walk behind one global mutex.
 	rcloneConfigMu.Lock()
-	defer rcloneConfigMu.Unlock()
 	if err := m.loadRcloneConfigLocked(); err != nil {
+		rcloneConfigMu.Unlock()
 		return GooglePhotosCardSummary{}, err
 	}
 
 	srcPath := filepath.Join(m.remoteName+":"+m.remotePath, cardName, "DCIM")
 	srcFs, err := fs.NewFs(ctx, srcPath)
+	rcloneConfigMu.Unlock()
 	if err != nil {
 		return GooglePhotosCardSummary{}, fmt.Errorf("failed to open card %s: %w", cardName, err)
 	}
