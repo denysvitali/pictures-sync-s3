@@ -120,18 +120,34 @@ func TestService_RunWithMockEvents(t *testing.T) {
 }
 
 func TestTimeSyncCheck_ValidatesSystemTime(t *testing.T) {
-	// This tests that the time sync logic properly validates system time
-	now := time.Now()
-
-	// Valid time check
-	if now.Year() <= 2020 {
-		t.Error("System time appears to be invalid (year <= 2020)")
+	tests := []struct {
+		name string
+		now  time.Time
+		want bool
+	}{
+		{
+			name: "unix epoch is not synced",
+			now:  time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC),
+			want: false,
+		},
+		{
+			name: "threshold year is not synced",
+			now:  time.Date(2020, 12, 31, 23, 59, 59, 0, time.UTC),
+			want: false,
+		},
+		{
+			name: "after threshold is synced",
+			now:  time.Date(2021, 1, 1, 0, 0, 0, 0, time.UTC),
+			want: true,
+		},
 	}
 
-	// Test would validate that times in the past are rejected
-	past := time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
-	if past.Year() > 2020 {
-		t.Error("Past time validation failed")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isSystemTimeSynced(tc.now); got != tc.want {
+				t.Fatalf("isSystemTimeSynced(%s) = %t, want %t", tc.now, got, tc.want)
+			}
+		})
 	}
 }
 

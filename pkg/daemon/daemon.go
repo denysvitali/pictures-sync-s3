@@ -32,6 +32,10 @@ const (
 	// This is used during daemon startup to ensure network connectivity before sync operations.
 	dnsCheckInterval = 2 * time.Second
 
+	timeSyncMaxWait  = 2 * time.Minute
+	dnsCheckAttempts = 60
+	dnsLookupTimeout = 5 * time.Second
+
 	// mountFailureCheckInterval governs how often the daemon polls for the
 	// "device present but unmounted" condition. sdmonitor swallows mount errors
 	// silently, so the daemon translates the missing-mount signal into a
@@ -68,137 +72,27 @@ func DefaultConfig() Config {
 
 // New creates and initializes a new daemon service
 func New(cfg Config) (*Service, error) {
-	// Wait for gokrazy's NTP daemon to sync time
-	log.Println("Waiting for time synchronization (gokrazy NTP daemon)...")
+	timeSynced := waitForTimeSync()
+	waitForDNS()
 
-	// Track whether time sync succeeded
-	var timeSynced bool
-
-	// Wait until we have a reasonable time (not 1970 epoch)
-	startWait := time.Now()
-	for {
-		now := time.Now()
-		// Check if time is after year 2020 (definitely synced)
-		if now.Year() > 2020 {
-			log.Printf("Time synchronized successfully. Current time: %s", now)
-			timeSynced = true
-			break
-		}
-
-		// Check if we've been waiting too long (fallback after 2 minutes)
-		if time.Since(startWait) > 2*time.Minute {
-			log.Printf("ERROR: Time sync failed after 2 minutes. Current time: %s", now)
-			log.Println("CRITICAL: System time is not synchronized! Sync operations will be disabled.")
-			log.Println("Please check network connectivity and NTP configuration.")
-			timeSynced = false
-			break
-		}
-
-		log.Printf("Time not synced yet (current: %s), waiting...", now)
-		time.Sleep(timeSyncCheckInterval)
-	}
-
-	// Wait for DNS to be available (check if we can resolve a common domain)
-	log.Println("Checking DNS availability...")
-	dnsReady := false
-	for i := 0; i < 60; i++ { // Try for 2 minutes (60 * 2s)
-		// Create context with 5-second timeout for DNS lookup
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-
-		// Use custom resolver with context for timeout protection
-		resolver := &net.Resolver{}
-		_, err := resolver.LookupHost(ctx, "google.com")
-		cancel() // Always cancel context to free resources
-
-		if err == nil {
-			log.Println("DNS is ready")
-			dnsReady = true
-			break
-		}
-		// Only log every 5 attempts to reduce log spam
-		if i%5 == 0 {
-			log.Printf("DNS not ready yet (attempt %d/60): %v", i+1, err)
-		}
-		time.Sleep(dnsCheckInterval)
-	}
-
-	if !dnsReady {
-		log.Println("Warning: DNS may not be fully available after 2 minutes. Network operations will retry with backoff.")
-	}
-
-	// Initialize event manager
 	eventMgr := events.NewManager()
 
-	// Initialize state manager
 	stateMgr, err := state.NewManager()
 	if err != nil {
 		return nil, err
 	}
 
-	// Load settings
-	appSettings, err := settings.Load()
+	appSettings, syncMgr, err := loadSyncDependencies(stateMgr)
 	if err != nil {
 		return nil, err
 	}
-	log.Printf("Loaded settings: remote=%s:%s", appSettings.GetRemoteName(), appSettings.GetRemotePath())
 
-	// Check if rclone is configured
-	hasConfig, err := state.EnsureRcloneConfig()
-	if err != nil {
-		return nil, err
-	}
-	if !hasConfig {
-		log.Println("Warning: rclone not configured yet. Please configure via web UI.")
-	}
-
-	// Initialize sync manager
-	syncMgr := syncmanager.NewManager(
-		state.GetRcloneConfigPath(),
-		appSettings.GetRemoteName(),
-		appSettings.GetRemotePath(),
-		stateMgr,
-		appSettings.GetTransfers(),
-		appSettings.GetCheckers(),
-	)
-	// Update Google Photos settings
-	syncMgr.SetGooglePhotos(appSettings.GetGooglePhotosEnabled(), appSettings.GetGooglePhotosRemoteName())
-
-	// Initialize LED controller
-	ledCtrl, err := ledcontroller.NewController()
-	if err != nil {
-		log.Printf("Warning: Failed to initialize LED controller: %v", err)
-	} else {
-		if err := ledCtrl.Start(stateMgr); err != nil {
-			log.Printf("Warning: Failed to start LED controller: %v", err)
-		}
-		log.Println("LED controller started")
-	}
-
-	// Initialize SD card monitor
+	ledCtrl := startLEDController(stateMgr)
 	monitor := sdmonitor.NewMonitor(state.MountDir)
-
-	// Initialize card handler
 	cardHandler := cardhandler.NewHandler(monitor, stateMgr, syncMgr, appSettings, eventMgr)
-
-	// Initialize signal handler
 	sigHandler := signals.NewHandler()
-
-	// Initialize WiFi manager for captive portal
-	wifiMgr, err := wifimanager.NewManager()
-	if err != nil {
-		log.Printf("Warning: Failed to initialize WiFi manager: %v", err)
-	}
-
-	// Initialize captive portal authenticator
-	var captivePortal *captiveportal.Authenticator
-	if wifiMgr != nil {
-		log.Println("Initializing captive portal authenticator...")
-		captivePortal = captiveportal.NewAuthenticator(func() (string, error) {
-			return wifiMgr.GetCurrentSSID()
-		})
-		captivePortal.Start()
-		log.Println("Captive portal authenticator started")
-	}
+	wifiMgr := newWiFiManager()
+	captivePortal := startCaptivePortal(wifiMgr)
 
 	return &Service{
 		eventMgr:      eventMgr,
@@ -213,6 +107,119 @@ func New(cfg Config) (*Service, error) {
 		captivePortal: captivePortal,
 		timeSynced:    timeSynced,
 	}, nil
+}
+
+func waitForTimeSync() bool {
+	log.Println("Waiting for time synchronization (gokrazy NTP daemon)...")
+
+	startWait := time.Now()
+	for {
+		now := time.Now()
+		if isSystemTimeSynced(now) {
+			log.Printf("Time synchronized successfully. Current time: %s", now)
+			return true
+		}
+
+		if time.Since(startWait) > timeSyncMaxWait {
+			log.Printf("ERROR: Time sync failed after 2 minutes. Current time: %s", now)
+			log.Println("CRITICAL: System time is not synchronized! Sync operations will be disabled.")
+			log.Println("Please check network connectivity and NTP configuration.")
+			return false
+		}
+
+		log.Printf("Time not synced yet (current: %s), waiting...", now)
+		time.Sleep(timeSyncCheckInterval)
+	}
+}
+
+func isSystemTimeSynced(now time.Time) bool {
+	return now.Year() > 2020
+}
+
+func waitForDNS() bool {
+	log.Println("Checking DNS availability...")
+
+	resolver := &net.Resolver{}
+	for i := 0; i < dnsCheckAttempts; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), dnsLookupTimeout)
+		_, err := resolver.LookupHost(ctx, "google.com")
+		cancel()
+
+		if err == nil {
+			log.Println("DNS is ready")
+			return true
+		}
+		if i%5 == 0 {
+			log.Printf("DNS not ready yet (attempt %d/%d): %v", i+1, dnsCheckAttempts, err)
+		}
+		time.Sleep(dnsCheckInterval)
+	}
+
+	log.Println("Warning: DNS may not be fully available after 2 minutes. Network operations will retry with backoff.")
+	return false
+}
+
+func loadSyncDependencies(stateMgr *state.Manager) (*settings.Settings, *syncmanager.Manager, error) {
+	appSettings, err := settings.Load()
+	if err != nil {
+		return nil, nil, err
+	}
+	log.Printf("Loaded settings: remote=%s:%s", appSettings.GetRemoteName(), appSettings.GetRemotePath())
+
+	hasConfig, err := state.EnsureRcloneConfig()
+	if err != nil {
+		return nil, nil, err
+	}
+	if !hasConfig {
+		log.Println("Warning: rclone not configured yet. Please configure via web UI.")
+	}
+
+	syncMgr := syncmanager.NewManager(
+		state.GetRcloneConfigPath(),
+		appSettings.GetRemoteName(),
+		appSettings.GetRemotePath(),
+		stateMgr,
+		appSettings.GetTransfers(),
+		appSettings.GetCheckers(),
+	)
+	syncMgr.SetGooglePhotos(appSettings.GetGooglePhotosEnabled(), appSettings.GetGooglePhotosRemoteName())
+	return appSettings, syncMgr, nil
+}
+
+func startLEDController(stateMgr *state.Manager) *ledcontroller.Controller {
+	ledCtrl, err := ledcontroller.NewController()
+	if err != nil {
+		log.Printf("Warning: Failed to initialize LED controller: %v", err)
+		return nil
+	}
+	if err := ledCtrl.Start(stateMgr); err != nil {
+		log.Printf("Warning: Failed to start LED controller: %v", err)
+	}
+	log.Println("LED controller started")
+	return ledCtrl
+}
+
+func newWiFiManager() *wifimanager.Manager {
+	wifiMgr, err := wifimanager.NewManager()
+	if err != nil {
+		log.Printf("Warning: Failed to initialize WiFi manager: %v", err)
+		return nil
+	}
+	return wifiMgr
+}
+
+func startCaptivePortal(wifiMgr *wifimanager.Manager) *captiveportal.Authenticator {
+	if wifiMgr == nil {
+		return nil
+	}
+
+	log.Println("Initializing captive portal authenticator...")
+	captivePortal := captiveportal.NewAuthenticator(func() (string, error) {
+		return wifiMgr.GetCurrentSSID()
+	})
+	captivePortal.Start()
+	log.Println("Captive portal authenticator started")
+	return captivePortal
 }
 
 // Run starts the daemon and blocks until shutdown signal is received
