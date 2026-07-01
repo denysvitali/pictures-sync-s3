@@ -240,6 +240,135 @@ func repairClockAndPersistentCertificateBeforeTLS() {
 	}
 }
 
+func registerAPIRoutes(
+	mux *http.ServeMux,
+	ctx *handlers.Context,
+	passwordProvider auth.PasswordProvider,
+	stateMgr *state.Manager,
+	eventMgr *events.Manager,
+	dmesgMgr *dmesg.Manager,
+	otaMgr *ota.Manager,
+) {
+	routes := []struct {
+		path    string
+		handler http.HandlerFunc
+	}{
+		{"/api/ws-token", handlers.WSTokenHandler(passwordProvider)},
+		{"/api/version", ctx.HandleVersion},
+		{"/api/status", ctx.HandleStatus},
+		{"/api/history", ctx.HandleHistory},
+		{"/api/config", ctx.HandleConfig},
+		{"/api/config/b2", ctx.HandleConfigB2},
+		{"/api/config/b2/regions", ctx.HandleConfigB2Regions},
+		{"/api/config/test", ctx.HandleConfigTest},
+		{"/api/auth/password", ctx.HandlePasswordChange},
+		{"/api/breakglass/authorized-keys", ctx.HandleBreakglassAuthorizedKeys},
+		{"/api/settings", ctx.HandleSettings},
+		{"/api/devices", ctx.HandleDevices},
+		{"/api/devices/select", ctx.HandleDeviceSelect},
+		{"/api/devices/format", ctx.HandleDeviceFormat},
+		{"/api/devices/redetect", ctx.HandleDeviceRedetect},
+		{"/api/sync/start", ctx.HandleSyncStart},
+		{"/api/sync/cancel", ctx.HandleSyncCancel},
+		{"/api/wifi/scan", ctx.HandleWiFiScan},
+		{"/api/wifi/networks", ctx.HandleWiFiNetworks},
+		{"/api/wifi/connect", ctx.HandleWiFiConnect},
+		{"/api/wifi/disconnect", ctx.HandleWiFiDisconnect},
+		{"/api/wifi/reorder", ctx.HandleWiFiReorder},
+		{"/api/wifi/status", ctx.HandleWiFiStatus},
+		{"/api/files/cards", ctx.HandleFileCards},
+		{"/api/files", ctx.HandleFiles},
+		{"/api/files/paginated", ctx.HandleFilesPaginated},
+		{"/api/files/link", ctx.HandleFileLink},
+		{"/api/files/view", ctx.HandleFileView},
+		{"/api/files/thumbnail", ctx.HandleFileThumbnail},
+		{"/api/thumbnail", ctx.HandleThumbnail},
+		{"/api/sdcard/files", ctx.HandleSDCardFiles},
+		{"/api/sdcard/preview", ctx.HandleSDCardPreview},
+		{"/api/sdcard/file", ctx.HandleSDCardFile},
+		{"/api/network/dns", ctx.HandleNetworkDNS},
+		{"/api/network/interfaces", ctx.HandleNetworkInterfaces},
+		{"/api/network/dns-lookup", ctx.HandleDNSLookup},
+		{"/api/network/ping", ctx.HandlePing},
+		{"/api/network/diagnostics", ctx.HandleNetworkDiagnostics},
+		{"/api/ota/status", ctx.HandleOTAStatus},
+		{"/api/ota/install", ctx.HandleOTAInstall},
+		{"/api/system/time", ctx.HandleSystemTime},
+		{"/api/system/tls-certificate", ctx.HandleSystemTLSCertificate},
+		{"/api/system/services/restart", ctx.HandleSystemServicesRestart},
+		{"/api/system/panic", ctx.HandleSystemPanic},
+		{"/api/system/stats", ctx.HandleSystemStats},
+		{"/api/googlephotos/status", ctx.HandleGooglePhotosStatus},
+		{"/api/googlephotos/auth/start", ctx.HandleGooglePhotosAuthStart},
+		{"/api/googlephotos/auth/callback", ctx.HandleGooglePhotosAuthCallback},
+		{"/api/googlephotos/auth/disconnect", ctx.HandleGooglePhotosAuthDisconnect},
+		{"/api/googlephotos/sync", ctx.HandleGooglePhotosSync},
+		{"/api/googlephotos/sync/cancel", ctx.HandleGooglePhotosSyncCancel},
+		{"/api/googlephotos/sync/progress", ctx.HandleGooglePhotosSyncProgress},
+		{"/api/googlephotos/sync/history/export", ctx.HandleGooglePhotosSyncHistoryExport},
+		{"/api/googlephotos/albums", ctx.HandleGooglePhotosAlbums},
+		{"/api/googlephotos/albums/", ctx.HandleGooglePhotosAlbums},
+		{"/api/googlephotos/cards", ctx.HandleGooglePhotosCards},
+		{"/api/googlephotos/cards/", ctx.HandleGooglePhotosCards},
+		{"/ws", websocket.HandleWebSocketWithDmesg(stateMgr, eventMgr, dmesgMgr, otaMgr)},
+	}
+	for _, route := range routes {
+		mux.HandleFunc(route.path, route.handler)
+	}
+}
+
+func registerWebRoutes(mux *http.ServeMux) {
+	routes := []struct {
+		path    string
+		handler http.HandlerFunc
+	}{
+		{"/static/", webui.HandleStatic},
+		{"/", webui.HandleSPA},
+		{"/legacy/status", webui.HandleIndex},
+		{"/legacy/wifi", webui.HandleWiFi},
+		{"/legacy/history", webui.HandleHistory},
+		{"/legacy/gallery", webui.HandleGallery},
+		{"/legacy/config", webui.HandleConfig},
+	}
+	for _, route := range routes {
+		mux.HandleFunc(route.path, route.handler)
+	}
+}
+
+func buildHandler(
+	appMux http.Handler,
+	passwordProvider auth.PasswordProvider,
+	allowedOrigins []string,
+	stateMgr *state.Manager,
+	appSettings *settings.Settings,
+) http.Handler {
+	authLimiter := ratelimit.NewLimiter(ratelimit.AuthConfig())
+
+	infraMux := http.NewServeMux()
+	infraMux.HandleFunc("/healthz", handleHealthz)
+	infraMux.Handle("/readyz", makeReadyzHandler(stateMgr, appSettings))
+	infraMux.Handle("/metrics", metrics.Handler())
+
+	authProtected := auth.BasicAuthMiddlewareWithProvider(passwordProvider, authLimiter)(appMux)
+	router := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/healthz", "/readyz", "/metrics":
+			infraMux.ServeHTTP(w, r)
+		default:
+			authProtected.ServeHTTP(w, r)
+		}
+	})
+
+	handler := auth.SecurityHeadersMiddleware(
+		auth.CORSMiddleware(allowedOrigins, true)(router),
+	)
+	handler = metrics.HTTPMiddleware(processStartTime, handler)
+	handler = middleware.RequestID(handler)
+	handler = requestTimeoutMiddleware(apiRequestTimeout)(handler)
+	handler = panicPersistenceMiddleware(paniclog.DefaultPath)(handler)
+	return handler
+}
+
 func main() {
 	// Enable caller reporting in logs (file:line)
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
@@ -388,109 +517,11 @@ func main() {
 	// (and an explicit ws-token for WebSocket); CSRF token middleware was
 	// removed because it produced spurious failures and added no defense
 	// beyond what credentialed same-origin already provides.
-	http.HandleFunc("/api/ws-token", handlers.WSTokenHandler(passwordMgr))
-	http.HandleFunc("/api/version", ctx.HandleVersion)
-	http.HandleFunc("/api/status", ctx.HandleStatus)
-	http.HandleFunc("/api/history", ctx.HandleHistory)
-	http.HandleFunc("/api/config", ctx.HandleConfig)
-	http.HandleFunc("/api/config/b2", ctx.HandleConfigB2)
-	http.HandleFunc("/api/config/b2/regions", ctx.HandleConfigB2Regions)
-	http.HandleFunc("/api/config/test", ctx.HandleConfigTest)
-	http.HandleFunc("/api/auth/password", ctx.HandlePasswordChange)
-	http.HandleFunc("/api/breakglass/authorized-keys", ctx.HandleBreakglassAuthorizedKeys)
-	http.HandleFunc("/api/settings", ctx.HandleSettings)
-	http.HandleFunc("/api/devices", ctx.HandleDevices)
-	http.HandleFunc("/api/devices/select", ctx.HandleDeviceSelect)
-	http.HandleFunc("/api/devices/format", ctx.HandleDeviceFormat)
-	http.HandleFunc("/api/devices/redetect", ctx.HandleDeviceRedetect)
-	http.HandleFunc("/api/sync/start", ctx.HandleSyncStart)
-	http.HandleFunc("/api/sync/cancel", ctx.HandleSyncCancel)
-	http.HandleFunc("/api/wifi/scan", ctx.HandleWiFiScan)
-	http.HandleFunc("/api/wifi/networks", ctx.HandleWiFiNetworks)
-	http.HandleFunc("/api/wifi/connect", ctx.HandleWiFiConnect)
-	http.HandleFunc("/api/wifi/disconnect", ctx.HandleWiFiDisconnect)
-	http.HandleFunc("/api/wifi/reorder", ctx.HandleWiFiReorder)
-	http.HandleFunc("/api/wifi/status", ctx.HandleWiFiStatus)
-	http.HandleFunc("/api/files/cards", ctx.HandleFileCards)
-	http.HandleFunc("/api/files", ctx.HandleFiles)
-	http.HandleFunc("/api/files/paginated", ctx.HandleFilesPaginated)
-	http.HandleFunc("/api/files/link", ctx.HandleFileLink)
-	http.HandleFunc("/api/files/view", ctx.HandleFileView)
-	http.HandleFunc("/api/files/thumbnail", ctx.HandleFileThumbnail)
-	http.HandleFunc("/api/thumbnail", ctx.HandleThumbnail)
-	http.HandleFunc("/api/sdcard/files", ctx.HandleSDCardFiles)
-	http.HandleFunc("/api/sdcard/preview", ctx.HandleSDCardPreview)
-	http.HandleFunc("/api/sdcard/file", ctx.HandleSDCardFile)
-	http.HandleFunc("/api/network/dns", ctx.HandleNetworkDNS)
-	http.HandleFunc("/api/network/interfaces", ctx.HandleNetworkInterfaces)
-	http.HandleFunc("/api/network/dns-lookup", ctx.HandleDNSLookup)
-	http.HandleFunc("/api/network/ping", ctx.HandlePing)
-	http.HandleFunc("/api/network/diagnostics", ctx.HandleNetworkDiagnostics)
-	http.HandleFunc("/api/ota/status", ctx.HandleOTAStatus)
-	http.HandleFunc("/api/ota/install", ctx.HandleOTAInstall)
-	http.HandleFunc("/api/system/time", ctx.HandleSystemTime)
-	http.HandleFunc("/api/system/tls-certificate", ctx.HandleSystemTLSCertificate)
-	http.HandleFunc("/api/system/services/restart", ctx.HandleSystemServicesRestart)
-	http.HandleFunc("/api/system/panic", ctx.HandleSystemPanic)
-	http.HandleFunc("/api/system/stats", ctx.HandleSystemStats)
-	http.HandleFunc("/api/googlephotos/status", ctx.HandleGooglePhotosStatus)
-	http.HandleFunc("/api/googlephotos/auth/start", ctx.HandleGooglePhotosAuthStart)
-	http.HandleFunc("/api/googlephotos/auth/callback", ctx.HandleGooglePhotosAuthCallback)
-	http.HandleFunc("/api/googlephotos/auth/disconnect", ctx.HandleGooglePhotosAuthDisconnect)
-	http.HandleFunc("/api/googlephotos/sync", ctx.HandleGooglePhotosSync)
-	http.HandleFunc("/api/googlephotos/sync/cancel", ctx.HandleGooglePhotosSyncCancel)
-	http.HandleFunc("/api/googlephotos/sync/progress", ctx.HandleGooglePhotosSyncProgress)
-	http.HandleFunc("/api/googlephotos/sync/history/export", ctx.HandleGooglePhotosSyncHistoryExport)
-	http.HandleFunc("/api/googlephotos/albums", ctx.HandleGooglePhotosAlbums)
-	http.HandleFunc("/api/googlephotos/albums/", ctx.HandleGooglePhotosAlbums)
-	http.HandleFunc("/api/googlephotos/cards", ctx.HandleGooglePhotosCards)
-	http.HandleFunc("/api/googlephotos/cards/", ctx.HandleGooglePhotosCards)
-	http.HandleFunc("/ws", websocket.HandleWebSocketWithDmesg(stateMgr, eventMgr, dmesgMgr, otaMgr))
+	appMux := http.NewServeMux()
+	registerAPIRoutes(appMux, ctx, passwordMgr, stateMgr, eventMgr, dmesgMgr, otaMgr)
+	registerWebRoutes(appMux)
 
-	// SPA route and static assets for React frontend
-	http.HandleFunc("/static/", webui.HandleStatic)
-	http.HandleFunc("/", webui.HandleSPA)
-
-	// Legacy routes keep working and load the new SPA shell.
-	http.HandleFunc("/legacy/status", webui.HandleIndex)
-	http.HandleFunc("/legacy/wifi", webui.HandleWiFi)
-	http.HandleFunc("/legacy/history", webui.HandleHistory)
-	http.HandleFunc("/legacy/gallery", webui.HandleGallery)
-	http.HandleFunc("/legacy/config", webui.HandleConfig)
-
-	// Build a per-IP rate limiter for authentication so brute-force attempts
-	// against Basic Auth get throttled and locked out (50 attempts / 15 min).
-	authLimiter := ratelimit.NewLimiter(ratelimit.AuthConfig())
-
-	// Register unauthenticated infrastructure endpoints on a separate mux so
-	// they bypass Basic Auth. These are deliberately minimal and do not expose
-	// any sensitive data or functionality.
-	infraMux := http.NewServeMux()
-	infraMux.HandleFunc("/healthz", handleHealthz)
-	infraMux.Handle("/readyz", makeReadyzHandler(stateMgr, appSettings))
-	infraMux.Handle("/metrics", metrics.Handler())
-
-	// top-level router: infrastructure paths are served directly; everything
-	// else goes through the auth-protected DefaultServeMux.
-	authProtected := auth.BasicAuthMiddlewareWithProvider(passwordMgr, authLimiter)(http.DefaultServeMux)
-	router := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/healthz", "/readyz", "/metrics":
-			infraMux.ServeHTTP(w, r)
-		default:
-			authProtected.ServeHTTP(w, r)
-		}
-	})
-
-	// Wrap default mux with middleware chain: security headers -> CORS -> basic auth.
-	// Security headers are applied first so they're present on all responses (including auth failures).
-	handler := auth.SecurityHeadersMiddleware(
-		auth.CORSMiddleware(allowedOrigins, true)(router),
-	)
-	handler = metrics.HTTPMiddleware(processStartTime, handler)
-	handler = middleware.RequestID(handler) // must be outermost for full request-ID coverage
-	handler = requestTimeoutMiddleware(apiRequestTimeout)(handler)
-	handler = panicPersistenceMiddleware(paniclog.DefaultPath)(handler)
+	handler := buildHandler(appMux, passwordMgr, allowedOrigins, stateMgr, appSettings)
 
 	// Start server (HTTPS if certificates are available, HTTP for development)
 	addr := ":" + port
