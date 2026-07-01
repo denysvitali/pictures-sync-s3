@@ -11,7 +11,20 @@ import (
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/daemoncontrol"
 	"github.com/denysvitali/pictures-sync-s3/pkg/httputil"
+	"github.com/denysvitali/pictures-sync-s3/pkg/sdmonitor"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
+)
+
+type daemonStatusMapping struct {
+	code   string
+	status int
+}
+
+var (
+	noSDCardBadRequest   = daemonStatusMapping{code: daemoncontrol.CodeNoSDCardMounted, status: http.StatusBadRequest}
+	invalidDeviceRequest = daemonStatusMapping{code: daemoncontrol.CodeInvalidDevice, status: http.StatusBadRequest}
+	syncActiveConflict   = daemonStatusMapping{code: daemoncontrol.CodeSyncAlreadyActive, status: http.StatusConflict}
+	syncActiveBadRequest = daemonStatusMapping{code: daemoncontrol.CodeSyncAlreadyActive, status: http.StatusBadRequest}
 )
 
 // HandleDevices lists all available storage devices
@@ -30,39 +43,7 @@ func (ctx *Context) HandleDevices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Convert to state.DeviceInfo to match the state manager's type
-	stateDevices := make([]state.DeviceInfo, len(devices))
-	for i, d := range devices {
-		stateDevices[i] = state.DeviceInfo{
-			DevicePath:  d.DevicePath,
-			DeviceName:  d.DeviceName,
-			Size:        d.Size,
-			SizeHuman:   d.SizeHuman,
-			IsUSB:       d.IsUSB,
-			IsMounted:   d.IsMounted,
-			MountPath:   d.MountPath,
-			HasDCIM:     d.HasDCIM,
-			VolumeLabel: d.VolumeLabel,
-			Partitions:  make([]state.PartitionInfo, len(d.Partitions)),
-		}
-		for j, p := range d.Partitions {
-			stateDevices[i].Partitions[j] = state.PartitionInfo{
-				DevicePath:  p.DevicePath,
-				DeviceName:  p.DeviceName,
-				Size:        p.Size,
-				SizeHuman:   p.SizeHuman,
-				FileSystem:  p.FileSystem,
-				UUID:        p.UUID,
-				VolumeLabel: p.VolumeLabel,
-				IsMounted:   p.IsMounted,
-				MountPath:   p.MountPath,
-				HasDCIM:     p.HasDCIM,
-			}
-		}
-	}
-
-	// Update state manager with available devices
-	ctx.StateMgr.SetAvailableDevices(stateDevices)
+	ctx.StateMgr.SetAvailableDevices(toStateDevices(devices))
 
 	httputil.JSON(w, http.StatusOK, devices)
 }
@@ -98,17 +79,7 @@ func (ctx *Context) HandleDeviceSelect(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Manual device selection requested via WebUI; syncing device: %s", req.DevicePath)
 	if err := requester.RequestManualSync(requestCtx, req.DevicePath); err != nil {
-		statusCode := http.StatusServiceUnavailable
-		var commandErr *daemoncontrol.CommandError
-		if errors.As(err, &commandErr) {
-			switch commandErr.Code {
-			case daemoncontrol.CodeNoSDCardMounted:
-				statusCode = http.StatusBadRequest
-			case daemoncontrol.CodeSyncAlreadyActive:
-				statusCode = http.StatusConflict
-			}
-		}
-		http.Error(w, err.Error(), statusCode)
+		writeDaemonCommandError(w, err, noSDCardBadRequest, syncActiveConflict)
 		return
 	}
 
@@ -150,17 +121,7 @@ func (ctx *Context) HandleDeviceFormat(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("SD card format requested via WebUI for device: %s", req.DevicePath)
 	if err := requester.RequestFormatSDCard(requestCtx, req.DevicePath, req.Label); err != nil {
-		statusCode := http.StatusServiceUnavailable
-		var commandErr *daemoncontrol.CommandError
-		if errors.As(err, &commandErr) {
-			switch commandErr.Code {
-			case daemoncontrol.CodeNoSDCardMounted, daemoncontrol.CodeInvalidDevice:
-				statusCode = http.StatusBadRequest
-			case daemoncontrol.CodeSyncAlreadyActive:
-				statusCode = http.StatusConflict
-			}
-		}
-		http.Error(w, err.Error(), statusCode)
+		writeDaemonCommandError(w, err, noSDCardBadRequest, invalidDeviceRequest, syncActiveConflict)
 		return
 	}
 
@@ -182,17 +143,7 @@ func (ctx *Context) HandleDeviceRedetect(w http.ResponseWriter, r *http.Request)
 
 	log.Println("SD card redetect requested via WebUI")
 	if err := ctx.manualSyncClient().RequestRedetectSDCard(requestCtx); err != nil {
-		statusCode := http.StatusServiceUnavailable
-		var commandErr *daemoncontrol.CommandError
-		if errors.As(err, &commandErr) {
-			switch commandErr.Code {
-			case daemoncontrol.CodeNoSDCardMounted, daemoncontrol.CodeInvalidDevice:
-				statusCode = http.StatusBadRequest
-			case daemoncontrol.CodeSyncAlreadyActive:
-				statusCode = http.StatusConflict
-			}
-		}
-		http.Error(w, err.Error(), statusCode)
+		writeDaemonCommandError(w, err, noSDCardBadRequest, invalidDeviceRequest, syncActiveConflict)
 		return
 	}
 
@@ -222,17 +173,7 @@ func (ctx *Context) HandleSyncStart(w http.ResponseWriter, r *http.Request) {
 
 	log.Println("Manual sync requested via WebUI; forwarding to pictures-sync daemon")
 	if err := requester.RequestManualSync(requestCtx, ""); err != nil {
-		statusCode := http.StatusServiceUnavailable
-		var commandErr *daemoncontrol.CommandError
-		if errors.As(err, &commandErr) {
-			switch commandErr.Code {
-			case daemoncontrol.CodeNoSDCardMounted:
-				statusCode = http.StatusBadRequest
-			case daemoncontrol.CodeSyncAlreadyActive:
-				statusCode = http.StatusConflict
-			}
-		}
-		http.Error(w, err.Error(), statusCode)
+		writeDaemonCommandError(w, err, noSDCardBadRequest, syncActiveConflict)
 		return
 	}
 
@@ -256,15 +197,7 @@ func (ctx *Context) HandleSyncCancel(w http.ResponseWriter, r *http.Request) {
 
 	log.Println("Manual sync cancellation requested via WebUI; forwarding to pictures-sync daemon")
 	if err := requester.RequestCancelSync(requestCtx); err != nil {
-		statusCode := http.StatusServiceUnavailable
-		var commandErr *daemoncontrol.CommandError
-		if errors.As(err, &commandErr) {
-			switch commandErr.Code {
-			case daemoncontrol.CodeSyncAlreadyActive:
-				statusCode = http.StatusBadRequest
-			}
-		}
-		http.Error(w, err.Error(), statusCode)
+		writeDaemonCommandError(w, err, syncActiveBadRequest)
 		return
 	}
 
@@ -272,4 +205,53 @@ func (ctx *Context) HandleSyncCancel(w http.ResponseWriter, r *http.Request) {
 		"status":  "ok",
 		"message": "Sync cancelled",
 	})
+}
+
+func toStateDevices(devices []sdmonitor.DeviceInfo) []state.DeviceInfo {
+	stateDevices := make([]state.DeviceInfo, len(devices))
+	for i, d := range devices {
+		stateDevices[i] = state.DeviceInfo{
+			DevicePath:  d.DevicePath,
+			DeviceName:  d.DeviceName,
+			Size:        d.Size,
+			SizeHuman:   d.SizeHuman,
+			IsUSB:       d.IsUSB,
+			IsMounted:   d.IsMounted,
+			MountPath:   d.MountPath,
+			HasDCIM:     d.HasDCIM,
+			VolumeLabel: d.VolumeLabel,
+			Partitions:  make([]state.PartitionInfo, len(d.Partitions)),
+		}
+		for j, p := range d.Partitions {
+			stateDevices[i].Partitions[j] = state.PartitionInfo{
+				DevicePath:  p.DevicePath,
+				DeviceName:  p.DeviceName,
+				Size:        p.Size,
+				SizeHuman:   p.SizeHuman,
+				FileSystem:  p.FileSystem,
+				UUID:        p.UUID,
+				VolumeLabel: p.VolumeLabel,
+				IsMounted:   p.IsMounted,
+				MountPath:   p.MountPath,
+				HasDCIM:     p.HasDCIM,
+			}
+		}
+	}
+	return stateDevices
+}
+
+func writeDaemonCommandError(w http.ResponseWriter, err error, mappings ...daemonStatusMapping) {
+	http.Error(w, err.Error(), daemonCommandStatus(err, mappings...))
+}
+
+func daemonCommandStatus(err error, mappings ...daemonStatusMapping) int {
+	var commandErr *daemoncontrol.CommandError
+	if errors.As(err, &commandErr) {
+		for _, mapping := range mappings {
+			if mapping.code == commandErr.Code {
+				return mapping.status
+			}
+		}
+	}
+	return http.StatusServiceUnavailable
 }

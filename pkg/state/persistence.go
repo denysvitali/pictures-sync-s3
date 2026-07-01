@@ -81,13 +81,6 @@ func ensureDirectories() error {
 	return nil
 }
 
-// atomicWrite performs an atomic file write by writing to a temp file
-// and then renaming it to the target path
-// Uses the utils package for consistent atomic writes across the codebase
-func atomicWrite(path string, data []byte, perm os.FileMode) error {
-	return utils.AtomicWrite(path, data, perm)
-}
-
 // persistedFiles returns the list of files whose .tmp siblings should be
 // considered by boot-time recovery. Each entry pairs the canonical path with
 // a JSON-validator: if the orphaned .tmp does not parse into the expected
@@ -190,7 +183,7 @@ func (m *Manager) saveState() error {
 		return err
 	}
 
-	return atomicWrite(StateFile, data, 0644)
+	return utils.AtomicWrite(StateFile, data, 0644)
 }
 
 // saveStateSnapshot persists a pre-captured CurrentState snapshot to disk.
@@ -210,7 +203,7 @@ func (m *Manager) saveStateSnapshot(s CurrentState) error {
 
 	m.saveMu.Lock()
 	defer m.saveMu.Unlock()
-	return atomicWrite(StateFile, data, 0644)
+	return utils.AtomicWrite(StateFile, data, 0644)
 }
 
 // loadState reads state from disk
@@ -226,7 +219,7 @@ func (m *Manager) saveHistory() error {
 		return err
 	}
 
-	return atomicWrite(HistoryFile, data, 0644)
+	return utils.AtomicWrite(HistoryFile, data, 0644)
 }
 
 // saveHistorySnapshot persists a pre-captured history slice to disk. Like
@@ -240,7 +233,7 @@ func (m *Manager) saveHistorySnapshot(h []SyncRecord) error {
 
 	m.saveMu.Lock()
 	defer m.saveMu.Unlock()
-	return atomicWrite(HistoryFile, data, 0644)
+	return utils.AtomicWrite(HistoryFile, data, 0644)
 }
 
 // loadHistory reads sync history from disk

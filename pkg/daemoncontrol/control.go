@@ -71,9 +71,9 @@ type Response struct {
 // one of State or Event will be populated depending on Kind. Future kinds may
 // be added without breaking older clients (they should ignore unknown kinds).
 type Envelope struct {
-	Kind  string               `json:"kind"`
-	State *state.CurrentState  `json:"state,omitempty"`
-	Event *events.Event        `json:"event,omitempty"`
+	Kind  string              `json:"kind"`
+	State *state.CurrentState `json:"state,omitempty"`
+	Event *events.Event       `json:"event,omitempty"`
 }
 
 type CommandError struct {
@@ -204,9 +204,7 @@ func handleConn(ctx context.Context, conn net.Conn, handlers Handlers) {
 
 	var req Request
 	if err := json.NewDecoder(conn).Decode(&req); err != nil {
-		if err := json.NewEncoder(conn).Encode(Error(CodeInternalError, "invalid daemon control request")); err != nil {
-			log.Printf("daemoncontrol: failed to encode response: %v", err)
-		}
+		writeResponse(conn, Error(CodeInternalError, "invalid daemon control request"))
 		return
 	}
 	if req.Command == CommandFormatSDCard {
@@ -219,53 +217,41 @@ func handleConn(ctx context.Context, conn net.Conn, handlers Handlers) {
 		_ = conn.SetDeadline(time.Time{})
 	}
 
+	var resp Response
 	switch req.Command {
 	case CommandManualSync:
-		if err := json.NewEncoder(conn).Encode(handlers.ManualSync(ctx, req.DevicePath)); err != nil {
-			log.Printf("daemoncontrol: failed to encode response: %v", err)
-		}
+		resp = handlers.ManualSync(ctx, req.DevicePath)
 	case CommandCancelSync:
-		if err := json.NewEncoder(conn).Encode(handlers.CancelSync(ctx)); err != nil {
-			log.Printf("daemoncontrol: failed to encode response: %v", err)
-		}
+		resp = handlers.CancelSync(ctx)
 	case CommandStatus:
-		if err := json.NewEncoder(conn).Encode(call0(ctx, handlers.Status)); err != nil {
-			log.Printf("daemoncontrol: failed to encode response: %v", err)
-		}
+		resp = call0(ctx, handlers.Status)
 	case CommandHistory:
-		if err := json.NewEncoder(conn).Encode(call0(ctx, handlers.History)); err != nil {
-			log.Printf("daemoncontrol: failed to encode response: %v", err)
-		}
+		resp = call0(ctx, handlers.History)
 	case CommandDevices:
-		if err := json.NewEncoder(conn).Encode(call0(ctx, handlers.Devices)); err != nil {
-			log.Printf("daemoncontrol: failed to encode response: %v", err)
-		}
+		resp = call0(ctx, handlers.Devices)
 	case CommandFormatSDCard:
-		if err := json.NewEncoder(conn).Encode(callFormatSDCard(ctx, handlers.FormatSDCard, req.DevicePath, req.Label)); err != nil {
-			log.Printf("daemoncontrol: failed to encode response: %v", err)
-		}
+		resp = callFormatSDCard(ctx, handlers.FormatSDCard, req.DevicePath, req.Label)
 	case CommandRedetectSDCard:
-		if err := json.NewEncoder(conn).Encode(call0(ctx, handlers.RedetectSDCard)); err != nil {
-			log.Printf("daemoncontrol: failed to encode response: %v", err)
-		}
+		resp = call0(ctx, handlers.RedetectSDCard)
 	case CommandSDCardFiles:
-		if err := json.NewEncoder(conn).Encode(callPath(ctx, handlers.SDCardFiles, req.Path)); err != nil {
-			log.Printf("daemoncontrol: failed to encode response: %v", err)
-		}
+		resp = callPath(ctx, handlers.SDCardFiles, req.Path)
 	case CommandSDCardPreview:
-		if err := json.NewEncoder(conn).Encode(callPath(ctx, handlers.SDCardPreview, req.Path)); err != nil {
-			log.Printf("daemoncontrol: failed to encode response: %v", err)
-		}
+		resp = callPath(ctx, handlers.SDCardPreview, req.Path)
 	case CommandSDCardThumbnail:
-		if err := json.NewEncoder(conn).Encode(callPath(ctx, handlers.SDCardThumbnail, req.Path)); err != nil {
-			log.Printf("daemoncontrol: failed to encode response: %v", err)
-		}
+		resp = callPath(ctx, handlers.SDCardThumbnail, req.Path)
 	case CommandSubscribe:
 		handleSubscribe(ctx, conn, handlers.Subscribe)
+		return
 	default:
-		if err := json.NewEncoder(conn).Encode(Error(CodeInternalError, "unknown daemon control command")); err != nil {
-			log.Printf("daemoncontrol: failed to encode response: %v", err)
-		}
+		resp = Error(CodeInternalError, "unknown daemon control command")
+	}
+
+	writeResponse(conn, resp)
+}
+
+func writeResponse(conn net.Conn, resp Response) {
+	if err := json.NewEncoder(conn).Encode(resp); err != nil {
+		log.Printf("daemoncontrol: failed to encode response: %v", err)
 	}
 }
 
@@ -276,9 +262,7 @@ func handleConn(ctx context.Context, conn net.Conn, handlers Handlers) {
 // the handler returns, or a write fails.
 func handleSubscribe(ctx context.Context, conn net.Conn, handler SubscribeHandler) {
 	if handler == nil {
-		if err := json.NewEncoder(conn).Encode(Error(CodeUnavailable, "subscribe is not available")); err != nil {
-			log.Printf("daemoncontrol: failed to encode response: %v", err)
-		}
+		writeResponse(conn, Error(CodeUnavailable, "subscribe is not available"))
 		return
 	}
 

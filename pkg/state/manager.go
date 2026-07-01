@@ -19,7 +19,7 @@ var recordIDCounter uint64
 // Locking discipline:
 //   - mu guards in-memory state (currentState, history, lastProgressSave).
 //   - saveMu serializes disk persistence. It is ALWAYS acquired AFTER releasing
-//     mu, never while mu is held, so the fsync inside atomicWrite cannot stall
+//     mu, never while mu is held, so the fsync inside utils.AtomicWrite cannot stall
 //     readers/writers contending for mu. Concurrent mutators first commit to
 //     memory under mu, then queue at saveMu in commit order, so on-disk writes
 //     match the order of in-memory commits.

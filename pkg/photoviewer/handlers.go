@@ -1,7 +1,6 @@
 package photoviewer
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -9,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/denysvitali/pictures-sync-s3/pkg/httputil"
 )
 
 // ServePhoto serves a photo file with proper MIME type and caching headers
@@ -101,7 +102,9 @@ func HandleListPhotos(w http.ResponseWriter, r *http.Request, mountPath string) 
 
 	if err != nil {
 		log.Printf("Failed to scan photos: %v", err)
-		writeJSONError(w, fmt.Sprintf("Failed to scan photos: %v", err), http.StatusInternalServerError)
+		httputil.JSON(w, http.StatusInternalServerError, map[string]string{
+			"error": fmt.Sprintf("Failed to scan photos: %v", err),
+		})
 		return
 	}
 
@@ -132,7 +135,7 @@ func HandleListPhotos(w http.ResponseWriter, r *http.Request, mountPath string) 
 		}
 	}
 
-	writeJSON(w, result)
+	httputil.JSON(w, http.StatusOK, result)
 }
 
 // HandleServePhoto is an HTTP handler that serves a photo file
@@ -203,23 +206,6 @@ func HandleServeThumbnail(w http.ResponseWriter, r *http.Request, mountPath stri
 		}
 		return
 	}
-}
-
-// Helper functions
-
-func writeJSON(w http.ResponseWriter, v interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(v); err != nil {
-		log.Printf("Failed to encode JSON response: %v", err)
-	}
-}
-
-func writeJSONError(w http.ResponseWriter, message string, statusCode int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(map[string]string{
-		"error": message,
-	})
 }
 
 func parseInt(s string, defaultValue int) int {
