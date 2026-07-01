@@ -10,9 +10,8 @@ import (
 	"time"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/daemoncontrol"
+	"github.com/denysvitali/pictures-sync-s3/pkg/deviceinfo"
 	"github.com/denysvitali/pictures-sync-s3/pkg/httputil"
-	"github.com/denysvitali/pictures-sync-s3/pkg/sdmonitor"
-	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 )
 
 type daemonStatusMapping struct {
@@ -43,7 +42,7 @@ func (ctx *Context) HandleDevices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx.StateMgr.SetAvailableDevices(toStateDevices(devices))
+	ctx.StateMgr.SetAvailableDevices(deviceinfo.ToStateDevices(devices))
 
 	httputil.JSON(w, http.StatusOK, devices)
 }
@@ -205,39 +204,6 @@ func (ctx *Context) HandleSyncCancel(w http.ResponseWriter, r *http.Request) {
 		"status":  "ok",
 		"message": "Sync cancelled",
 	})
-}
-
-func toStateDevices(devices []sdmonitor.DeviceInfo) []state.DeviceInfo {
-	stateDevices := make([]state.DeviceInfo, len(devices))
-	for i, d := range devices {
-		stateDevices[i] = state.DeviceInfo{
-			DevicePath:  d.DevicePath,
-			DeviceName:  d.DeviceName,
-			Size:        d.Size,
-			SizeHuman:   d.SizeHuman,
-			IsUSB:       d.IsUSB,
-			IsMounted:   d.IsMounted,
-			MountPath:   d.MountPath,
-			HasDCIM:     d.HasDCIM,
-			VolumeLabel: d.VolumeLabel,
-			Partitions:  make([]state.PartitionInfo, len(d.Partitions)),
-		}
-		for j, p := range d.Partitions {
-			stateDevices[i].Partitions[j] = state.PartitionInfo{
-				DevicePath:  p.DevicePath,
-				DeviceName:  p.DeviceName,
-				Size:        p.Size,
-				SizeHuman:   p.SizeHuman,
-				FileSystem:  p.FileSystem,
-				UUID:        p.UUID,
-				VolumeLabel: p.VolumeLabel,
-				IsMounted:   p.IsMounted,
-				MountPath:   p.MountPath,
-				HasDCIM:     p.HasDCIM,
-			}
-		}
-	}
-	return stateDevices
 }
 
 func writeDaemonCommandError(w http.ResponseWriter, err error, mappings ...daemonStatusMapping) {

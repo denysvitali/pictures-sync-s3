@@ -11,6 +11,7 @@ import (
 	"github.com/denysvitali/pictures-sync-s3/pkg/captiveportal"
 	"github.com/denysvitali/pictures-sync-s3/pkg/daemon/cardhandler"
 	"github.com/denysvitali/pictures-sync-s3/pkg/daemoncontrol"
+	"github.com/denysvitali/pictures-sync-s3/pkg/deviceinfo"
 	"github.com/denysvitali/pictures-sync-s3/pkg/events"
 	"github.com/denysvitali/pictures-sync-s3/pkg/ledcontroller"
 	"github.com/denysvitali/pictures-sync-s3/pkg/netwatchdog"
@@ -454,36 +455,7 @@ func (s *Service) handleDevicesCommand(ctx context.Context) daemoncontrol.Respon
 		return daemoncontrol.Error(daemoncontrol.CodeInternalError, fmt.Sprintf("failed to list devices: %v", err))
 	}
 
-	stateDevices := make([]state.DeviceInfo, len(devices))
-	for i, d := range devices {
-		stateDevices[i] = state.DeviceInfo{
-			DevicePath:  d.DevicePath,
-			DeviceName:  d.DeviceName,
-			Size:        d.Size,
-			SizeHuman:   d.SizeHuman,
-			IsUSB:       d.IsUSB,
-			IsMounted:   d.IsMounted,
-			MountPath:   d.MountPath,
-			HasDCIM:     d.HasDCIM,
-			VolumeLabel: d.VolumeLabel,
-			Partitions:  make([]state.PartitionInfo, len(d.Partitions)),
-		}
-		for j, p := range d.Partitions {
-			stateDevices[i].Partitions[j] = state.PartitionInfo{
-				DevicePath:  p.DevicePath,
-				DeviceName:  p.DeviceName,
-				Size:        p.Size,
-				SizeHuman:   p.SizeHuman,
-				FileSystem:  p.FileSystem,
-				UUID:        p.UUID,
-				VolumeLabel: p.VolumeLabel,
-				IsMounted:   p.IsMounted,
-				MountPath:   p.MountPath,
-				HasDCIM:     p.HasDCIM,
-			}
-		}
-	}
-	if err := s.stateMgr.SetAvailableDevices(stateDevices); err != nil {
+	if err := s.stateMgr.SetAvailableDevices(deviceinfo.ToStateDevices(devices)); err != nil {
 		log.Printf("Warning: Failed to update daemon device state: %v", err)
 	}
 
