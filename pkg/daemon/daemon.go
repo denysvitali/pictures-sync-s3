@@ -290,35 +290,39 @@ func (s *Service) Run() error {
 			return nil
 
 		case event := <-eventChan:
-			log.Printf("Received event from monitor: %+v", event)
-			switch event.Type {
-			case sdmonitor.EventInserted:
-				log.Printf("Processing card insertion event: %s at %s", event.DevName, event.MountPath)
-
-				// A successful insertion implies the mount succeeded; clear any
-				// previous silent-mount-failure flag so the next idle/syncing
-				// status transition can clear the error LED.
-				mountFailureActive = false
-
-				// Check if time is synced before allowing sync operations
-				if !s.timeSynced {
-					log.Println("ERROR: Cannot sync - system time is not synchronized!")
-					log.Println("Card detected but sync disabled due to incorrect system time")
-					s.stateMgr.SetStatus(state.StatusError)
-					s.stateMgr.SetError("System time not synchronized - sync disabled")
-					break
-				}
-
-				s.cardHandler.HandleInserted(event)
-			case sdmonitor.EventRemoved:
-				log.Printf("Processing card removal event: %s", event.DevName)
-				mountFailureActive = false
-				s.cardHandler.HandleRemoved(event)
-			}
+			s.handleMonitorEvent(event, &mountFailureActive)
 
 		case <-mountWatchTicker.C:
 			s.checkSilentMountFailure(&mountFailureActive)
 		}
+	}
+}
+
+func (s *Service) handleMonitorEvent(event sdmonitor.Event, mountFailureActive *bool) {
+	log.Printf("Received event from monitor: %+v", event)
+
+	switch event.Type {
+	case sdmonitor.EventInserted:
+		log.Printf("Processing card insertion event: %s at %s", event.DevName, event.MountPath)
+
+		// A successful insertion implies the mount succeeded; clear any
+		// previous silent-mount-failure flag so the next idle/syncing
+		// status transition can clear the error LED.
+		*mountFailureActive = false
+
+		if !s.timeSynced {
+			log.Println("ERROR: Cannot sync - system time is not synchronized!")
+			log.Println("Card detected but sync disabled due to incorrect system time")
+			s.stateMgr.SetStatus(state.StatusError)
+			s.stateMgr.SetError("System time not synchronized - sync disabled")
+			return
+		}
+
+		s.cardHandler.HandleInserted(event)
+	case sdmonitor.EventRemoved:
+		log.Printf("Processing card removal event: %s", event.DevName)
+		*mountFailureActive = false
+		s.cardHandler.HandleRemoved(event)
 	}
 }
 
