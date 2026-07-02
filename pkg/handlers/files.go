@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/denysvitali/pictures-sync-s3/pkg/daemoncontrol"
 	"github.com/denysvitali/pictures-sync-s3/pkg/httputil"
 	"github.com/denysvitali/pictures-sync-s3/pkg/sdcardbrowser"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
@@ -108,36 +107,36 @@ var fileViewImageContentTypes = map[string]string{
 }
 
 var fileViewTextContentTypes = map[string]string{
-	".conf":      "text/plain; charset=utf-8",
-	".config":    "text/plain; charset=utf-8",
-	".css":       "text/css; charset=utf-8",
-	".csv":       "text/csv; charset=utf-8",
-	".go":        "text/x-go; charset=utf-8",
-	".hcl":       "text/x-hcl; charset=utf-8",
-	".html":      "text/html; charset=utf-8",
-	".ini":       "text/plain; charset=utf-8",
-	".java":      "text/x-java-source; charset=utf-8",
-	".js":        "text/javascript; charset=utf-8",
-	".json":      "application/json; charset=utf-8",
-	".log":       "text/plain; charset=utf-8",
-	".lua":       "text/x-lua; charset=utf-8",
-	".md":        "text/markdown; charset=utf-8",
-	".mod":       "text/plain; charset=utf-8",
-	".php":       "text/x-php; charset=utf-8",
-	".pl":        "text/x-perl; charset=utf-8",
-	".py":        "text/x-python; charset=utf-8",
-	".rb":        "text/x-ruby; charset=utf-8",
-	".rs":        "text/rust; charset=utf-8",
-	".sh":        "text/x-sh; charset=utf-8",
-	".sql":       "text/x-sql; charset=utf-8",
-	".toml":      "text/plain; charset=utf-8",
-	".ts":        "text/typescript; charset=utf-8",
-	".tsx":       "text/typescript; charset=utf-8",
-	".txt":       "text/plain; charset=utf-8",
-	".xml":       "application/xml; charset=utf-8",
-	".yml":       "text/yaml; charset=utf-8",
-	".yaml":      "text/yaml; charset=utf-8",
-	".yaml.tpl":  "text/yaml; charset=utf-8",
+	".conf":     "text/plain; charset=utf-8",
+	".config":   "text/plain; charset=utf-8",
+	".css":      "text/css; charset=utf-8",
+	".csv":      "text/csv; charset=utf-8",
+	".go":       "text/x-go; charset=utf-8",
+	".hcl":      "text/x-hcl; charset=utf-8",
+	".html":     "text/html; charset=utf-8",
+	".ini":      "text/plain; charset=utf-8",
+	".java":     "text/x-java-source; charset=utf-8",
+	".js":       "text/javascript; charset=utf-8",
+	".json":     "application/json; charset=utf-8",
+	".log":      "text/plain; charset=utf-8",
+	".lua":      "text/x-lua; charset=utf-8",
+	".md":       "text/markdown; charset=utf-8",
+	".mod":      "text/plain; charset=utf-8",
+	".php":      "text/x-php; charset=utf-8",
+	".pl":       "text/x-perl; charset=utf-8",
+	".py":       "text/x-python; charset=utf-8",
+	".rb":       "text/x-ruby; charset=utf-8",
+	".rs":       "text/rust; charset=utf-8",
+	".sh":       "text/x-sh; charset=utf-8",
+	".sql":      "text/x-sql; charset=utf-8",
+	".toml":     "text/plain; charset=utf-8",
+	".ts":       "text/typescript; charset=utf-8",
+	".tsx":      "text/typescript; charset=utf-8",
+	".txt":      "text/plain; charset=utf-8",
+	".xml":      "application/xml; charset=utf-8",
+	".yml":      "text/yaml; charset=utf-8",
+	".yaml":     "text/yaml; charset=utf-8",
+	".yaml.tpl": "text/yaml; charset=utf-8",
 }
 
 var fileViewTextFilenames = map[string]string{
@@ -404,12 +403,12 @@ func writeThumbnailResponse(w http.ResponseWriter, preview *sdcardbrowser.Previe
 
 // SDCardFileInfo contains file metadata including EXIF data
 type SDCardFileInfo struct {
-	Name    string                 `json:"name"`
-	Path    string                 `json:"path"`
-	Size    int64                  `json:"size"`
-	ModTime time.Time              `json:"mod_time"`
-	IsDir   bool                   `json:"is_dir"`
-	IsImage bool                   `json:"is_image"`
+	Name    string         `json:"name"`
+	Path    string         `json:"path"`
+	Size    int64          `json:"size"`
+	ModTime time.Time      `json:"mod_time"`
+	IsDir   bool           `json:"is_dir"`
+	IsImage bool           `json:"is_image"`
 	EXIF    map[string]any `json:"exif,omitempty"`
 }
 
@@ -665,26 +664,6 @@ func sdcardFileHTTPStatus(err error) int {
 		return http.StatusBadRequest
 	case errors.Is(err, fs.ErrNotExist):
 		return http.StatusNotFound
-	default:
-		return http.StatusInternalServerError
-	}
-}
-
-func daemonErrorMessage(err error) string {
-	var commandErr *daemoncontrol.CommandError
-	if errors.As(err, &commandErr) && commandErr.Message != "" {
-		return commandErr.Message
-	}
-	return err.Error()
-}
-
-func daemonHTTPStatus(err error) int {
-	message := daemonErrorMessage(err)
-	switch message {
-	case "access denied":
-		return http.StatusForbidden
-	case "unsupported file type", "path parameter required", "no SD card mounted":
-		return http.StatusBadRequest
 	default:
 		return http.StatusInternalServerError
 	}
