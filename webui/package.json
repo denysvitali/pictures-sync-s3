@@ -1,7 +1,7 @@
 {
   "name": "photo-backup-station",
   "version": "3.0.0",
-  "packageManager": "pnpm@10.33.2",
+  "packageManager": "pnpm@10.34.5",
   "private": true,
   "type": "module",
   "description": "React frontend for Photo Backup Station",
