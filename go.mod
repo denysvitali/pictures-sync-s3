@@ -5,19 +5,19 @@ go 1.26
 require (
 	github.com/beevik/ntp v1.5.0
 	github.com/disintegration/imaging v1.6.2
-	github.com/diskfs/go-diskfs v1.9.1
+	github.com/diskfs/go-diskfs v1.9.4
 	github.com/dsoprea/go-exif/v3 v3.0.1
 	github.com/gokrazy/gokapi v0.0.0-20251205165548-0927bab199d4
-	github.com/gokrazy/updater v0.0.0-20250705135802-db129c40879c
+	github.com/gokrazy/updater v0.0.0-20260620140544-0a84d8ab3878
 	github.com/gorilla/websocket v1.5.3
 	github.com/mdlayher/genetlink v1.4.0
-	github.com/mdlayher/netlink v1.11.1
-	github.com/mdlayher/wifi v0.7.2
-	github.com/prometheus-community/pro-bing v0.8.0
-	github.com/rclone/rclone v1.74.0
+	github.com/mdlayher/netlink v1.11.2
+	github.com/mdlayher/wifi v0.8.0
+	github.com/prometheus-community/pro-bing v0.9.1
+	github.com/rclone/rclone v1.74.4
 	github.com/spf13/cobra v1.10.2
-	golang.org/x/crypto v0.50.0
-	golang.org/x/sys v0.43.0
+	golang.org/x/crypto v0.54.0
+	golang.org/x/sys v0.47.0
 	golang.org/x/time v0.15.0
 )
 
@@ -67,7 +67,7 @@ require (
 	github.com/dsoprea/go-logging v0.0.0-20200710184922-b02d349568dd // indirect
 	github.com/dsoprea/go-utility/v2 v2.0.0-20221003172846-a3e1774ef349 // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
-	github.com/elliotwutingfeng/asciiset v0.0.0-20230602022725-51bbb787efab // indirect
+	github.com/elliotwutingfeng/asciiset v0.0.0-20260129054604-cfde2086bc57 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.13 // indirect
 	github.com/go-chi/chi/v5 v5.2.5 // indirect
@@ -112,7 +112,7 @@ require (
 	github.com/ncw/swift/v2 v2.0.5 // indirect
 	github.com/oklog/ulid/v2 v2.1.1 // indirect
 	github.com/peterh/liner v1.2.2 // indirect
-	github.com/pierrec/lz4/v4 v4.1.25 // indirect
+	github.com/pierrec/lz4/v4 v4.1.26 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/pkg/xattr v0.4.12 // indirect
 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
@@ -142,12 +142,12 @@ require (
 	go.opentelemetry.io/otel/metric v1.43.0 // indirect
 	go.opentelemetry.io/otel/trace v1.43.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
-	golang.org/x/image v0.39.0 // indirect
-	golang.org/x/net v0.53.0 // indirect
+	golang.org/x/image v0.43.0 // indirect
+	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/term v0.42.0 // indirect
-	golang.org/x/text v0.36.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
+	golang.org/x/term v0.45.0 // indirect
+	golang.org/x/text v0.40.0 // indirect
 	google.golang.org/api v0.277.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260427160629-7cedc36a6bc4 // indirect
 	google.golang.org/grpc v1.80.0 // indirect
