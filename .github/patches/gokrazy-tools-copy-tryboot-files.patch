@@ -1,0 +1,13 @@
+diff --git a/internal/packer/write.go b/internal/packer/write.go
+index 8029d4e..6ba48cd 100644
+--- a/internal/packer/write.go
++++ b/internal/packer/write.go
+@@ -171,6 +171,8 @@ var (
+ 	kernelGlobs = []string{
+ 		"boot.scr", // u-boot script file
+ 		"vmlinuz",
++		"vmlinuz.*",
++		"tryboot.txt",
+ 		"*.dtb",
+ 		"overlays/*.dtbo",
+ 		"overlays/overlay_map.dtb",

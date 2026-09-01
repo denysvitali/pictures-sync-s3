@@ -143,7 +143,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/go/bin/gok
-          key: ${{ runner.os }}-${{ runner.arch }}-gokrazy-gok-${{ env.GOKRAZY_TOOLS_REPOSITORY }}-${{ env.GOKRAZY_TOOLS_REF }}-${{ env.GOKRAZY_INTERNAL_REPOSITORY }}-${{ env.GOKRAZY_INTERNAL_REF }}-v1
+          key: ${{ runner.os }}-${{ runner.arch }}-gokrazy-gok-${{ env.GOKRAZY_TOOLS_REPOSITORY }}-${{ env.GOKRAZY_TOOLS_REF }}-${{ env.GOKRAZY_INTERNAL_REPOSITORY }}-${{ env.GOKRAZY_INTERNAL_REF }}-${{ hashFiles('.github/patches/gokrazy-tools-copy-tryboot-files.patch') }}
 
       - name: Install gokrazy CLI
         if: steps.cache-gok.outputs.cache-hit != 'true'
@@ -151,6 +151,8 @@ jobs:
           git clone --depth=1 "https://github.com/${GOKRAZY_TOOLS_REPOSITORY}.git" /tmp/gokrazy-tools
           git -C /tmp/gokrazy-tools fetch --depth=1 origin "${GOKRAZY_TOOLS_REF}"
           git -C /tmp/gokrazy-tools checkout --detach FETCH_HEAD
+          git -C /tmp/gokrazy-tools apply --check "${{ github.workspace }}/.github/patches/gokrazy-tools-copy-tryboot-files.patch"
+          git -C /tmp/gokrazy-tools apply "${{ github.workspace }}/.github/patches/gokrazy-tools-copy-tryboot-files.patch"
 
           git clone --depth=1 "https://github.com/${GOKRAZY_INTERNAL_REPOSITORY}.git" /tmp/gokrazy-internal
           git -C /tmp/gokrazy-internal fetch --depth=1 origin "${GOKRAZY_INTERNAL_REF}"
@@ -320,6 +322,8 @@ jobs:
           GOKRAZY_PARENT_DIR: ${{ env.GOKRAZY_PARENT_DIR }}
           IMAGE_DIR: ${{ github.workspace }}/ota
           IMAGE_NAME: photo-backup-rpi-root.squashfs
+          BOOT_IMAGE_NAME: photo-backup-rpi-boot.fat
+          GOKRAZY_TRYBOOT_KERNEL: "1"
           GOKRAZY_IMAGE_MODE: ota
           HOSTAPD_BINARY: ${{ steps.hostapd.outputs.hostapd_binary }}
           EXFAT_MKFS_BINARY: ${{ steps.exfatprogs.outputs.exfat_mkfs_binary }}
@@ -329,6 +333,16 @@ jobs:
           TAG_NAME: ${{ steps.release-tag.outputs.tag }}
         run: |
           make ota
+
+      - name: Validate rollback-safe boot OTA image
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mtools
+          boot_image="${{ steps.build-root.outputs.boot_image_path }}"
+          mtype -i "$boot_image" ::config.txt | grep -qx 'kernel=vmlinuz.recovery'
+          mtype -i "$boot_image" ::tryboot.txt | grep -qx 'kernel=vmlinuz'
+          mdir -i "$boot_image" ::vmlinuz
+          mdir -i "$boot_image" ::vmlinuz.recovery
 
       - name: Compress flash image for release
         id: compress
@@ -346,6 +360,14 @@ jobs:
           gzip -9 -c "${{ steps.build-root.outputs.image_path }}" > "$compressed_path"
           echo "compressed_path=$compressed_path" >> "$GITHUB_OUTPUT"
 
+      - name: Compress boot OTA image for release
+        id: compress-boot
+        shell: bash
+        run: |
+          compressed_path="${{ steps.build-root.outputs.boot_image_path }}.gz"
+          gzip -9 -c "${{ steps.build-root.outputs.boot_image_path }}" > "$compressed_path"
+          echo "compressed_path=$compressed_path" >> "$GITHUB_OUTPUT"
+
       - name: Attest build provenance for squashfs OTA image
         uses: actions/attest-build-provenance@v4
         with:
@@ -360,6 +382,8 @@ jobs:
             ${{ steps.compress.outputs.compressed_path }}
             ${{ steps.build-root.outputs.image_path }}
             ${{ steps.compress-root.outputs.compressed_path }}
+            ${{ steps.build-root.outputs.boot_image_path }}
+            ${{ steps.compress-boot.outputs.compressed_path }}
           if-no-files-found: error
 
       - name: Publish OTA release
@@ -374,3 +398,4 @@ jobs:
           files: |
             ${{ steps.compress.outputs.compressed_path }}
             ${{ steps.compress-root.outputs.compressed_path }}
+            ${{ steps.compress-boot.outputs.compressed_path }}

@@ -18,6 +18,8 @@ git -C "$BUILD_DIR/kernel" submodule update --init --depth=1
 git -C "$BUILD_DIR/kernel" apply --check "$PATCH_FILE"
 git -C "$BUILD_DIR/kernel" apply "$PATCH_FILE"
 
+cp "$BUILD_DIR/kernel/dist/vmlinuz" "$BUILD_DIR/recovery-vmlinuz"
+
 (
   cd "$BUILD_DIR/kernel"
   go run ./cmd/compile
@@ -26,6 +28,7 @@ git -C "$BUILD_DIR/kernel" apply "$PATCH_FILE"
 cp "$BUILD_DIR/kernel/go.mod" "$OUTPUT_DIR/go.mod"
 cp "$BUILD_DIR/kernel/go.sum" "$OUTPUT_DIR/go.sum"
 cp -a "$BUILD_DIR/kernel/dist" "$OUTPUT_DIR/dist"
+cp "$BUILD_DIR/recovery-vmlinuz" "$OUTPUT_DIR/dist/vmlinuz.recovery"
 
 test -s "$OUTPUT_DIR/dist/vmlinuz"
 test -f "$OUTPUT_DIR/dist/bcm2708-rpi-b-plus.dtb"

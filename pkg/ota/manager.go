@@ -17,17 +17,20 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/auth"
 	"github.com/denysvitali/pictures-sync-s3/pkg/state"
 	"github.com/denysvitali/pictures-sync-s3/pkg/utils"
 	"github.com/gokrazy/updater"
+	"golang.org/x/sys/unix"
 )
 
 const (
 	DefaultOwner        = "denysvitali"
 	DefaultRepo         = "pictures-sync-s3"
 	DefaultAssetName    = "photo-backup-rpi-root.squashfs.gz"
+	BootAssetName       = "photo-backup-rpi-boot.fat.gz"
 	FlashAssetName      = "photo-backup-rpi.img.gz"
 	DefaultGitHubAPIURL = "https://api.github.com"
 	// UpdateInsecureEnv enables TLS verification bypass for self-signed gokrazy updater endpoints.
@@ -42,6 +45,13 @@ type Installer interface {
 	InstallRoot(ctx context.Context, r io.Reader, progress InstallProgressFunc) error
 }
 
+// SystemInstaller installs a root image together with its matching boot
+// filesystem. Root is written first because it targets the inactive A/B slot;
+// boot is written only after both release assets have been verified.
+type SystemInstaller interface {
+	InstallSystem(ctx context.Context, root, boot io.Reader, progress InstallProgressFunc) error
+}
+
 type InstallProgressFunc func(InstallProgress)
 
 type InstallProgress struct {
@@ -54,6 +64,27 @@ type GokrazyInstaller struct {
 	BaseURL            string
 	HTTPClient         *http.Client
 	InsecureSkipVerify bool
+}
+
+var rebootIntoTryboot = func() error {
+	arg, err := unix.BytePtrFromString("0 tryboot")
+	if err != nil {
+		return err
+	}
+	unix.Sync()
+	_, _, errno := unix.RawSyscall6(
+		unix.SYS_REBOOT,
+		unix.LINUX_REBOOT_MAGIC1,
+		unix.LINUX_REBOOT_MAGIC2,
+		unix.LINUX_REBOOT_CMD_RESTART2,
+		uintptr(unsafe.Pointer(arg)),
+		0,
+		0,
+	)
+	if errno != 0 {
+		return errno
+	}
+	return nil
 }
 
 func (i GokrazyInstaller) InstallRoot(ctx context.Context, r io.Reader, progress InstallProgressFunc) error {
@@ -79,6 +110,35 @@ func (i GokrazyInstaller) InstallRoot(ctx context.Context, r io.Reader, progress
 	reportInstallProgress(progress, "rebooting", "Requesting reboot", 95)
 	if err := target.Reboot(ctx); err != nil {
 		return fmt.Errorf("reboot: %w", err)
+	}
+	return nil
+}
+
+func (i GokrazyInstaller) InstallSystem(ctx context.Context, root, boot io.Reader, progress InstallProgressFunc) error {
+	baseURL := normalizeUpdateBaseURL(i.BaseURL)
+	if baseURL == "" {
+		baseURL = DefaultUpdateURL
+	}
+	target, err := NewUpdateTarget(ctx, baseURL, i.httpClient(baseURL))
+	if err != nil {
+		return fmt.Errorf("connect to gokrazy updater: %w", err)
+	}
+
+	reportInstallProgress(progress, "flashing", "Flashing inactive root partition", 10)
+	if err := target.StreamTo(ctx, "root", root); err != nil {
+		return fmt.Errorf("stream root image: %w", err)
+	}
+	reportInstallProgress(progress, "flashing-boot", "Flashing matching boot filesystem", 75)
+	if err := target.StreamTo(ctx, "boot", boot); err != nil {
+		return fmt.Errorf("stream boot image: %w", err)
+	}
+	reportInstallProgress(progress, "testboot", "Scheduling inactive root for test boot", 90)
+	if err := target.Testboot(ctx); err != nil {
+		return fmt.Errorf("schedule test boot: %w", err)
+	}
+	reportInstallProgress(progress, "rebooting", "Requesting one-shot tryboot into updated kernel", 95)
+	if err := rebootIntoTryboot(); err != nil {
+		return fmt.Errorf("reboot into tryboot: %w", err)
 	}
 	return nil
 }
@@ -204,6 +264,7 @@ func NewManager() *Manager {
 		subscribers:    make([]*statusSubscriber, 0),
 	}
 	_ = mgr.loadInstallHistory()
+	go mgr.commitTrybootWhenHealthy()
 	return mgr
 }
 
@@ -465,6 +526,23 @@ func (m *Manager) run(ctx context.Context, releaseTag string) {
 		}
 	}
 
+	var stagedBoot *StagedImage
+	bootAsset := findAsset(release.Assets, BootAssetName)
+	_, supportsSystemInstall := m.installer().(SystemInstaller)
+	if bootAsset != nil && supportsSystemInstall {
+		m.updateInstallProgress(InstallProgress{
+			Phase:           "downloading-boot",
+			Message:         "Downloading matching boot filesystem",
+			ProgressPercent: 78,
+		})
+		stagedBoot, err = m.downloadAndVerifyAsset(ctx, release, bootAsset)
+		if err != nil {
+			m.fail(fmt.Errorf("prepare boot OTA asset: %w", err))
+			return
+		}
+		defer func() { _ = stagedBoot.Close() }()
+	}
+
 	imageFile, err := staged.Open()
 	if err != nil {
 		m.fail(fmt.Errorf("open staged OTA image: %w", err))
@@ -484,8 +562,26 @@ func (m *Manager) run(ctx context.Context, releaseTag string) {
 		Message:         "Flashing verified OTA image",
 		ProgressPercent: 85,
 	})
-	if err := m.installer().InstallRoot(ctx, gz, m.updateInstallProgress); err != nil {
-		m.fail(fmt.Errorf("apply OTA image: %w", err))
+	var installErr error
+	if stagedBoot != nil {
+		bootFile, openErr := stagedBoot.Open()
+		if openErr != nil {
+			m.fail(fmt.Errorf("open staged boot OTA image: %w", openErr))
+			return
+		}
+		defer bootFile.Close()
+		bootGz, gzipErr := gzip.NewReader(bootFile)
+		if gzipErr != nil {
+			m.fail(fmt.Errorf("open gzip boot OTA asset: %w", gzipErr))
+			return
+		}
+		defer bootGz.Close()
+		installErr = m.installer().(SystemInstaller).InstallSystem(ctx, gz, bootGz, m.updateInstallProgress)
+	} else {
+		installErr = m.installer().InstallRoot(ctx, gz, m.updateInstallProgress)
+	}
+	if installErr != nil {
+		m.fail(fmt.Errorf("apply OTA image: %w", installErr))
 		return
 	}
 
@@ -499,6 +595,55 @@ func (m *Manager) run(ctx context.Context, releaseTag string) {
 		snapshot = *status
 	})
 	m.recordInstallHistory(m.historyFromStatus(snapshot))
+}
+
+func (m *Manager) downloadAndVerifyAsset(ctx context.Context, release *Release, asset *Asset) (*StagedImage, error) {
+	expectedHash, sidecarURL, err := m.resolveExpectedSHA256(ctx, release, asset)
+	if err != nil {
+		return nil, fmt.Errorf("resolve SHA256 sidecar: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, asset.BrowserDownloadURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := m.client().Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("download asset: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("download asset: GitHub returned %s", resp.Status)
+	}
+	staged, err := stageReader(otaStagingDir(), asset.Name, resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	ok := false
+	defer func() {
+		if !ok {
+			_ = staged.Close()
+		}
+	}()
+	expectedSize := asset.Size
+	sizeSource := "github asset size"
+	if expectedSize <= 0 && resp.ContentLength > 0 {
+		expectedSize = resp.ContentLength
+		sizeSource = "Content-Length"
+	}
+	if err := staged.VerifyExpectedSize(expectedSize, sizeSource); err != nil {
+		return nil, err
+	}
+	if expectedHash != "" {
+		source := "github-sidecar"
+		if sidecarURL != "" {
+			source = sidecarURL
+		}
+		if err := staged.VerifyExpected(expectedHash, source); err != nil {
+			return nil, err
+		}
+	}
+	ok = true
+	return staged, nil
 }
 
 // resolveExpectedSHA256 looks for a SHA256 sidecar accompanying the release
@@ -581,6 +726,12 @@ func (m *Manager) releaseWithInstallAsset(release Release) (Release, bool) {
 	// handler) read release.Assets[0] as the image.
 	if sidecar := findAsset(release.Assets, m.assetName()+SHA256SidecarSuffix); sidecar != nil {
 		kept = append(kept, *sidecar)
+	}
+	if boot := findAsset(release.Assets, BootAssetName); boot != nil {
+		kept = append(kept, *boot)
+		if sidecar := findAsset(release.Assets, BootAssetName+SHA256SidecarSuffix); sidecar != nil {
+			kept = append(kept, *sidecar)
+		}
 	}
 	release.Assets = kept
 	return release, true

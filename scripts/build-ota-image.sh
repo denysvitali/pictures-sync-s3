@@ -8,6 +8,8 @@ GOKRAZY_MODULE_REPLACE="${GOKRAZY_MODULE_REPLACE:-}"
 GOKRAZY_KERNEL_REPLACE="${GOKRAZY_KERNEL_REPLACE:-}"
 IMAGE_DIR="${IMAGE_DIR:-$PWD/ota}"
 IMAGE_NAME="${IMAGE_NAME:-photo-backup-rpi-root.squashfs}"
+BOOT_IMAGE_NAME="${BOOT_IMAGE_NAME:-}"
+GOKRAZY_TRYBOOT_KERNEL="${GOKRAZY_TRYBOOT_KERNEL:-0}"
 GOKRAZY_IMAGE_MODE="${GOKRAZY_IMAGE_MODE:-ota}"
 TARGET_STORAGE_BYTES="${TARGET_STORAGE_BYTES:-}"
 IMAGE_PATH="${IMAGE_DIR}/${IMAGE_NAME}"
@@ -232,7 +234,20 @@ EOF
 
 case "$GOKRAZY_IMAGE_MODE" in
   ota)
-    gok -i "$GOKRAZY_INSTANCE" overwrite --root "$IMAGE_PATH"
+    if [ -n "$BOOT_IMAGE_NAME" ]; then
+      BOOT_IMAGE_PATH="${IMAGE_DIR}/${BOOT_IMAGE_NAME}"
+      if [ "$GOKRAZY_TRYBOOT_KERNEL" = "1" ]; then
+        cp "$GOKRAZY_KERNEL_REPLACE/dist/config.txt" "$GOKRAZY_KERNEL_REPLACE/dist/tryboot.txt"
+        sed -i 's/^kernel=vmlinuz$/kernel=vmlinuz.recovery/' "$GOKRAZY_KERNEL_REPLACE/dist/config.txt"
+      fi
+      gok -i "$GOKRAZY_INSTANCE" overwrite --root "$IMAGE_PATH" --boot "$BOOT_IMAGE_PATH"
+      if [ "$GOKRAZY_TRYBOOT_KERNEL" = "1" ]; then
+        mv "$GOKRAZY_KERNEL_REPLACE/dist/tryboot.txt" "$GOKRAZY_KERNEL_REPLACE/dist/config.txt"
+      fi
+      test -s "$BOOT_IMAGE_PATH"
+    else
+      gok -i "$GOKRAZY_INSTANCE" overwrite --root "$IMAGE_PATH"
+    fi
     ;;
   full)
     if [ -z "$TARGET_STORAGE_BYTES" ]; then
@@ -253,6 +268,9 @@ esac
 
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
   echo "image_path=$IMAGE_PATH" >> "$GITHUB_OUTPUT"
+  if [ -n "${BOOT_IMAGE_PATH:-}" ]; then
+    echo "boot_image_path=$BOOT_IMAGE_PATH" >> "$GITHUB_OUTPUT"
+  fi
 fi
 
 echo "Built image: $IMAGE_PATH"

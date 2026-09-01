@@ -554,7 +554,9 @@ GitHub Actions builds one flashable 32-bit Gokrazy image on every push to `maste
 
 The workflow rebuilds that kernel with FAT12/16, FAT32/vFAT, and exFAT support built in so camera SD cards can be mounted without loadable filesystem modules. Because the kernel lives outside the root filesystem, devices installed before this support was added must be flashed once with the new full `photo-backup-rpi.img`; installing only the root OTA asset does not replace the kernel.
 
-The workflow also publishes `photo-backup-rpi-root.squashfs.gz`, the shared gokrazy-compatible OTA root image used by the web UI updater on both models. The updater checks GitHub Releases by publish time, downloads the newest matching root image, streams it to the inactive gokrazy root partition, switches partitions, and requests a reboot.
+The workflow also publishes `photo-backup-rpi-root.squashfs.gz` and `photo-backup-rpi-boot.fat.gz`. The web updater verifies both assets before changing the device, writes the root image to the inactive A/B slot first, then installs the matching boot filesystem. Kernel changes use Raspberry Pi firmware `tryboot`: the previous kernel remains the normal boot target, while the new kernel is selected for one boot only. Once the updated userspace has remained healthy for 30 seconds it promotes the candidate kernel and commits the new root slot. If the candidate kernel cannot boot, the firmware clears the one-shot flag and automatically returns to the recovery kernel.
+
+An installation running an older root-only updater needs two update passes for the transition: the first installs the updater that understands boot assets; after that reboot, run the same/latest update once more to install and test the matching kernel. No full-card reflash is required.
 
 Workflow:
 `.github/workflows/ota-image.yml`

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -603,6 +604,62 @@ func TestGokrazyInstallerResolvesHTTPRedirectBeforeStreamingRoot(t *testing.T) {
 		if phases[i] != wantPhases[i] {
 			t.Fatalf("progress phases = %#v, want %#v", phases, wantPhases)
 		}
+	}
+}
+
+func TestGokrazyInstallerInstallsRootAndBootBeforeTestboot(t *testing.T) {
+	originalReboot := rebootIntoTryboot
+	rebootIntoTryboot = func() error { return nil }
+	t.Cleanup(func() { rebootIntoTryboot = originalReboot })
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		switch r.URL.Path {
+		case "/update/features":
+			_, _ = w.Write([]byte(`{"features":""}`))
+		case "/update/root", "/update/boot":
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			sum := sha256.Sum256(body)
+			_, _ = fmt.Fprintf(w, "%x", sum)
+		case "/update/testboot":
+			if r.Method != http.MethodPost {
+				http.Error(w, "expected POST", http.StatusBadRequest)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	installer := GokrazyInstaller{BaseURL: server.URL + "/", HTTPClient: server.Client()}
+	var phases []string
+	err := installer.InstallSystem(
+		context.Background(),
+		bytes.NewReader([]byte("root")),
+		bytes.NewReader([]byte("boot")),
+		func(progress InstallProgress) { phases = append(phases, progress.Phase) },
+	)
+	if err != nil {
+		t.Fatalf("InstallSystem returned error: %v", err)
+	}
+	wantRequests := []string{
+		"GET /update/features",
+		"GET /update/features",
+		"GET /",
+		"PUT /update/root",
+		"PUT /update/boot",
+		"POST /update/testboot",
+	}
+	if !reflect.DeepEqual(requests, wantRequests) {
+		t.Fatalf("requests = %#v, want %#v", requests, wantRequests)
+	}
+	wantPhases := []string{"flashing", "flashing-boot", "testboot", "rebooting"}
+	if !reflect.DeepEqual(phases, wantPhases) {
+		t.Fatalf("phases = %#v, want %#v", phases, wantPhases)
 	}
 }
 
