@@ -67,6 +67,7 @@ CONFIG_IEEE80211AX=y
 CFLAGS += -Os -march=armv6
 LDFLAGS += -static
 EOF
+printf 'LIBS += -L%s/lib\n' "$SYSROOT_DIR" >> .config
 
 export PKG_CONFIG_LIBDIR="$SYSROOT_DIR/lib/pkgconfig"
 make -j"$(nproc)" CC=arm-linux-gnueabi-gcc hostapd
