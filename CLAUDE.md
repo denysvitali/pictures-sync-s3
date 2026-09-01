@@ -30,7 +30,7 @@ This file provides guidance to Claude Code (claude.ai/code) and agents when work
 
 ## Project Overview
 
-A Gokrazy-based photo backup appliance for Raspberry Pi 4 that automatically syncs SD card photos to cloud storage (Backblaze B2, S3, etc.) using rclone. The system features enterprise-grade security, real-time WebSocket updates, comprehensive testing, and modern Go patterns.
+A Gokrazy-based photo backup appliance for Raspberry Pi 1 Model B+ and Raspberry Pi 4 that automatically syncs SD card photos to cloud storage (Backblaze B2, S3, etc.) using rclone. One ARMv6-compatible 32-bit image supports both models. The system features enterprise-grade security, real-time WebSocket updates, comprehensive testing, and modern Go patterns.
 
 ## 🔧 Build and Development Commands
 

@@ -82,7 +82,7 @@ func TestLatestReleaseRejectsFlashOnlyAsset(t *testing.T) {
 		PublishedAt: time.Now().UTC(),
 		Assets: []Asset{{
 			Name:               FlashAssetName,
-			BrowserDownloadURL: "https://example.invalid/photo-backup-rpi4b.img.gz",
+			BrowserDownloadURL: "https://example.invalid/photo-backup-rpi.img.gz",
 		}},
 	}}
 
@@ -115,12 +115,12 @@ func TestSelectReleaseFetchesSpecificTagDirectly(t *testing.T) {
 		Assets: []Asset{
 			{
 				Name:               DefaultAssetName,
-				BrowserDownloadURL: "https://example.invalid/photo-backup-rpi4b-root.squashfs.gz",
+				BrowserDownloadURL: "https://example.invalid/photo-backup-rpi-root.squashfs.gz",
 				Size:               1234,
 			},
 			{
 				Name:               DefaultAssetName + SHA256SidecarSuffix,
-				BrowserDownloadURL: "https://example.invalid/photo-backup-rpi4b-root.squashfs.gz.sha256",
+				BrowserDownloadURL: "https://example.invalid/photo-backup-rpi-root.squashfs.gz.sha256",
 				Size:               64,
 			},
 		},
@@ -175,7 +175,7 @@ func TestSelectReleaseRejectsSpecificTagWithoutRootAsset(t *testing.T) {
 		PublishedAt: time.Now().UTC(),
 		Assets: []Asset{{
 			Name:               FlashAssetName,
-			BrowserDownloadURL: "https://example.invalid/photo-backup-rpi4b.img.gz",
+			BrowserDownloadURL: "https://example.invalid/photo-backup-rpi.img.gz",
 		}},
 	}
 

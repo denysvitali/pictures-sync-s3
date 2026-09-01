@@ -119,6 +119,13 @@ echo "Creating configuration at: $CONFIG_FILE"
 cat > "$CONFIG_FILE" <<EOF
 {
   "Hostname": "$INSTANCE_NAME",
+  "Environment": [
+    "GOOS=linux",
+    "GOARCH=arm",
+    "GOARM=6"
+  ],
+  "KernelPackage": "github.com/gokrazy-community/kernel-rpi-os-32/dist",
+  "FirmwarePackage": "github.com/gokrazy-community/firmware-rpi/dist",
   "Update": {
     "HTTPPort": "80",
     "HTTPSPort": "443",
@@ -217,7 +224,7 @@ echo "Next steps:"
 echo "1. Insert an SD card into your computer"
 echo "2. Identify the device (e.g., /dev/sdb) - BE CAREFUL!"
 echo "3. Run: gok -i $INSTANCE_NAME overwrite --full /dev/sdX"
-echo "4. Insert the SD card into your Raspberry Pi 4 and power on"
+echo "4. Insert the SD card into your Raspberry Pi 1 Model B+ or Raspberry Pi 4 and power on"
 echo "5. Access the web UI at: https://$INSTANCE_NAME.local or http://$INSTANCE_NAME.local:8080"
 echo "6. Configure rclone settings (remote name, path, and credentials) via the web UI"
 echo ""

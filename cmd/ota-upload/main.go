@@ -43,7 +43,7 @@ func newRootCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		// #nosec G101 -- example placeholder password in usage string
-		Use:   "ota-upload --image photo-backup-rpi4b-root.squashfs.gz --target https://gokrazy:password@device/",
+		Use:   "ota-upload --image photo-backup-rpi-root.squashfs.gz --target https://gokrazy:password@device/",
 		Short: "Upload a gzipped gokrazy root image to a running device",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return run(cmd.Context(), opts)

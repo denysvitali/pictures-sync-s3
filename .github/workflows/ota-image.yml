@@ -65,7 +65,7 @@ jobs:
       GOKRAZY_TOOLS_REF: 242f3106842c380a1c9a4a4473e3e3c7090f29f2
       GOKRAZY_INTERNAL_REPOSITORY: denysvitali/gokrazy-internal
       GOKRAZY_INTERNAL_REF: 516186dbfc01bdae7730e451d2b8a7c7a24e5452
-      IMAGE_NAME: photo-backup-rpi4b.img
+      IMAGE_NAME: photo-backup-rpi.img
       TARGET_STORAGE_BYTES: 2147483648
     steps:
       - name: Checkout
@@ -129,30 +129,30 @@ jobs:
         run: |
           echo "PATH=$PATH:$(go env GOPATH)/bin" >> "$GITHUB_ENV"
 
-      - name: Cache static arm64 hostapd
+      - name: Cache static ARMv6 hostapd
         id: cache-hostapd
         uses: actions/cache@v5
         with:
-          path: ${{ github.workspace }}/dist/hostapd-arm64/hostapd
-          key: ${{ runner.os }}-${{ runner.arch }}-hostapd-arm64-${{ hashFiles('.github/scripts/build-hostapd-arm64.sh') }}
+          path: ${{ github.workspace }}/dist/hostapd-armv6/hostapd
+          key: ${{ runner.os }}-${{ runner.arch }}-hostapd-armv6-${{ hashFiles('.github/scripts/build-hostapd-armv6.sh') }}
 
-      - name: Build static arm64 hostapd
+      - name: Build static ARMv6 hostapd
         if: steps.cache-hostapd.outputs.cache-hit != 'true'
         run: |
-          bash .github/scripts/build-hostapd-arm64.sh
+          bash .github/scripts/build-hostapd-armv6.sh
 
-      - name: Resolve static arm64 hostapd
+      - name: Resolve static ARMv6 hostapd
         id: hostapd
         shell: bash
         run: |
-          hostapd_binary="${{ github.workspace }}/dist/hostapd-arm64/hostapd"
+          hostapd_binary="${{ github.workspace }}/dist/hostapd-armv6/hostapd"
           if [ ! -x "$hostapd_binary" ]; then
-            echo "::error::static arm64 hostapd binary is missing or not executable: $hostapd_binary"
+            echo "::error::static ARMv6 hostapd binary is missing or not executable: $hostapd_binary"
             exit 1
           fi
           file "$hostapd_binary"
-          if ! file "$hostapd_binary" | grep -q 'ARM aarch64'; then
-            echo "::error::cached hostapd is not an arm64 binary"
+          if ! file "$hostapd_binary" | grep -q 'ARM, EABI5'; then
+            echo "::error::cached hostapd is not a 32-bit ARM EABI5 binary"
             exit 1
           fi
           if ! file "$hostapd_binary" | grep -q 'statically linked'; then
@@ -161,30 +161,30 @@ jobs:
           fi
           echo "hostapd_binary=$hostapd_binary" >> "$GITHUB_OUTPUT"
 
-      - name: Cache static arm64 exfatprogs
+      - name: Cache static ARMv6 exfatprogs
         id: cache-exfatprogs
         uses: actions/cache@v5
         with:
-          path: ${{ github.workspace }}/dist/exfatprogs-arm64/mkfs.exfat
-          key: ${{ runner.os }}-${{ runner.arch }}-exfatprogs-arm64-${{ hashFiles('.github/scripts/build-exfatprogs-arm64.sh') }}
+          path: ${{ github.workspace }}/dist/exfatprogs-armv6/mkfs.exfat
+          key: ${{ runner.os }}-${{ runner.arch }}-exfatprogs-armv6-${{ hashFiles('.github/scripts/build-exfatprogs-armv6.sh') }}
 
-      - name: Build static arm64 exfatprogs
+      - name: Build static ARMv6 exfatprogs
         if: steps.cache-exfatprogs.outputs.cache-hit != 'true'
         run: |
-          bash .github/scripts/build-exfatprogs-arm64.sh
+          bash .github/scripts/build-exfatprogs-armv6.sh
 
-      - name: Resolve static arm64 mkfs.exfat
+      - name: Resolve static ARMv6 mkfs.exfat
         id: exfatprogs
         shell: bash
         run: |
-          exfat_mkfs_binary="${{ github.workspace }}/dist/exfatprogs-arm64/mkfs.exfat"
+          exfat_mkfs_binary="${{ github.workspace }}/dist/exfatprogs-armv6/mkfs.exfat"
           if [ ! -x "$exfat_mkfs_binary" ]; then
-            echo "::error::static arm64 mkfs.exfat binary is missing or not executable: $exfat_mkfs_binary"
+            echo "::error::static ARMv6 mkfs.exfat binary is missing or not executable: $exfat_mkfs_binary"
             exit 1
           fi
           file "$exfat_mkfs_binary"
-          if ! file "$exfat_mkfs_binary" | grep -q 'ARM aarch64'; then
-            echo "::error::cached mkfs.exfat is not an arm64 binary"
+          if ! file "$exfat_mkfs_binary" | grep -q 'ARM, EABI5'; then
+            echo "::error::cached mkfs.exfat is not a 32-bit ARM EABI5 binary"
             exit 1
           fi
           if ! file "$exfat_mkfs_binary" | grep -q 'statically linked'; then
@@ -193,30 +193,30 @@ jobs:
           fi
           echo "exfat_mkfs_binary=$exfat_mkfs_binary" >> "$GITHUB_OUTPUT"
 
-      - name: Cache static arm64 e2fsprogs
+      - name: Cache static ARMv6 e2fsprogs
         id: cache-e2fsprogs
         uses: actions/cache@v5
         with:
-          path: ${{ github.workspace }}/dist/e2fsprogs-arm64/mke2fs
-          key: ${{ runner.os }}-${{ runner.arch }}-e2fsprogs-arm64-${{ hashFiles('.github/scripts/build-mke2fs-arm64.sh') }}
+          path: ${{ github.workspace }}/dist/e2fsprogs-armv6/mke2fs
+          key: ${{ runner.os }}-${{ runner.arch }}-e2fsprogs-armv6-${{ hashFiles('.github/scripts/build-mke2fs-armv6.sh') }}
 
-      - name: Build static arm64 e2fsprogs
+      - name: Build static ARMv6 e2fsprogs
         if: steps.cache-e2fsprogs.outputs.cache-hit != 'true'
         run: |
-          bash .github/scripts/build-mke2fs-arm64.sh
+          bash .github/scripts/build-mke2fs-armv6.sh
 
-      - name: Resolve static arm64 mke2fs
+      - name: Resolve static ARMv6 mke2fs
         id: e2fsprogs
         shell: bash
         run: |
-          mke2fs_binary="${{ github.workspace }}/dist/e2fsprogs-arm64/mke2fs"
+          mke2fs_binary="${{ github.workspace }}/dist/e2fsprogs-armv6/mke2fs"
           if [ ! -x "$mke2fs_binary" ]; then
-            echo "::error::static arm64 mke2fs binary is missing or not executable: $mke2fs_binary"
+            echo "::error::static ARMv6 mke2fs binary is missing or not executable: $mke2fs_binary"
             exit 1
           fi
           file "$mke2fs_binary"
-          if ! file "$mke2fs_binary" | grep -q 'ARM aarch64'; then
-            echo "::error::cached mke2fs is not an arm64 binary"
+          if ! file "$mke2fs_binary" | grep -q 'ARM, EABI5'; then
+            echo "::error::cached mke2fs is not a 32-bit ARM EABI5 binary"
             exit 1
           fi
           if ! file "$mke2fs_binary" | grep -q 'statically linked'; then
@@ -267,7 +267,7 @@ jobs:
           GOKRAZY_INSTANCE: ${{ env.GOKRAZY_INSTANCE }}
           GOKRAZY_PARENT_DIR: ${{ env.GOKRAZY_PARENT_DIR }}
           IMAGE_DIR: ${{ github.workspace }}/ota
-          IMAGE_NAME: photo-backup-rpi4b-root.squashfs
+          IMAGE_NAME: photo-backup-rpi-root.squashfs
           GOKRAZY_IMAGE_MODE: ota
           HOSTAPD_BINARY: ${{ steps.hostapd.outputs.hostapd_binary }}
           EXFAT_MKFS_BINARY: ${{ steps.exfatprogs.outputs.exfat_mkfs_binary }}

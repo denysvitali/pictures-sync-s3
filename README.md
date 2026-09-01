@@ -1,6 +1,6 @@
 # Photo Backup Station
 
-An automated SD card photo backup appliance built with [Gokrazy](https://gokrazy.org/) for Raspberry Pi 4. This appliance automatically syncs photos from inserted SD cards to cloud storage (Backblaze B2, S3, etc.) using rclone, with real-time progress monitoring via a web interface.
+An automated SD card photo backup appliance built with [Gokrazy](https://gokrazy.org/) for Raspberry Pi 1 Model B+ and Raspberry Pi 4. One 32-bit image supports both models. This appliance automatically syncs photos from inserted SD cards to cloud storage (Backblaze B2, S3, etc.) using rclone, with real-time progress monitoring via a web interface.
 
 ## Features
 
@@ -62,7 +62,7 @@ remote:/photos/
 
 ## Hardware Requirements
 
-- Raspberry Pi 4 (tested, other models may work)
+- Raspberry Pi 1 Model B+ or Raspberry Pi 4 (shared 32-bit image)
 - MicroSD card (for Gokrazy OS)
 - USB SD card reader (for photo SD cards)
 - Power supply
@@ -134,7 +134,13 @@ Supporting packages:
    ```json
    {
      "Hostname": "photo-backup",
-     "DeviceType": "raspberrypi4b",
+     "Environment": [
+       "GOOS=linux",
+       "GOARCH=arm",
+       "GOARM=6"
+     ],
+     "KernelPackage": "github.com/gokrazy-community/kernel-rpi-os-32/dist",
+     "FirmwarePackage": "github.com/gokrazy-community/firmware-rpi/dist",
      "Update": {
        "HTTPPort": "80",
        "HTTPSPort": "443",
@@ -172,12 +178,12 @@ Supporting packages:
        },
        "github.com/denysvitali/pictures-sync-s3/cmd/pictures-sync": {
          "ExtraFilePaths": {
-           "/usr/bin/mkfs.exfat": "/path/to/target-arm64/mkfs.exfat"
+           "/usr/bin/mkfs.exfat": "/path/to/target-armv6/mkfs.exfat"
          }
        },
        "github.com/denysvitali/pictures-sync-s3/cmd/perm-init": {
          "ExtraFilePaths": {
-           "/usr/local/bin/mke2fs": "/path/to/target-arm64/mke2fs"
+           "/usr/local/bin/mke2fs": "/path/to/target-armv6/mke2fs"
          }
        },
        "tailscale.com/cmd/tailscale": {
@@ -207,7 +213,7 @@ Supporting packages:
            "WIFI_COUNTRY=US"
          ],
          "ExtraFilePaths": {
-           "/usr/bin/hostapd": "/path/to/target-arm64/hostapd"
+           "/usr/bin/hostapd": "/path/to/target-armv6/hostapd"
          }
        }
      }
@@ -544,25 +550,25 @@ go test ./pkg/syncmanager
 
 ### CI - OTA image
 
-GitHub Actions builds a flashable Gokrazy image on every push to `master`, producing `photo-backup-rpi4b.img` as a workflow artifact. The same workflow also runs for version tags (`v*`) and publishes the flash image to GitHub Releases as a compressed `photo-backup-rpi4b.img.gz` asset to stay within the release asset size limit.
+GitHub Actions builds one flashable 32-bit Gokrazy image on every push to `master`, producing `photo-backup-rpi.img` as a workflow artifact. It uses an ARMv6 userspace and the community multi-model Raspberry Pi kernel, so the same image boots on the Raspberry Pi 1 Model B+ and Raspberry Pi 4. The workflow also runs for version tags (`v*`) and publishes the flash image to GitHub Releases as `photo-backup-rpi.img.gz`.
 
-The workflow also publishes `photo-backup-rpi4b-root.squashfs.gz`, which is the gokrazy-compatible OTA root image used by the web UI updater. The updater checks GitHub Releases by publish time, downloads the newest matching root image, streams it to the inactive gokrazy root partition, switches partitions, and requests a reboot.
+The workflow also publishes `photo-backup-rpi-root.squashfs.gz`, the shared gokrazy-compatible OTA root image used by the web UI updater on both models. The updater checks GitHub Releases by publish time, downloads the newest matching root image, streams it to the inactive gokrazy root partition, switches partitions, and requests a reboot.
 
 Workflow:
 `.github/workflows/ota-image.yml`
 
-To flash a SD card for Raspberry Pi 4:
+To flash an SD card for a Raspberry Pi 1 Model B+ or Raspberry Pi 4:
 
-1. Download `photo-backup-rpi4b.img.gz` from the latest successful `master` workflow run or release asset.
+1. Download `photo-backup-rpi.img.gz` from the latest successful `master` workflow run or release asset.
 2. Decompress it before flashing:
    ```bash
-   gunzip photo-backup-rpi4b.img.gz
+   gunzip photo-backup-rpi.img.gz
    ```
 3. Insert the target SD card and identify it (for example `/dev/sdb`), then unmount any mounted partitions before flashing.
 4. Unmount any mounted partitions for the card (for example `/dev/sdb1`, `/dev/sdb2`).
 5. Flash and flush the image:
    ```bash
-   sudo dd if=photo-backup-rpi4b.img of=/dev/sdX bs=4M status=progress conv=fsync
+   sudo dd if=photo-backup-rpi.img of=/dev/sdX bs=4M status=progress conv=fsync
    ```
    Replace `/dev/sdX` with your actual SD card device.
 6. Remove the card safely:
@@ -573,7 +579,7 @@ To flash a SD card for Raspberry Pi 4:
    ```bash
    lsblk /dev/sdX
    ```
-8. Remove the card safely and insert into Raspberry Pi 4:
+8. Remove the card safely and insert it into the Raspberry Pi 1 Model B+ or Raspberry Pi 4:
    ```bash
    sync
    ```
@@ -581,7 +587,7 @@ To flash a SD card for Raspberry Pi 4:
 
 Notes:
 - This image is a full `overwrite --full` Gokrazy image intended for initial provisioning on SD media.
-- Use the web UI configuration page for in-place OTA updates. The full `photo-backup-rpi4b.img.gz` asset is not written onto a running device.
+- Use the web UI configuration page for in-place OTA updates. The full `photo-backup-rpi.img.gz` asset is not written onto a running device.
 - The initial Gokrazy/web UI credentials are `gokrazy` / `photo-backup`; change the password after first boot.
 - Double-check the device path before running `dd` (it will destroy the selected disk).
 
@@ -621,7 +627,7 @@ Required for `ota-release`:
    ```bash
    go run ./cmd/ota-upload \
      -target http://gokrazy:<password>@<device-ip>/ \
-     -image photo-backup-rpi4b-root.squashfs.gz
+     -image photo-backup-rpi-root.squashfs.gz
    ```
    Use `-insecure` when connecting to a self-signed HTTPS gokrazy endpoint by IP address.
    The web UI updater uses the same client behavior; set `OTA_GOKRAZY_INSECURE=true`

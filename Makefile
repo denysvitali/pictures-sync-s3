@@ -342,7 +342,7 @@ ota-release:
 		echo "Error: set TAG_NAME or run from an exact tag checkout"; \
 		exit 1; \
 	fi; \
-	IMAGE_NAME=$${IMAGE_NAME:-photo-backup-ota.squashfs}; \
+	IMAGE_NAME=$${IMAGE_NAME:-photo-backup-rpi-root.squashfs}; \
 	IMAGE_PATH=$${IMAGE_DIR:-$$(pwd)/ota}/$${IMAGE_NAME}; \
 	./scripts/build-ota-image.sh; \
 	echo "Uploading $$IMAGE_PATH to GitHub release $$TAG_NAME"; \

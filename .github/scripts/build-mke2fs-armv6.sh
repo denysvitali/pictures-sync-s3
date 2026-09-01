@@ -4,14 +4,14 @@ set -euo pipefail
 
 E2FSPROGS_VERSION="${E2FSPROGS_VERSION:-1.47.2}"
 E2FSPROGS_SHA256="${E2FSPROGS_SHA256:-7a959221c1b1cc6e28b7d7a4e204a2ffd8ec6d8a2de4461c482b64c5f4463cca}"
-OUTPUT_DIR="${OUTPUT_DIR:-$PWD/dist/e2fsprogs-arm64}"
+OUTPUT_DIR="${OUTPUT_DIR:-$PWD/dist/e2fsprogs-armv6}"
 BUILD_DIR="${BUILD_DIR:-$PWD/.e2fsprogs-build}"
 
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
   ca-certificates \
   curl \
-  gcc \
+  gcc-arm-linux-gnueabi \
   make \
   pkg-config
 
@@ -28,18 +28,21 @@ cd "$BUILD_DIR/e2fsprogs-${E2FSPROGS_VERSION}"
 # Build mke2fs statically. e2fsprogs ships bundled libuuid/libblkid/libcom_err
 # and links them in by default; --disable-shared keeps everything as .a.
 ./configure \
+  --host=arm-linux-gnueabi \
   --prefix=/usr \
   --disable-shared \
   --enable-static \
   --disable-nls \
-  --disable-fuse2fs
-make -j"$(nproc)" LDFLAGS=-static
+  --disable-fuse2fs \
+  CFLAGS="-Os -march=armv6" \
+  LDFLAGS="-static"
+make -j"$(nproc)"
 
 install -m 0755 misc/mke2fs "$OUTPUT_DIR/mke2fs"
 file "$OUTPUT_DIR/mke2fs"
 
-if ! file "$OUTPUT_DIR/mke2fs" | grep -q 'ARM aarch64'; then
-  echo "Error: built mke2fs is not an arm64 binary"
+if ! file "$OUTPUT_DIR/mke2fs" | grep -q 'ARM, EABI5'; then
+  echo "Error: built mke2fs is not a 32-bit ARM EABI5 binary"
   exit 1
 fi
 

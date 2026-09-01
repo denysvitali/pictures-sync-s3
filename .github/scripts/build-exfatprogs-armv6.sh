@@ -4,7 +4,7 @@ set -euo pipefail
 
 EXFATPROGS_VERSION="${EXFATPROGS_VERSION:-1.3.2}"
 EXFATPROGS_SHA256="${EXFATPROGS_SHA256:-0c5d445947df781f90ba6bfddbd323bd6324c78a51fe75380a6ce2238c3cbcce}"
-OUTPUT_DIR="${OUTPUT_DIR:-$PWD/dist/exfatprogs-arm64}"
+OUTPUT_DIR="${OUTPUT_DIR:-$PWD/dist/exfatprogs-armv6}"
 BUILD_DIR="${BUILD_DIR:-$PWD/.exfatprogs-build}"
 
 sudo apt-get update
@@ -13,7 +13,7 @@ sudo apt-get install -y --no-install-recommends \
   automake \
   ca-certificates \
   curl \
-  gcc \
+  gcc-arm-linux-gnueabi \
   libtool \
   make \
   pkg-config
@@ -28,14 +28,20 @@ printf '%s  %s\n' "$EXFATPROGS_SHA256" "$archive" | sha256sum -c -
 tar -C "$BUILD_DIR" -xzf "$archive"
 cd "$BUILD_DIR/exfatprogs-${EXFATPROGS_VERSION}"
 
-./configure --prefix=/usr --disable-shared --enable-static
-make -j"$(nproc)" CC=gcc LDFLAGS=-all-static
+./configure \
+  --host=arm-linux-gnueabi \
+  --prefix=/usr \
+  --disable-shared \
+  --enable-static \
+  CFLAGS="-Os -march=armv6" \
+  LDFLAGS="-static"
+make -j"$(nproc)"
 
 install -m 0755 mkfs/mkfs.exfat "$OUTPUT_DIR/mkfs.exfat"
 file "$OUTPUT_DIR/mkfs.exfat"
 
-if ! file "$OUTPUT_DIR/mkfs.exfat" | grep -q 'ARM aarch64'; then
-  echo "Error: built mkfs.exfat is not an arm64 binary"
+if ! file "$OUTPUT_DIR/mkfs.exfat" | grep -q 'ARM, EABI5'; then
+  echo "Error: built mkfs.exfat is not a 32-bit ARM EABI5 binary"
   exit 1
 fi
 

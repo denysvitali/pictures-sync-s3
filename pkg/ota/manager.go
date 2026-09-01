@@ -27,8 +27,8 @@ import (
 const (
 	DefaultOwner        = "denysvitali"
 	DefaultRepo         = "pictures-sync-s3"
-	DefaultAssetName    = "photo-backup-rpi4b-root.squashfs.gz"
-	FlashAssetName      = "photo-backup-rpi4b.img.gz"
+	DefaultAssetName    = "photo-backup-rpi-root.squashfs.gz"
+	FlashAssetName      = "photo-backup-rpi.img.gz"
 	DefaultGitHubAPIURL = "https://api.github.com"
 	// UpdateInsecureEnv enables TLS verification bypass for self-signed gokrazy updater endpoints.
 	UpdateInsecureEnv = "OTA_GOKRAZY_INSECURE"

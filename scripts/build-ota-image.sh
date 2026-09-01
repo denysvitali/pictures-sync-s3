@@ -6,7 +6,7 @@ GOKRAZY_INSTANCE="${GOKRAZY_INSTANCE:-photo-backup}"
 GOKRAZY_PARENT_DIR="${GOKRAZY_PARENT_DIR:-$HOME/.gokrazy/$GOKRAZY_INSTANCE}"
 GOKRAZY_MODULE_REPLACE="${GOKRAZY_MODULE_REPLACE:-}"
 IMAGE_DIR="${IMAGE_DIR:-$PWD/ota}"
-IMAGE_NAME="${IMAGE_NAME:-photo-backup-ota.squashfs}"
+IMAGE_NAME="${IMAGE_NAME:-photo-backup-rpi-root.squashfs}"
 GOKRAZY_IMAGE_MODE="${GOKRAZY_IMAGE_MODE:-ota}"
 TARGET_STORAGE_BYTES="${TARGET_STORAGE_BYTES:-}"
 IMAGE_PATH="${IMAGE_DIR}/${IMAGE_NAME}"
@@ -116,6 +116,13 @@ done
 cat > "$INSTANCE_DIR/config.json" <<EOF
 {
   "Hostname": "$GOKRAZY_INSTANCE",
+  "Environment": [
+    "GOOS=linux",
+    "GOARCH=arm",
+    "GOARM=6"
+  ],
+  "KernelPackage": "github.com/gokrazy-community/kernel-rpi-os-32/dist",
+  "FirmwarePackage": "github.com/gokrazy-community/firmware-rpi/dist",
   "Update": {
     "HTTPPort": "80",
     "HTTPSPort": "443",
