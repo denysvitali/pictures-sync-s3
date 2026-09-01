@@ -36,7 +36,7 @@ cd "$BUILD_DIR/exfatprogs-${EXFATPROGS_VERSION}"
   --enable-static \
   CFLAGS="-Os -march=armv6" \
   LDFLAGS="-static"
-make -j"$(nproc)"
+make -j"$(nproc)" LDFLAGS=-all-static
 
 install -m 0755 mkfs/mkfs.exfat "$OUTPUT_DIR/mkfs.exfat"
 file "$OUTPUT_DIR/mkfs.exfat"
