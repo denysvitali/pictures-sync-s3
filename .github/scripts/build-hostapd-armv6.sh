@@ -53,6 +53,9 @@ tar -C "$BUILD_DIR" -xzf "$archive"
 cd "$BUILD_DIR/hostapd-${HOSTAPD_VERSION}/hostapd"
 
 cp defconfig .config
+# The appliance provisions WPA/WPA2-PSK networks. Enterprise EAP and DPP are
+# unused and would otherwise pull an ARM OpenSSL build into the static binary.
+sed -i '/^CONFIG_EAP_/d; /^CONFIG_DPP/d' .config
 cat >> .config <<'EOF'
 CONFIG_DRIVER_NL80211=y
 CONFIG_LIBNL32=y
