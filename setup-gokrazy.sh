@@ -53,6 +53,7 @@ if [ -z "$MKE2FS_BINARY" ] || [ ! -x "$MKE2FS_BINARY" ]; then
 fi
 
 GOKRAZY_MODULE_REPLACE=${GOKRAZY_MODULE_REPLACE:-}
+GOKRAZY_KERNEL_REPLACE=${GOKRAZY_KERNEL_REPLACE:-}
 if [ -z "$GOKRAZY_MODULE_REPLACE" ] && [ -f "$SCRIPT_DIR/../gokrazy/go.mod" ]; then
     GOKRAZY_MODULE_REPLACE="$SCRIPT_DIR/../gokrazy"
 fi
@@ -62,6 +63,13 @@ if [ -n "$GOKRAZY_MODULE_REPLACE" ]; then
         exit 1
     fi
     GOKRAZY_MODULE_REPLACE="$(cd "$GOKRAZY_MODULE_REPLACE" && pwd -P)"
+fi
+if [ -n "$GOKRAZY_KERNEL_REPLACE" ]; then
+    if [ ! -f "$GOKRAZY_KERNEL_REPLACE/go.mod" ] || [ ! -s "$GOKRAZY_KERNEL_REPLACE/dist/vmlinuz" ]; then
+        echo "Error: GOKRAZY_KERNEL_REPLACE must point to a built kernel-rpi-os-32 module"
+        exit 1
+    fi
+    GOKRAZY_KERNEL_REPLACE="$(cd "$GOKRAZY_KERNEL_REPLACE" && pwd -P)"
 fi
 
 # Note: Remote name and path are now configured via web UI and persisted to /perm/pictures-sync/settings.json
@@ -99,6 +107,12 @@ EOF
     echo "go.mod created with gokrazy runtime replace directive pointing to: $GOKRAZY_MODULE_REPLACE"
 else
     echo "Warning: GOKRAZY_MODULE_REPLACE is not set; persistent TLS certificate support requires a gokrazy runtime fork with TLS storage markers"
+fi
+if [ -n "$GOKRAZY_KERNEL_REPLACE" ]; then
+    cat >> "$INSTANCE_DIR/go.mod" <<EOF
+replace github.com/gokrazy-community/kernel-rpi-os-32 => $GOKRAZY_KERNEL_REPLACE
+EOF
+    echo "go.mod uses FAT/exFAT camera kernel at: $GOKRAZY_KERNEL_REPLACE"
 fi
 echo ""
 

@@ -552,6 +552,8 @@ go test ./pkg/syncmanager
 
 GitHub Actions builds one flashable 32-bit Gokrazy image on every push to `master`, producing `photo-backup-rpi.img` as a workflow artifact. It uses an ARMv6 userspace and the community multi-model Raspberry Pi kernel, so the same image boots on the Raspberry Pi 1 Model B+ and Raspberry Pi 4. The workflow also runs for version tags (`v*`) and publishes the flash image to GitHub Releases as `photo-backup-rpi.img.gz`.
 
+The workflow rebuilds that kernel with FAT12/16, FAT32/vFAT, and exFAT support built in so camera SD cards can be mounted without loadable filesystem modules. Because the kernel lives outside the root filesystem, devices installed before this support was added must be flashed once with the new full `photo-backup-rpi.img`; installing only the root OTA asset does not replace the kernel.
+
 The workflow also publishes `photo-backup-rpi-root.squashfs.gz`, the shared gokrazy-compatible OTA root image used by the web UI updater on both models. The updater checks GitHub Releases by publish time, downloads the newest matching root image, streams it to the inactive gokrazy root partition, switches partitions, and requests a reboot.
 
 Workflow:

@@ -5,6 +5,7 @@ set -euo pipefail
 GOKRAZY_INSTANCE="${GOKRAZY_INSTANCE:-photo-backup}"
 GOKRAZY_PARENT_DIR="${GOKRAZY_PARENT_DIR:-$HOME/.gokrazy/$GOKRAZY_INSTANCE}"
 GOKRAZY_MODULE_REPLACE="${GOKRAZY_MODULE_REPLACE:-}"
+GOKRAZY_KERNEL_REPLACE="${GOKRAZY_KERNEL_REPLACE:-}"
 IMAGE_DIR="${IMAGE_DIR:-$PWD/ota}"
 IMAGE_NAME="${IMAGE_NAME:-photo-backup-rpi-root.squashfs}"
 GOKRAZY_IMAGE_MODE="${GOKRAZY_IMAGE_MODE:-ota}"
@@ -73,6 +74,14 @@ if [ -n "$GOKRAZY_MODULE_REPLACE" ]; then
   GOKRAZY_MODULE_REPLACE="$(cd "$GOKRAZY_MODULE_REPLACE" && pwd -P)"
 fi
 
+if [ -n "$GOKRAZY_KERNEL_REPLACE" ]; then
+  if [ ! -f "$GOKRAZY_KERNEL_REPLACE/go.mod" ] || [ ! -s "$GOKRAZY_KERNEL_REPLACE/dist/vmlinuz" ]; then
+    echo "Error: GOKRAZY_KERNEL_REPLACE must point to a built kernel-rpi-os-32 module"
+    exit 1
+  fi
+  GOKRAZY_KERNEL_REPLACE="$(cd "$GOKRAZY_KERNEL_REPLACE" && pwd -P)"
+fi
+
 mkdir -p "$GOKRAZY_PARENT_DIR"
 mkdir -p "$IMAGE_DIR"
 
@@ -106,6 +115,12 @@ EOF
 if [ -n "$GOKRAZY_MODULE_REPLACE" ]; then
   cat >> "$INSTANCE_DIR/go.mod" <<EOF
 replace github.com/gokrazy/gokrazy => $GOKRAZY_MODULE_REPLACE
+EOF
+fi
+
+if [ -n "$GOKRAZY_KERNEL_REPLACE" ]; then
+  cat >> "$INSTANCE_DIR/go.mod" <<EOF
+replace github.com/gokrazy-community/kernel-rpi-os-32 => $GOKRAZY_KERNEL_REPLACE
 EOF
 fi
 

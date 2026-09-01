@@ -1,0 +1,41 @@
+diff --git a/cmd/compile/main.go b/cmd/compile/main.go
+index f5c9cf7..57acf45 100644
+--- a/cmd/compile/main.go
++++ b/cmd/compile/main.go
+@@ -78,6 +78,17 @@ func run() error {
+ 		"--disable", "MODULE_COMPRESS_XZ",
+ 		"--disable", "MODULE_COMPRESS_ZSTD",
+ 
++		// Camera SD card filesystems. Keep these built in: gokrazy does not
++		// provide a general-purpose module loader during early appliance use.
++		"--enable", "FAT_FS",
++		"--enable", "MSDOS_FS",
++		"--enable", "VFAT_FS",
++		"--enable", "EXFAT_FS",
++		"--enable", "NLS",
++		"--enable", "NLS_CODEPAGE_437",
++		"--enable", "NLS_ISO8859_1",
++		"--enable", "NLS_UTF8",
++
+ 		// WiFi
+ 		"--enable", "RFKILL",
+ 		"--enable", "CFG80211",
+@@ -147,6 +158,18 @@ func run() error {
+ 	if err := dockerRun("make", "olddefconfig"); err != nil {
+ 		return err
+ 	}
++	for _, option := range []string{
++		"CONFIG_FAT_FS=y",
++		"CONFIG_MSDOS_FS=y",
++		"CONFIG_VFAT_FS=y",
++		"CONFIG_EXFAT_FS=y",
++		"CONFIG_NLS_CODEPAGE_437=y",
++		"CONFIG_NLS_UTF8=y",
++	} {
++		if err := dockerRun("grep", "-qx", option, ".config"); err != nil {
++			return fmt.Errorf("required kernel option %s is not enabled: %w", option, err)
++		}
++	}
+ 
+ 	// compile kernel and dtbs
+ 	if err := dockerRun("make", "zImage", "dtbs", "modules", "-j"+strconv.Itoa(runtime.NumCPU())); err != nil {

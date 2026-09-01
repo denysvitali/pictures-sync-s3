@@ -18,6 +18,44 @@ permissions:
   attestations: write
 
 jobs:
+  build-camera-kernel:
+    name: Build FAT/exFAT camera kernel
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Cache camera kernel
+        id: cache-camera-kernel
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/dist/camera-kernel-armv6
+          key: ${{ runner.os }}-${{ runner.arch }}-camera-kernel-armv6-${{ hashFiles('.github/scripts/build-camera-kernel-armv6.sh', '.github/patches/kernel-enable-camera-filesystems.patch') }}
+
+      - name: Build FAT/exFAT-enabled ARMv6 kernel
+        if: steps.cache-camera-kernel.outputs.cache-hit != 'true'
+        run: bash .github/scripts/build-camera-kernel-armv6.sh
+
+      - name: Validate camera kernel package
+        run: |
+          test -s dist/camera-kernel-armv6/dist/vmlinuz
+          test -f dist/camera-kernel-armv6/dist/bcm2708-rpi-b-plus.dtb
+          test -f dist/camera-kernel-armv6/dist/bcm2711-rpi-4-b.dtb
+
+      - name: Upload camera kernel package
+        uses: actions/upload-artifact@v7
+        with:
+          name: camera-kernel-armv6
+          path: dist/camera-kernel-armv6
+          if-no-files-found: error
+
   test:
     name: Run Go tests
     runs-on: ubuntu-latest
@@ -53,7 +91,9 @@ jobs:
         run: go test -short ./...
 
   build-and-publish-flash-image:
-    needs: test
+    needs:
+      - test
+      - build-camera-kernel
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     env:
@@ -128,6 +168,17 @@ jobs:
       - name: Add Go bin to PATH
         run: |
           echo "PATH=$PATH:$(go env GOPATH)/bin" >> "$GITHUB_ENV"
+
+      - name: Download FAT/exFAT camera kernel
+        uses: actions/download-artifact@v8
+        with:
+          name: camera-kernel-armv6
+          path: ${{ github.workspace }}/dist/camera-kernel-armv6
+
+      - name: Validate downloaded camera kernel
+        run: |
+          test -s dist/camera-kernel-armv6/dist/vmlinuz
+          test -f dist/camera-kernel-armv6/go.mod
 
       - name: Cache static ARMv6 hostapd
         id: cache-hostapd
@@ -257,6 +308,7 @@ jobs:
           EXFAT_MKFS_BINARY: ${{ steps.exfatprogs.outputs.exfat_mkfs_binary }}
           MKE2FS_BINARY: ${{ steps.e2fsprogs.outputs.mke2fs_binary }}
           GOKRAZY_MODULE_REPLACE: /tmp/gokrazy
+          GOKRAZY_KERNEL_REPLACE: ${{ github.workspace }}/dist/camera-kernel-armv6
           TAG_NAME: ${{ steps.release-tag.outputs.tag }}
         run: |
           make ota
@@ -273,6 +325,7 @@ jobs:
           EXFAT_MKFS_BINARY: ${{ steps.exfatprogs.outputs.exfat_mkfs_binary }}
           MKE2FS_BINARY: ${{ steps.e2fsprogs.outputs.mke2fs_binary }}
           GOKRAZY_MODULE_REPLACE: /tmp/gokrazy
+          GOKRAZY_KERNEL_REPLACE: ${{ github.workspace }}/dist/camera-kernel-armv6
           TAG_NAME: ${{ steps.release-tag.outputs.tag }}
         run: |
           make ota
