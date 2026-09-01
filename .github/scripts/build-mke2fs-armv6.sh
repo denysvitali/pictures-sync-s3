@@ -12,6 +12,7 @@ sudo apt-get install -y --no-install-recommends \
   ca-certificates \
   curl \
   gcc-arm-linux-gnueabi \
+  libc6-dev-armel-cross \
   make \
   pkg-config
 

@@ -19,6 +19,7 @@ sudo apt-get install -y --no-install-recommends \
   flex \
   gcc-arm-linux-gnueabi \
   git \
+  libc6-dev-armel-cross \
   libtool \
   make \
   pkg-config
