@@ -63,10 +63,8 @@ CFLAGS += -Os -march=armv6
 LDFLAGS += -static
 EOF
 
-make -j"$(nproc)" \
-  CC=arm-linux-gnueabi-gcc \
-  PKG_CONFIG_LIBDIR="$SYSROOT_DIR/lib/pkgconfig" \
-  hostapd
+export PKG_CONFIG_LIBDIR="$SYSROOT_DIR/lib/pkgconfig"
+make -j"$(nproc)" CC=arm-linux-gnueabi-gcc hostapd
 
 install -m 0755 hostapd "$OUTPUT_DIR/hostapd"
 file "$OUTPUT_DIR/hostapd"
