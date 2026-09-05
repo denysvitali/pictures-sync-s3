@@ -119,3 +119,54 @@ func TestHandleBreakglassAuthorizedKeys_GetMissingFile(t *testing.T) {
 		t.Fatalf("unexpected response: %+v", response)
 	}
 }
+
+func TestHandleBreakglassAuthorizedKeys_ReplaceKeys(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		input  string
+		want   string
+		status int
+	}{
+		{"multiple keys", "\r\n# note\r\n " + testAuthorizedKey + " \r\n" + testAuthorizedKey + "\r\n", testAuthorizedKey + "\n" + testAuthorizedKey + "\n", http.StatusOK},
+		{"clear keys", "", "", http.StatusOK},
+		{"invalid preserves existing keys", "\n# note\ninvalid", testAuthorizedKey + "\n", http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := withBreakglassAuthorizedKeysPath(t)
+			if err := writeBreakglassAuthorizedKeys(testAuthorizedKey + "\n"); err != nil {
+				t.Fatal(err)
+			}
+			payload, err := json.Marshal(map[string]string{"authorized_keys": tc.input})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := &Context{}
+			rec := httptest.NewRecorder()
+			ctx.HandleBreakglassAuthorizedKeys(rec, httptest.NewRequest(http.MethodPost, "/api/breakglass/authorized-keys", bytes.NewReader(payload)))
+			if rec.Code != tc.status {
+				t.Fatalf("status = %d, want %d: %s", rec.Code, tc.status, rec.Body.String())
+			}
+			if tc.status == http.StatusBadRequest && !strings.Contains(rec.Body.String(), "line 3") {
+				t.Fatalf("expected original line number: %s", rec.Body.String())
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(data) != tc.want {
+				t.Fatalf("saved keys = %q, want %q", data, tc.want)
+			}
+			rec = httptest.NewRecorder()
+			ctx.HandleBreakglassAuthorizedKeys(rec, httptest.NewRequest(http.MethodGet, "/api/breakglass/authorized-keys", nil))
+			var response struct {
+				AuthorizedKeys string `json:"authorized_keys"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if rec.Code != http.StatusOK || response.AuthorizedKeys != tc.want {
+				t.Fatalf("unexpected read-back: %d %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}

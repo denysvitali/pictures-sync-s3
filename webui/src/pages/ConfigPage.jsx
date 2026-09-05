@@ -1684,11 +1684,8 @@ function DangerZoneBreakglass() {
     setLoadError(null)
     getBreakglassAuthorizedKeys(deviceUrl)
       .then((data) => {
-        if (!cancelled && data?.authorized_keys) {
-          setKeys(Array.isArray(data.authorized_keys)
-            ? data.authorized_keys.join('\n')
-            : data.authorized_keys
-          )
+        if (!cancelled) {
+          setKeys(data.authorized_keys)
         }
       })
       .catch((err) => { if (!cancelled) setLoadError(describeError(err)) })
@@ -1701,14 +1698,9 @@ function DangerZoneBreakglass() {
       toast.error('Reload breakglass keys before saving')
       return
     }
-    const parsed = keys
-      .split('\n')
-      .map((k) => k.trim())
-      .filter(Boolean)
-
     setSaving(true)
     try {
-      await saveBreakglassAuthorizedKeys(deviceUrl, parsed)
+      await saveBreakglassAuthorizedKeys(deviceUrl, keys)
       toast.success('Breakglass SSH keys saved')
     } catch (err) {
       toast.error(describeError(err) || 'Failed to save breakglass keys')

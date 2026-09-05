@@ -61,6 +61,7 @@ jobs:
           cd webui
           corepack enable
           pnpm install --frozen-lockfile
+          pnpm test
           pnpm build
 
       - name: Run tests with race detector
