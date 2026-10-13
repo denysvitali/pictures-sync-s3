@@ -314,6 +314,8 @@ jobs:
           GOKRAZY_MODULE_REPLACE: /tmp/gokrazy
           GOKRAZY_KERNEL_REPLACE: ${{ github.workspace }}/dist/camera-kernel-armv6
           TAG_NAME: ${{ steps.release-tag.outputs.tag }}
+          # tailscale.com tracks the newest Go release; let gok fetch it.
+          GOTOOLCHAIN: auto
         run: |
           make ota
 
@@ -333,6 +335,8 @@ jobs:
           GOKRAZY_MODULE_REPLACE: /tmp/gokrazy
           GOKRAZY_KERNEL_REPLACE: ${{ github.workspace }}/dist/camera-kernel-armv6
           TAG_NAME: ${{ steps.release-tag.outputs.tag }}
+          # tailscale.com tracks the newest Go release; let gok fetch it.
+          GOTOOLCHAIN: auto
         run: |
           make ota
 
