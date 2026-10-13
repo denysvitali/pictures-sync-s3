@@ -66,7 +66,7 @@ remote:/photos/
 - MicroSD card (for Gokrazy OS)
 - USB SD card reader (for photo SD cards)
 - Power supply
-- Optional: WiFi network (Ethernet also supported)
+- Optional: WiFi network (Ethernet also supported). Wi-Fi uses the onboard radio of the Raspberry Pi 4; the Raspberry Pi 1 Model B+ has no Wi-Fi hardware and USB Wi-Fi dongles are not supported by the kernel, so use Ethernet there
 
 ## Architecture
 
@@ -550,7 +550,7 @@ go test ./pkg/syncmanager
 
 ### CI - OTA image
 
-GitHub Actions builds one flashable 32-bit Gokrazy image on every push to `master`, producing `photo-backup-rpi.img` as a workflow artifact. It uses an ARMv6 userspace and the community multi-model Raspberry Pi kernel, so the same image boots on the Raspberry Pi 1 Model B+ and Raspberry Pi 4. The workflow also runs for version tags (`v*`) and publishes the flash image to GitHub Releases as `photo-backup-rpi.img.gz`.
+GitHub Actions builds one flashable 32-bit Gokrazy image on every push to `master`, producing `photo-backup-rpi.img` as a workflow artifact. It uses an ARMv6 userspace shared by both boards and carries two kernels built from the same Raspberry Pi sources: `vmlinuz` (ARMv6) for the Raspberry Pi 1 Model B+ and `vmlinuz.v7` (ARMv7 LPAE) for the Raspberry Pi 4, whose Cortex-A72 cannot execute the ARMv6 kernel. A `[pi4]` section in `config.txt` selects the right one, and each kernel ships its own `/lib/modules/<release>` tree. The workflow also runs for version tags (`v*`) and publishes the flash image to GitHub Releases as `photo-backup-rpi.img.gz`.
 
 The workflow rebuilds that kernel with FAT12/16, FAT32/vFAT, and exFAT support built in so camera SD cards can be mounted without loadable filesystem modules. Because the kernel lives outside the root filesystem, devices installed before this support was added must be flashed once with the new full `photo-backup-rpi.img`; installing only the root OTA asset does not replace the kernel.
 

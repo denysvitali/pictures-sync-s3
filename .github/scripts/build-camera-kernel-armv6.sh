@@ -23,6 +23,8 @@ cp "$BUILD_DIR/kernel/dist/vmlinuz" "$BUILD_DIR/recovery-vmlinuz"
 (
   cd "$BUILD_DIR/kernel"
   go run ./cmd/compile
+  # Second pass adds the ARMv7 kernel and its modules for the Raspberry Pi 4.
+  go run ./cmd/compile -pi4
 )
 
 cp "$BUILD_DIR/kernel/go.mod" "$OUTPUT_DIR/go.mod"
@@ -31,7 +33,13 @@ cp -a "$BUILD_DIR/kernel/dist" "$OUTPUT_DIR/dist"
 cp "$BUILD_DIR/recovery-vmlinuz" "$OUTPUT_DIR/dist/vmlinuz.recovery"
 
 test -s "$OUTPUT_DIR/dist/vmlinuz"
+test -s "$OUTPUT_DIR/dist/vmlinuz.v7"
+grep -qx 'kernel=vmlinuz.v7' "$OUTPUT_DIR/dist/config.txt"
+for kernel_modules in "$OUTPUT_DIR"/dist/lib/modules/*; do
+  test -n "$(find "$kernel_modules" -name brcmfmac.ko -print -quit)"
+done
+test "$(find "$OUTPUT_DIR/dist/lib/modules" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 2
 test -f "$OUTPUT_DIR/dist/bcm2708-rpi-b-plus.dtb"
 test -f "$OUTPUT_DIR/dist/bcm2711-rpi-4-b.dtb"
 
-echo "Built FAT/exFAT-enabled kernel package at $OUTPUT_DIR"
+echo "Built FAT/exFAT-enabled Pi 1 and Pi 4 kernel package at $OUTPUT_DIR"

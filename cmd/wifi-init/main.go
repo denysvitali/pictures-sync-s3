@@ -34,6 +34,7 @@ var moduleOrder = []kernelModule{
 	{name: "brcmutil"},
 	{name: "brcmfmac"},
 	{name: "brcmfmac-wcc", optional: true},
+	{name: "brcmfmac-cyw", optional: true},
 }
 
 func main() {

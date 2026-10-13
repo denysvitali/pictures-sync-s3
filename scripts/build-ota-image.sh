@@ -81,6 +81,9 @@ if [ -n "$GOKRAZY_KERNEL_REPLACE" ]; then
     echo "Error: GOKRAZY_KERNEL_REPLACE must point to a built kernel-rpi-os-32 module"
     exit 1
   fi
+  if [ ! -s "$GOKRAZY_KERNEL_REPLACE/dist/vmlinuz.v7" ]; then
+    echo "Warning: $GOKRAZY_KERNEL_REPLACE/dist/vmlinuz.v7 is missing; the image will not boot on a Raspberry Pi 4"
+  fi
   GOKRAZY_KERNEL_REPLACE="$(cd "$GOKRAZY_KERNEL_REPLACE" && pwd -P)"
 fi
 

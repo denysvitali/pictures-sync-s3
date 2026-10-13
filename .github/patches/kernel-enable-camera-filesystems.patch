@@ -1,8 +1,37 @@
 diff --git a/cmd/compile/main.go b/cmd/compile/main.go
-index f5c9cf7..57acf45 100644
+index e04447b..11366e2 100644
 --- a/cmd/compile/main.go
 +++ b/cmd/compile/main.go
-@@ -78,6 +78,17 @@ func run() error {
+@@ -33,6 +33,11 @@ func execCmd(env map[string]string, stdout io.Writer, stderr io.Writer, cmd stri
+ 
+ var kernelFolderFlag = flag.String("kernel", "./linux-sources", "folder containing the kernel to compile")
+ 
++// The Raspberry Pi 4 (Cortex-A72) cannot execute the ARMv6-only bcmrpi kernel,
++// so the image carries a second ARMv7 LPAE kernel next to it. Both share the
++// ARMv6 userspace; config.txt selects the kernel per board.
++var pi4Flag = flag.Bool("pi4", false, "build the ARMv7 Raspberry Pi 4 kernel as dist/vmlinuz.v7 and add it to an existing dist folder")
++
+ func run() error {
+ 	flag.Parse()
+ 
+@@ -61,7 +66,15 @@ func run() error {
+ 
+ 	// bcmrpi_defconfig: default raspberry pi config according to https://www.raspberrypi.com/documentation/computers/linux_kernel.html#cross-compiling-the-kernel
+ 	// mod2noconfig: disable all modules
+-	if err := dockerRun("make", "bcmrpi_defconfig", "mod2noconfig"); err != nil {
++	defconfig, image := "bcmrpi_defconfig", "vmlinuz"
++	if *pi4Flag {
++		defconfig, image = "bcm2709_defconfig", "vmlinuz.v7"
++		// Drop the ARMv6 objects left behind by the previous build.
++		if err := dockerRun("make", "clean"); err != nil {
++			return err
++		}
++	}
++	if err := dockerRun("make", defconfig, "mod2noconfig"); err != nil {
+ 		return err
+ 	}
+ 
+@@ -80,6 +93,17 @@ func run() error {
  		"--disable", "MODULE_COMPRESS_XZ",
  		"--disable", "MODULE_COMPRESS_ZSTD",
  
@@ -20,18 +49,80 @@ index f5c9cf7..57acf45 100644
  		// WiFi
  		"--enable", "RFKILL",
  		"--enable", "CFG80211",
-@@ -147,6 +158,18 @@ func run() error {
+@@ -141,12 +165,80 @@ func run() error {
+ 		"--module", "USB_SERIAL_SAFE",
+ 	}
+ 
++	required := []string{}
++	if *pi4Flag {
++		args = append(args,
++			// BCM2711 maps PCIe (and with it the VL805 USB controller)
++			// above 4 GiB, which a 32-bit kernel only reaches with LPAE.
++			"--enable", "ARM_LPAE",
++			"--enable", "HIGHMEM",
++			// The ARMv6 userspace relies on the kernel user helpers.
++			"--enable", "KUSER_HELPERS",
++
++			// microSD slot (emmc2) and its supplies
++			"--enable", "MMC_SDHCI",
++			"--enable", "MMC_SDHCI_PLTFM",
++			"--enable", "MMC_SDHCI_IPROC",
++			"--enable", "REGULATOR",
++			"--enable", "REGULATOR_FIXED_VOLTAGE",
++			"--enable", "REGULATOR_GPIO",
++			"--enable", "GPIO_RASPBERRYPI_EXP",
++
++			// Ethernet
++			"--enable", "BCMGENET",
++			"--enable", "BROADCOM_PHY",
++
++			// USB (SD card reader) behind PCIe
++			"--enable", "PCI",
++			"--enable", "PCI_MSI",
++			"--enable", "PCIE_BRCMSTB",
++			"--enable", "USB_XHCI_HCD",
++			"--enable", "USB_XHCI_PCI",
++			"--enable", "RESET_RASPBERRYPI",
++
++			// Onboard Wi-Fi power sequencing
++			"--enable", "PWRSEQ_SIMPLE",
++		)
++		required = append(required,
++			"CONFIG_ARM_LPAE=y",
++			"CONFIG_KUSER_HELPERS=y",
++			"CONFIG_VFP=y",
++			"CONFIG_SQUASHFS=y",
++			"CONFIG_MMC_SDHCI_IPROC=y",
++			"CONFIG_MMC_BCM2835_MMC=y",
++			"CONFIG_REGULATOR_FIXED_VOLTAGE=y",
++			"CONFIG_REGULATOR_GPIO=y",
++			"CONFIG_GPIO_RASPBERRYPI_EXP=y",
++			"CONFIG_BCMGENET=y",
++			"CONFIG_PCIE_BRCMSTB=y",
++			"CONFIG_USB_XHCI_PCI=y",
++			"CONFIG_RESET_RASPBERRYPI=y",
++			"CONFIG_USB_STORAGE=y",
++			"CONFIG_PWRSEQ_SIMPLE=y",
++			"CONFIG_CFG80211=y",
++			"CONFIG_BRCMFMAC=m",
++			"CONFIG_BRCMFMAC_SDIO=y",
++		)
++	}
++
+ 	if err := dockerRun(args...); err != nil {
+ 		return err
+ 	}
  	if err := dockerRun("make", "olddefconfig"); err != nil {
  		return err
  	}
-+	for _, option := range []string{
++	for _, option := range append(required,
 +		"CONFIG_FAT_FS=y",
 +		"CONFIG_MSDOS_FS=y",
 +		"CONFIG_VFAT_FS=y",
 +		"CONFIG_EXFAT_FS=y",
 +		"CONFIG_NLS_CODEPAGE_437=y",
 +		"CONFIG_NLS_UTF8=y",
-+	} {
++	) {
 +		if err := dockerRun("grep", "-qx", option, ".config"); err != nil {
 +			return fmt.Errorf("required kernel option %s is not enabled: %w", option, err)
 +		}
@@ -39,3 +130,51 @@ index f5c9cf7..57acf45 100644
  
  	// compile kernel and dtbs
  	if err := dockerRun("make", "zImage", "dtbs", "modules", "-j"+strconv.Itoa(runtime.NumCPU())); err != nil {
+@@ -164,13 +256,15 @@ func run() error {
+ 
+ 	bootFolder := filepath.Join(kernelFolder, "arch", "arm", "boot")
+ 	dstFolder := filepath.Join(".", "dist")
+-	os.RemoveAll(dstFolder) // ignore any error
++	if !*pi4Flag {
++		os.RemoveAll(dstFolder) // ignore any error
++	}
+ 	if err = os.MkdirAll(dstFolder, 0755); err != nil {
+ 		return err
+ 	}
+ 
+ 	// copy and rename kernel
+-	if err = sh.Copy(filepath.Join(dstFolder, "vmlinuz"), filepath.Join(bootFolder, "zImage")); err != nil {
++	if err = sh.Copy(filepath.Join(dstFolder, image), filepath.Join(bootFolder, "zImage")); err != nil {
+ 		return err
+ 	}
+ 
+@@ -181,7 +275,13 @@ func run() error {
+ 	if err := chown("modules_out"); err != nil {
+ 		return err
+ 	}
+-	if err := os.Rename(filepath.Join(kernelFolder, "modules_out", "lib"), filepath.Join(dstFolder, "lib")); err != nil {
++	if err := os.MkdirAll(filepath.Join(dstFolder, "lib", "modules"), 0755); err != nil {
++		return err
++	}
++	if err := os.Rename(filepath.Join(kernelFolder, "modules_out", "lib", "modules", release), filepath.Join(dstFolder, "lib", "modules", release)); err != nil {
++		return err
++	}
++	if err := os.RemoveAll(filepath.Join(kernelFolder, "modules_out")); err != nil {
+ 		return err
+ 	}
+ 	// remove unused symlinks
+diff --git a/gokrazy/config.txt b/gokrazy/config.txt
+index e4cc7f5..b3ffce4 100644
+--- a/gokrazy/config.txt
++++ b/gokrazy/config.txt
+@@ -5,3 +5,10 @@ enable_uart=0
+ kernel=vmlinuz
+ 
+ disable_splash=1
++
++# The Cortex-A72 cannot run the ARMv6 kernel above; boot the ARMv7 build.
++[pi4]
++kernel=vmlinuz.v7
++arm_64bit=0
++
++[all]

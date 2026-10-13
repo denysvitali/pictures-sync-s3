@@ -21,7 +21,7 @@ jobs:
   build-camera-kernel:
     name: Build FAT/exFAT camera kernel
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 150
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -46,6 +46,7 @@ jobs:
       - name: Validate camera kernel package
         run: |
           test -s dist/camera-kernel-armv6/dist/vmlinuz
+          test -s dist/camera-kernel-armv6/dist/vmlinuz.v7
           test -f dist/camera-kernel-armv6/dist/bcm2708-rpi-b-plus.dtb
           test -f dist/camera-kernel-armv6/dist/bcm2711-rpi-4-b.dtb
 
@@ -180,6 +181,7 @@ jobs:
       - name: Validate downloaded camera kernel
         run: |
           test -s dist/camera-kernel-armv6/dist/vmlinuz
+          test -s dist/camera-kernel-armv6/dist/vmlinuz.v7
           test -f dist/camera-kernel-armv6/go.mod
 
       - name: Cache static ARMv6 hostapd
@@ -343,6 +345,11 @@ jobs:
           mtype -i "$boot_image" ::tryboot.txt | grep -qx 'kernel=vmlinuz'
           mdir -i "$boot_image" ::vmlinuz
           mdir -i "$boot_image" ::vmlinuz.recovery
+          # The Raspberry Pi 4 boots its own ARMv7 kernel from both configs.
+          mtype -i "$boot_image" ::config.txt | grep -qx 'kernel=vmlinuz.v7'
+          mtype -i "$boot_image" ::tryboot.txt | grep -qx 'kernel=vmlinuz.v7'
+          mtype -i "$boot_image" ::config.txt | grep -qx 'arm_64bit=0'
+          mdir -i "$boot_image" ::vmlinuz.v7
 
       - name: Compress flash image for release
         id: compress
