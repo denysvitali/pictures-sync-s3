@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // Line represents a single kernel log message.
@@ -29,7 +31,21 @@ type Manager struct {
 	listeners []*subscriber
 	cancel    context.CancelFunc
 	wg        sync.WaitGroup
+
+	// history keeps the most recent lines so new subscribers see the log
+	// instead of an empty page until the next kernel message arrives.
+	history []Line
+	// lastSeq is the highest /dev/kmsg sequence number already broadcast, so
+	// a reopened reader does not replay the ring buffer.
+	lastSeq int64
+	hasSeq  bool
 }
+
+const (
+	maxHistory     = 2000
+	subscriberBuf  = 500
+	reopenInterval = time.Second
+)
 
 type subscriber struct {
 	mu     sync.Mutex
@@ -72,7 +88,11 @@ func (m *Manager) Subscribe() chan Line {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	ch := make(chan Line, 500) // Buffer for burst absorption
+	// Buffer for the replayed history plus burst absorption.
+	ch := make(chan Line, len(m.history)+subscriberBuf)
+	for _, line := range m.history {
+		ch <- line
+	}
 	m.listeners = append(m.listeners, &subscriber{ch: ch})
 	return ch
 }
@@ -115,15 +135,25 @@ func (m *Manager) Stop() {
 }
 
 func (m *Manager) run(ctx context.Context) {
-	// Prefer /dev/kmsg for true live kernel messages.
+	// Prefer /dev/kmsg for true live kernel messages. A read error (for
+	// example EPIPE when the ring buffer overruns) must not end log
+	// streaming, so reopen it until the context is cancelled.
 	// Fall back to dmesg -w if unavailable.
-	if f, err := os.Open("/dev/kmsg"); err == nil {
-		defer f.Close()
+	for ctx.Err() == nil {
+		f, err := os.Open("/dev/kmsg")
+		if err != nil {
+			m.readDmesg(ctx)
+			return
+		}
 		m.readKMsg(ctx, f)
-		return
-	}
+		f.Close()
 
-	m.readDmesg(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(reopenInterval):
+		}
+	}
 }
 
 func (m *Manager) readKMsg(ctx context.Context, r io.Reader) {
@@ -136,9 +166,41 @@ func (m *Manager) readKMsg(ctx context.Context, r io.Reader) {
 		}
 
 		line := scanner.Text()
-		parsed := parseKMsgLine(line)
-		m.broadcast(parsed)
+		// Continuation lines carry key=value metadata, not log text.
+		if strings.HasPrefix(line, " ") {
+			continue
+		}
+		if seq, ok := parseKMsgSeq(line); ok {
+			if m.seenSeq(seq) {
+				continue
+			}
+		}
+		m.broadcast(parseKMsgLine(line))
 	}
+}
+
+// seenSeq records seq and reports whether it was already broadcast.
+func (m *Manager) seenSeq(seq int64) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.hasSeq && seq <= m.lastSeq {
+		return true
+	}
+	m.lastSeq, m.hasSeq = seq, true
+	return false
+}
+
+func parseKMsgSeq(raw string) (int64, bool) {
+	semi := strings.Index(raw, ";")
+	if semi < 0 {
+		return 0, false
+	}
+	parts := strings.Split(raw[:semi], ",")
+	if len(parts) < 3 {
+		return 0, false
+	}
+	seq, err := strconv.ParseInt(parts[1], 10, 64)
+	return seq, err == nil
 }
 
 func (m *Manager) readDmesg(ctx context.Context) {
@@ -167,10 +229,14 @@ func (m *Manager) readDmesg(ctx context.Context) {
 }
 
 func (m *Manager) broadcast(line Line) {
-	m.mu.RLock()
+	m.mu.Lock()
+	m.history = append(m.history, line)
+	if len(m.history) > maxHistory {
+		m.history = append(m.history[:0], m.history[len(m.history)-maxHistory:]...)
+	}
 	listenersCopy := make([]*subscriber, len(m.listeners))
 	copy(listenersCopy, m.listeners)
-	m.mu.RUnlock()
+	m.mu.Unlock()
 
 	for _, listener := range listenersCopy {
 		listener.send(line)
@@ -200,13 +266,26 @@ func parseKMsgLine(raw string) Line {
 		if lvl, err := strconv.Atoi(parts[0]); err == nil {
 			result.Level = lvl & 0x7 // kernel level is lower 3 bits
 		}
-		// parts[1] = seqnum, parts[2] = timestamp (microseconds since boot)
-		// We keep time.Now() as the wall-clock timestamp.
+		// parts[2] = microseconds since boot (CLOCK_MONOTONIC); convert to
+		// wall-clock so replayed history is not all stamped "now".
+		if us, err := strconv.ParseInt(parts[2], 10, 64); err == nil {
+			if boot, ok := bootTime(); ok {
+				result.Timestamp = boot.Add(time.Duration(us) * time.Microsecond)
+			}
+		}
 	}
 
 	// Remove trailing newline if any
 	result.Text = strings.TrimSuffix(msg, "\n")
 	return result
+}
+
+func bootTime() (time.Time, bool) {
+	var ts unix.Timespec
+	if err := unix.ClockGettime(unix.CLOCK_MONOTONIC, &ts); err != nil {
+		return time.Time{}, false
+	}
+	return time.Now().Add(-time.Duration(ts.Nano())), true
 }
 
 // parseDmesgLine parses output from dmesg -w.

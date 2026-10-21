@@ -425,3 +425,41 @@ func TestStartRestarts(t *testing.T) {
 	m.Start()
 	m.Stop()
 }
+
+func TestSubscribeReplaysHistory(t *testing.T) {
+	m := NewManager()
+	m.broadcast(Line{Text: "first"})
+	m.broadcast(Line{Text: "second"})
+
+	ch := m.Subscribe()
+	for _, want := range []string{"first", "second"} {
+		select {
+		case got := <-ch:
+			if got.Text != want {
+				t.Fatalf("got %q, want %q", got.Text, want)
+			}
+		default:
+			t.Fatalf("missing replayed line %q", want)
+		}
+	}
+}
+
+func TestHistoryIsBounded(t *testing.T) {
+	m := NewManager()
+	for i := 0; i < maxHistory+50; i++ {
+		m.broadcast(Line{Text: "x"})
+	}
+	if len(m.history) != maxHistory {
+		t.Fatalf("history len = %d, want %d", len(m.history), maxHistory)
+	}
+}
+
+func TestReadKMsgSkipsReplayedSequences(t *testing.T) {
+	m := NewManager()
+	input := "6,1,100;one\n6,2,200;two\n"
+	m.readKMsg(context.Background(), strings.NewReader(input))
+	m.readKMsg(context.Background(), strings.NewReader(input+"6,3,300;three\n"))
+	if len(m.history) != 3 {
+		t.Fatalf("history len = %d, want 3", len(m.history))
+	}
+}

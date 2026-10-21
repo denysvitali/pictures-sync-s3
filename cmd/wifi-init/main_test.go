@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -65,5 +66,40 @@ func TestGetenvBool(t *testing.T) {
 	t.Setenv("WIFI_INIT_TEST_BOOL", "not-a-bool")
 	if !getenvBool("WIFI_INIT_TEST_BOOL", true) {
 		t.Fatal("getenvBool(invalid) = false, want fallback true")
+	}
+}
+
+func TestEnsureClientRegion(t *testing.T) {
+	cases := []struct {
+		name, in string
+		changed  bool
+		region   string
+	}{
+		{"missing", `{"ssid":"a","psk":"b"}`, true, "DE"},
+		{"world", `{"ssid":"a","region":"00"}`, true, "DE"},
+		{"kept", `{"ssid":"a","region":"IT"}`, false, "IT"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "wifi.json")
+			if err := os.WriteFile(path, []byte(tc.in), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			changed, err := ensureClientRegion(path, "DE")
+			if err != nil || changed != tc.changed {
+				t.Fatalf("changed=%v err=%v", changed, err)
+			}
+			var got map[string]any
+			data, _ := os.ReadFile(path)
+			if err := json.Unmarshal(data, &got); err != nil {
+				t.Fatal(err)
+			}
+			if got["region"] != tc.region || got["ssid"] != "a" {
+				t.Fatalf("got %v", got)
+			}
+		})
+	}
+	if changed, err := ensureClientRegion(filepath.Join(t.TempDir(), "none.json"), "DE"); changed || err != nil {
+		t.Fatalf("missing file: changed=%v err=%v", changed, err)
 	}
 }

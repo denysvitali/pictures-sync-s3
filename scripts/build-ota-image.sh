@@ -187,7 +187,8 @@ $(emit_packages_json '    ')
         "-ldflags=${VERSION_LDFLAGS}"
       ],
       "Environment": [
-        "PORT=8080"
+        "PORT=8080",
+        "WIFI_COUNTRY=${WIFI_COUNTRY:-US}"
       ]
     },
     "github.com/denysvitali/pictures-sync-s3/cmd/wifi-init": {

@@ -116,7 +116,24 @@ func saveGokrazyWiFiConfig(networks []Network) error {
 		}
 		return nil
 	}
-	return utils.SaveJSON(GokrazyWiFiConfigPath, networks[0], 0600)
+	// gokrazy/wifi falls back to the world regulatory domain, which blocks
+	// 5 GHz association, unless the config names a region.
+	return utils.SaveJSON(GokrazyWiFiConfigPath, gokrazyClientConfig{
+		Network: networks[0],
+		Region:  wifiCountry(),
+	}, 0600)
+}
+
+type gokrazyClientConfig struct {
+	Network
+	Region string `json:"region"`
+}
+
+func wifiCountry() string {
+	if country := strings.ToUpper(strings.TrimSpace(os.Getenv("WIFI_COUNTRY"))); len(country) == 2 {
+		return country
+	}
+	return "US"
 }
 
 func filterConfiguredNetworks(networks []Network) []Network {

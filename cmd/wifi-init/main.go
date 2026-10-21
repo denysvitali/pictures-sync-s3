@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -23,6 +24,7 @@ const (
 	defaultEthernetIface   = "eth0"
 	defaultEthernetTimeout = 10 * time.Second
 	defaultWiFiCommand     = "/user/wifi"
+	defaultClientConfig    = "/perm/wifi.json"
 )
 
 type kernelModule struct {
@@ -78,6 +80,16 @@ func main() {
 		log.Printf("wifi-init: set WiFi country to %s", country)
 	}
 
+	// gokrazy/wifi re-applies the region from wifi.json and falls back to the
+	// restrictive world domain "00" when it is missing, which silently
+	// disables 5 GHz association. Make sure it carries our country.
+	clientConfig := getenv("WIFI_CONFIG_PATH", defaultClientConfig)
+	if changed, err := ensureClientRegion(clientConfig, country); err != nil {
+		log.Printf("wifi-init: failed to set region in %s: %v", clientConfig, err)
+	} else if changed {
+		log.Printf("wifi-init: set region %s in %s", country, clientConfig)
+	}
+
 	if err := disablePowerSave(iface); err != nil {
 		log.Printf("wifi-init: failed to disable power save on %s: %v", iface, err)
 	} else {
@@ -92,6 +104,40 @@ func main() {
 	if err := unix.Exec(wifiCommand, []string{filepath.Base(wifiCommand)}, os.Environ()); err != nil {
 		log.Fatalf("start Wi-Fi client %s: %v", wifiCommand, err)
 	}
+}
+
+// ensureClientRegion adds the regulatory region to a gokrazy wifi.json that
+// lacks one (or pins the world domain), preserving all other fields.
+func ensureClientRegion(path, country string) (bool, error) {
+	// #nosec G304 -- path is the well-known gokrazy Wi-Fi config location
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	var config map[string]any
+	if err := json.Unmarshal(data, &config); err != nil {
+		return false, fmt.Errorf("parse %s: %w", path, err)
+	}
+	if region, _ := config["region"].(string); region != "" && region != "00" {
+		return false, nil
+	}
+	config["region"] = country
+	out, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return false, err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, out, 0o600); err != nil {
+		return false, err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return false, err
+	}
+	return true, nil
 }
 
 func waitForEthernetCarrier(name string, timeout time.Duration) bool {
