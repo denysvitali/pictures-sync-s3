@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/denysvitali/pictures-sync-s3/pkg/wifiregion"
 )
 
 const (
@@ -66,6 +68,12 @@ func ConfigFromEnv() (Config, error) {
 		EthernetFirst:     getenvBool("PROVISION_AP_ETHERNET_FIRST", true),
 		EthernetInterface: getenv("PROVISION_AP_ETHERNET_INTERFACE", defaultEthernetIface),
 		EthernetWait:      getenvDuration("PROVISION_AP_ETHERNET_WAIT", defaultEthernetWait),
+	}
+
+	// A region chosen in the settings or detected from nearby networks wins
+	// over the image-wide default.
+	if country := wifiregion.Read(); country != "" {
+		cfg.CountryCode = country
 	}
 
 	apIP := net.ParseIP(getenv("PROVISION_AP_IP", defaultAPIP)).To4()

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"github.com/denysvitali/pictures-sync-s3/pkg/netiface"
+	"github.com/denysvitali/pictures-sync-s3/pkg/wifiregion"
 	"github.com/mdlayher/genetlink"
 	"github.com/mdlayher/netlink"
 	"golang.org/x/sys/unix"
@@ -45,6 +45,12 @@ func main() {
 	iface := getenv("WIFI_INIT_INTERFACE", defaultInterface)
 	timeout := getenvDuration("WIFI_INIT_TIMEOUT", defaultTimeout)
 	country := strings.ToUpper(getenv("WIFI_COUNTRY", defaultCountry))
+	// A region chosen in the settings (or detected from nearby networks)
+	// wins over the image-wide default.
+	persisted := wifiregion.Read()
+	if persisted != "" {
+		country = persisted
+	}
 	ethernetFirst := getenvBool("WIFI_INIT_ETHERNET_FIRST", true)
 	ethernetIface := getenv("WIFI_INIT_ETHERNET_INTERFACE", defaultEthernetIface)
 	ethernetTimeout := getenvDuration("WIFI_INIT_ETHERNET_TIMEOUT", defaultEthernetTimeout)
@@ -74,7 +80,7 @@ func main() {
 	}
 	log.Printf("wifi-init: %s is available", iface)
 
-	if err := setRegulatoryDomain(country); err != nil {
+	if err := wifiregion.Apply(country); err != nil {
 		log.Printf("wifi-init: failed to set WiFi country %s: %v", country, err)
 	} else {
 		log.Printf("wifi-init: set WiFi country to %s", country)
@@ -84,7 +90,7 @@ func main() {
 	// restrictive world domain "00" when it is missing, which silently
 	// disables 5 GHz association. Make sure it carries our country.
 	clientConfig := getenv("WIFI_CONFIG_PATH", defaultClientConfig)
-	if changed, err := ensureClientRegion(clientConfig, country); err != nil {
+	if changed, err := wifiregion.SetClientConfigRegion(clientConfig, country, persisted != ""); err != nil {
 		log.Printf("wifi-init: failed to set region in %s: %v", clientConfig, err)
 	} else if changed {
 		log.Printf("wifi-init: set region %s in %s", country, clientConfig)
@@ -104,40 +110,6 @@ func main() {
 	if err := unix.Exec(wifiCommand, []string{filepath.Base(wifiCommand)}, os.Environ()); err != nil {
 		log.Fatalf("start Wi-Fi client %s: %v", wifiCommand, err)
 	}
-}
-
-// ensureClientRegion adds the regulatory region to a gokrazy wifi.json that
-// lacks one (or pins the world domain), preserving all other fields.
-func ensureClientRegion(path, country string) (bool, error) {
-	// #nosec G304 -- path is the well-known gokrazy Wi-Fi config location
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return false, err
-	}
-	var config map[string]any
-	if err := json.Unmarshal(data, &config); err != nil {
-		return false, fmt.Errorf("parse %s: %w", path, err)
-	}
-	if region, _ := config["region"].(string); region != "" && region != "00" {
-		return false, nil
-	}
-	config["region"] = country
-	out, err := json.MarshalIndent(config, "", "  ")
-	if err != nil {
-		return false, err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, out, 0o600); err != nil {
-		return false, err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return false, err
-	}
-	return true, nil
 }
 
 func waitForEthernetCarrier(name string, timeout time.Duration) bool {
@@ -200,47 +172,6 @@ func disablePowerSave(iface string) error {
 	}, family.ID, netlink.Request|netlink.Acknowledge)
 	if err != nil {
 		return fmt.Errorf("set power save: %w", err)
-	}
-	return nil
-}
-
-func setRegulatoryDomain(country string) error {
-	if len(country) != 2 {
-		return fmt.Errorf("country must be a two-letter ISO 3166-1 alpha-2 code")
-	}
-	for _, r := range country {
-		if r < 'A' || r > 'Z' {
-			return fmt.Errorf("country must contain only uppercase ASCII letters")
-		}
-	}
-
-	conn, err := genetlink.Dial(nil)
-	if err != nil {
-		return fmt.Errorf("genetlink dial: %w", err)
-	}
-	defer conn.Close()
-
-	family, err := conn.GetFamily(unix.NL80211_GENL_NAME)
-	if err != nil {
-		return fmt.Errorf("get nl80211 family: %w", err)
-	}
-
-	ae := netlink.NewAttributeEncoder()
-	ae.String(unix.NL80211_ATTR_REG_ALPHA2, country)
-	data, err := ae.Encode()
-	if err != nil {
-		return fmt.Errorf("encode attrs: %w", err)
-	}
-
-	_, err = conn.Execute(genetlink.Message{
-		Header: genetlink.Header{
-			Command: unix.NL80211_CMD_REQ_SET_REG,
-			Version: family.Version,
-		},
-		Data: data,
-	}, family.ID, netlink.Request|netlink.Acknowledge)
-	if err != nil {
-		return fmt.Errorf("set regulatory domain: %w", err)
 	}
 	return nil
 }

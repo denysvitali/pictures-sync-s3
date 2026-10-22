@@ -16,3 +16,7 @@ func triggerInterfaceScan(ctx context.Context, cl scanClient, intf *wifi.Interfa
 func readAccessPointsNL80211(_ *wifi.Interface) ([]*wifi.BSS, error) {
 	return nil, fmt.Errorf("raw nl80211 scanning is only available on Linux")
 }
+
+func readCountryObservations(_ *wifi.Interface) ([]countryObservation, error) {
+	return nil, fmt.Errorf("raw nl80211 scanning is only available on Linux")
+}

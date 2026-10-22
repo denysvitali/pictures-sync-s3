@@ -411,6 +411,7 @@ type settingsRequest struct {
 	GooglePhotosClientID   *string  `json:"google_photos_client_id"`
 	GooglePhotosClientSecret *string `json:"google_photos_client_secret"`
 	Prefer5GHzWiFi         *bool    `json:"prefer_5ghz_wifi"`
+	WiFiCountry            *string  `json:"wifi_country"`
 	TailscaleAuthKey       *string  `json:"tailscale_auth_key"`
 }
 
@@ -520,6 +521,19 @@ var settingsUpdaters = []fieldUpdater{
 		}
 		return nil
 	}},
+	{"wifi_country", func(req *settingsRequest, ctx *Context) error {
+		if req.WiFiCountry == nil {
+			return nil
+		}
+		country := strings.TrimSpace(*req.WiFiCountry)
+		if strings.EqualFold(country, "auto") {
+			country = ""
+		}
+		if err := ctx.AppSettings.SetWiFiCountry(country); err != nil {
+			return &settingsBadRequestError{msg: err.Error()}
+		}
+		return nil
+	}},
 }
 
 func applySettingsRequest(ctx *Context, r *http.Request, req *settingsRequest) (map[string]any, error) {
@@ -536,6 +550,12 @@ func applySettingsRequest(ctx *Context, r *http.Request, req *settingsRequest) (
 	}
 
 	response := map[string]any{"status": "ok"}
+	if req.WiFiCountry != nil {
+		if err := ctx.syncWiFiRegion(); err != nil {
+			log.Printf("Failed to apply WiFi region: %v", err)
+			response["warning"] = "Wi-Fi region saved but could not be fully applied: " + err.Error()
+		}
+	}
 	if req.TailscaleAuthKey != nil && *req.TailscaleAuthKey != "" {
 		if warning, err := configureTailscale(*req.TailscaleAuthKey); err != nil {
 			return nil, err

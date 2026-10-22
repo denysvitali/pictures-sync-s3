@@ -13,6 +13,7 @@ import {
   saveB2Config,
   getSettings,
   saveSettings,
+  detectWifiRegion,
   changeGokrazyPassword,
   getBreakglassAuthorizedKeys,
   saveBreakglassAuthorizedKeys,
@@ -707,6 +708,8 @@ function SyncSettingsSection() {
   const [googlePhotosClientID, setGooglePhotosClientID] = useState('')
   const [googlePhotosClientSecret, setGooglePhotosClientSecret] = useState('')
   const [prefer5GHzWiFi, setPrefer5GHzWiFi] = useState(true)
+  const [wifiCountry, setWifiCountry] = useState('')
+  const [detecting, setDetecting] = useState(false)
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
@@ -726,6 +729,7 @@ function SyncSettingsSection() {
           setGooglePhotosClientID(data.google_photos_client_id || '')
           setGooglePhotosClientSecret(data.google_photos_client_secret || '')
           setPrefer5GHzWiFi(data.prefer_5ghz_wifi ?? true)
+          setWifiCountry(data.wifi_country || '')
         }
       })
       .catch((err) => { if (!cancelled) setLoadError(describeError(err)) })
@@ -743,10 +747,15 @@ function SyncSettingsSection() {
       toast.error('Transfers must be between 1 and 64')
       return
     }
+    const country = wifiCountry.trim().toUpperCase()
+    if (country && !/^[A-Z]{2}$/.test(country)) {
+      toast.error('Wi-Fi country must be a two-letter code such as US or DE')
+      return
+    }
 
     setSaving(true)
     try {
-      await saveSettings(deviceUrl, {
+      const result = await saveSettings(deviceUrl, {
         transfers: t,
         bandwidth: bandwidth.trim() || undefined,
         google_photos_enabled: googlePhotos,
@@ -754,14 +763,35 @@ function SyncSettingsSection() {
         google_photos_client_id: googlePhotosClientID.trim() || undefined,
         google_photos_client_secret: googlePhotosClientSecret.trim() || undefined,
         prefer_5ghz_wifi: prefer5GHzWiFi,
+        wifi_country: country,
       })
-      toast.success('Sync settings saved')
+      if (result?.warning) toast.warning(result.warning)
+      else toast.success('Sync settings saved')
     } catch (err) {
       toast.error(describeError(err) || 'Failed to save sync settings')
     } finally {
       setSaving(false)
     }
-  }, [deviceUrl, transfers, bandwidth, googlePhotos, googlePhotosOAuth, googlePhotosClientID, googlePhotosClientSecret, prefer5GHzWiFi, loadError, toast])
+  }, [deviceUrl, transfers, bandwidth, googlePhotos, googlePhotosOAuth, googlePhotosClientID, googlePhotosClientSecret, prefer5GHzWiFi, wifiCountry, loadError, toast])
+
+  const handleDetectRegion = useCallback(async () => {
+    setDetecting(true)
+    try {
+      const result = await detectWifiRegion(deviceUrl)
+      if (!result?.country) {
+        toast.warning('No nearby networks announced a country')
+        return
+      }
+      setWifiCountry(result.country)
+      const seen = `${result.votes} of ${result.total} nearby networks`
+      if (result.confident) toast.success(`Detected ${result.country} (${seen}). Save to apply.`)
+      else toast.warning(`Weak signal: ${result.country} from ${seen}. Check before saving.`)
+    } catch (err) {
+      toast.error(describeError(err) || 'Failed to detect Wi-Fi country')
+    } finally {
+      setDetecting(false)
+    }
+  }, [deviceUrl, toast])
 
   return (
     <AccordionSection title="Sync Settings" description="Transfer performance and integrations" icon="settings">
@@ -859,6 +889,32 @@ function SyncSettingsSection() {
               hint="Choose the 5 GHz band for networks with matching names"
               disabled={saving || !!loadError}
             />
+            <Field
+              label="Wi-Fi Country"
+              hint="Two-letter code (e.g. US, DE). 5 GHz only works with the right country. Empty = detect from nearby networks"
+            >
+              {({ id, describedBy }) => (
+                <div className="flex gap-2">
+                  <TextInput
+                    id={id}
+                    describedBy={describedBy}
+                    value={wifiCountry}
+                    onChange={(v) => setWifiCountry(v.toUpperCase().slice(0, 2))}
+                    placeholder="Auto"
+                    disabled={saving || detecting || !!loadError}
+                  />
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    loading={detecting}
+                    disabled={saving || !!loadError}
+                    onClick={handleDetectRegion}
+                  >
+                    Detect
+                  </Button>
+                </div>
+              )}
+            </Field>
           </FormGroup>
 
           <div className="flex justify-end pt-1">

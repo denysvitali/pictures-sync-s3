@@ -146,7 +146,7 @@ func nl80211InterfaceIndex(attrs []netlink.Attribute) (int, bool) {
 	return 0, false
 }
 
-func readAccessPointsNL80211(intf *wifi.Interface) ([]*wifi.BSS, error) {
+func dumpScanNL80211(intf *wifi.Interface) ([]genetlink.Message, error) {
 	if intf == nil {
 		return nil, fmt.Errorf("nil WiFi interface")
 	}
@@ -185,7 +185,61 @@ func readAccessPointsNL80211(intf *wifi.Interface) ([]*wifi.BSS, error) {
 		return nil, err
 	}
 
+	return msgs, nil
+}
+
+func readAccessPointsNL80211(intf *wifi.Interface) ([]*wifi.BSS, error) {
+	msgs, err := dumpScanNL80211(intf)
+	if err != nil {
+		return nil, err
+	}
 	return parseNL80211ScanMessages(msgs)
+}
+
+// readCountryObservations returns the 802.11d country advertised by each
+// access point in the current scan results.
+func readCountryObservations(intf *wifi.Interface) ([]countryObservation, error) {
+	msgs, err := dumpScanNL80211(intf)
+	if err != nil {
+		return nil, err
+	}
+	return parseCountryObservations(msgs)
+}
+
+func parseCountryObservations(msgs []genetlink.Message) ([]countryObservation, error) {
+	var observations []countryObservation
+	for _, msg := range msgs {
+		attrs, err := netlink.UnmarshalAttributes(msg.Data)
+		if err != nil {
+			return nil, err
+		}
+		for _, attr := range attrs {
+			if attr.Type != unix.NL80211_ATTR_BSS {
+				continue
+			}
+			bssAttrs, err := netlink.UnmarshalAttributes(attr.Data)
+			if err != nil {
+				return nil, err
+			}
+			var obs countryObservation
+			for _, a := range bssAttrs {
+				switch a.Type {
+				case unix.NL80211_BSS_BSSID:
+					obs.BSSID = net.HardwareAddr(a.Data).String()
+				case unix.NL80211_BSS_SIGNAL_MBM:
+					obs.Signal = nlenc.Int32(a.Data)
+				case unix.NL80211_BSS_INFORMATION_ELEMENTS, unix.NL80211_BSS_BEACON_IES:
+					if obs.Country == "" {
+						obs.Country = parseCountryIE(a.Data)
+					}
+				}
+			}
+			if obs.Country != "" {
+				observations = append(observations, obs)
+			}
+		}
+	}
+	return observations, nil
 }
 
 func parseNL80211ScanMessages(msgs []genetlink.Message) ([]*wifi.BSS, error) {

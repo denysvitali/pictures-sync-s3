@@ -145,6 +145,8 @@ export const startSync = (d) => apiRequest('/api/sync/start', { deviceUrl: d, me
 export const cancelSync = (d) => apiRequest('/api/sync/cancel', { deviceUrl: d, method: 'POST' })
 export const scanWifi = (d, sortBy) =>
   apiRequest('/api/wifi/scan', { deviceUrl: d, method: 'POST', body: { sort_by: sortBy } })
+export const detectWifiRegion = (d) =>
+  apiRequest('/api/wifi/region', { deviceUrl: d, method: 'POST' })
 export const connectWifi = (d, ssid, password = '') =>
   apiRequest('/api/wifi/connect', { deviceUrl: d, method: 'POST', body: { ssid, password } })
 export const disconnectWifi = (d, ssid) =>

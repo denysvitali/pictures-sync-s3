@@ -272,7 +272,7 @@ on boot.
    - Override hotspot defaults with env vars:
      - `SETUP_WIFI_SSID`
      - `SETUP_WIFI_PSK`
-     - `WIFI_COUNTRY` (defaults to `US`; set this to your deployment country for 5 GHz regulatory support)
+     - `WIFI_COUNTRY` (defaults to `US`; image-wide fallback for 5 GHz regulatory support). The web UI "Wi-Fi Country" setting overrides it; when left empty the device infers the region from the country announced by nearby access points and stores the result in `/perm/wifi-region`
    - Or pre-seed `/perm/wifi.json` before first boot with your network. Gokrazy expects a single client network object:
      ```json
      {"ssid": "YourNetwork", "psk": "YourPassword"}

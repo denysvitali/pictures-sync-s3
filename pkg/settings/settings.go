@@ -14,6 +14,8 @@ import (
 	"sync"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/denysvitali/pictures-sync-s3/pkg/wifiregion"
 )
 
 // Settings represents persistent application settings
@@ -44,6 +46,10 @@ type Settings struct {
 
 	// WiFi scan behavior
 	Prefer5GHzWiFi bool `json:"prefer_5ghz_wifi"` // Prefer 5 GHz APs when duplicate SSIDs are found
+
+	// WiFiCountry is the regulatory region (ISO 3166-1 alpha-2). Empty means
+	// "auto": infer it from the country announced by nearby access points.
+	WiFiCountry string `json:"wifi_country"`
 
 	mu sync.RWMutex
 }
@@ -83,6 +89,7 @@ func (s *Settings) UnmarshalJSON(data []byte) error {
 	s.GooglePhotosClientSecret = decoded.GooglePhotosClientSecret
 	s.GooglePhotosSortByShootTime = decoded.GooglePhotosSortByShootTime
 	s.Prefer5GHzWiFi = decoded.Prefer5GHzWiFi
+	s.WiFiCountry = decoded.WiFiCountry
 	if _, ok := raw["prefer_5ghz_wifi"]; !ok {
 		s.Prefer5GHzWiFi = true
 	}
@@ -414,6 +421,13 @@ func (s *Settings) GetPrefer5GHzWiFi() bool {
 	return s.Prefer5GHzWiFi
 }
 
+// GetWiFiCountry returns the configured Wi-Fi regulatory region, or "" for auto.
+func (s *Settings) GetWiFiCountry() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.WiFiCountry
+}
+
 // Setters (with validation and auto-save)
 
 // SetRemote updates the remote name and path
@@ -521,6 +535,23 @@ func (s *Settings) SetPrefer5GHzWiFi(prefer bool) error {
 	return s.Save()
 }
 
+// SetWiFiCountry updates the Wi-Fi regulatory region. An empty value selects
+// automatic detection.
+func (s *Settings) SetWiFiCountry(country string) error {
+	country = strings.ToUpper(strings.TrimSpace(country))
+	if country != "" {
+		var err error
+		if country, err = wifiregion.Normalize(country); err != nil {
+			return err
+		}
+	}
+	s.mu.Lock()
+	s.WiFiCountry = country
+	s.mu.Unlock()
+
+	return s.Save()
+}
+
 // Helper methods
 
 // ToJSON returns settings as JSON for API responses
@@ -542,6 +573,7 @@ func (s *Settings) ToJSON() map[string]any {
 		"google_photos_client_secret":      s.GooglePhotosClientSecret,
 		"google_photos_sort_by_shoot_time": s.GooglePhotosSortByShootTime,
 		"prefer_5ghz_wifi":                 s.Prefer5GHzWiFi,
+		"wifi_country":                     s.WiFiCountry,
 	}
 }
 
@@ -580,5 +612,6 @@ func (s *Settings) Clone() *Settings {
 		GooglePhotosClientSecret:      s.GooglePhotosClientSecret,
 		GooglePhotosSortByShootTime:   s.GooglePhotosSortByShootTime,
 		Prefer5GHzWiFi:                s.Prefer5GHzWiFi,
+		WiFiCountry:                   s.WiFiCountry,
 	}
 }

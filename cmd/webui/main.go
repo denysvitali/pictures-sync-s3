@@ -276,6 +276,7 @@ func registerAPIRoutes(
 		{"/api/wifi/disconnect", ctx.HandleWiFiDisconnect},
 		{"/api/wifi/reorder", ctx.HandleWiFiReorder},
 		{"/api/wifi/status", ctx.HandleWiFiStatus},
+		{"/api/wifi/region", ctx.HandleWiFiRegion},
 		{"/api/files/cards", ctx.HandleFileCards},
 		{"/api/files", ctx.HandleFiles},
 		{"/api/files/paginated", ctx.HandleFilesPaginated},
@@ -506,6 +507,9 @@ func main() {
 		PasswordMgr:            passwordMgr,
 		GooglePhotosStateStore: googlephotos.NewStateStore(),
 	}
+
+	// With the region on "auto", infer it from nearby access points.
+	go ctx.RunWiFiRegionAutoDetect(shutdownCtx.Done())
 
 	allowedOrigins := configuredAllowedOrigins()
 	if len(allowedOrigins) > 0 {

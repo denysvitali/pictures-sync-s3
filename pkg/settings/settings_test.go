@@ -1125,3 +1125,26 @@ func TestSettingsRoundTripDefaults(t *testing.T) {
 		t.Errorf("GooglePhotosEnabled = %v, want false", got.GooglePhotosEnabled)
 	}
 }
+
+func TestSetWiFiCountry(t *testing.T) {
+	s := &Settings{}
+	for _, tc := range []struct {
+		in, want string
+		wantErr  bool
+	}{
+		{"de", "DE", false},
+		{" it ", "IT", false},
+		{"", "", false},
+		{"DEU", "", true},
+		{"1X", "", true},
+	} {
+		s2 := s.Clone()
+		err := s2.SetWiFiCountry(tc.in)
+		if tc.wantErr && err == nil {
+			t.Errorf("SetWiFiCountry(%q) should fail", tc.in)
+		}
+		if !tc.wantErr && s2.GetWiFiCountry() != tc.want {
+			t.Errorf("SetWiFiCountry(%q) = %q, want %q", tc.in, s2.GetWiFiCountry(), tc.want)
+		}
+	}
+}
